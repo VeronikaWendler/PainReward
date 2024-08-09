@@ -1,2 +1,2 @@
 # PainReward
-This repository holds all code for the project PainReward at the University Laval under the supervision of Dr. Coll
+This repository contains the drift diffusion modeling code for the PainReward project at Université Laval, under the supervision of Dr. Coll.
