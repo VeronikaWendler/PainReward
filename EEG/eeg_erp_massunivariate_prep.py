@@ -18,11 +18,12 @@ from scipy import stats
 basepath = "D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives"
 
 # Outpath for analysis
-outpath = opj(basepath, 'statistics')
+outpath = opj(basepath, 'statistics')              # for averaging over more electrodes: 'statistics_2' 
 if not os.path.exists(outpath):
     os.mkdir(outpath)
+    
 
-outpath = opj(outpath, 'erps_modelbased')
+outpath = opj(outpath, 'erps_modelbased_v_sv_pain_para_Quest')
 if not os.path.exists(outpath):
     os.mkdir(outpath)
 
@@ -45,18 +46,40 @@ param = {
     # Downsample to this frequency prior to analysis
     'testresampfreq': 1024,
     # clustering threshold
-    'cluster_threshold': 0.01
-}
+    'cluster_threshold': 0.01}
 
-mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_pain_para_contrib.csv')
+#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_pain_para_contrib.csv')
+#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_money_contrib.csv')
+#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Abs_contrib.csv')
+#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_OV_contrib.csv')
+#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_full_sv_pain_para_contrib.csv')
+#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_complex_pain_money_contrib.csv')
+#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_pain_para_contrib.csv')
+#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Quest.csv)
+
+mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Quest.csv')
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
-# Massunivariate Regression from MP Code
+# Massunivariate Regression from MP Code (for single regressors)
 
 # Regressors
-regvars = ['v_sv_pain_para_contrib']   #'v_sv_pain_para_contrib' 'mean_v_sv_pain_para_trace'
-regvarsnames = ['single_trial_var_v_sv_pain_para ']  #'single_trial_var_v_sv_pain_para '  'subject_v_sv_pain_para'
+# regvars = ['full_v_sv_pain_para_contrib', 'full_a_sv_pain_para_contrib', 'full_t_sv_pain_para_contrib', 'full_z_sv_pain_para_contrib'] 
+# regvarsnames = ['Full_DDM_v', 'Full_DDM_a', 'Full_DDM_t', 'Full_DDM_z'] 
 
+# regvars = ['v_complex_v_sv_pain_para_contrib','v_complex_v_sv_money_contrib','v_complex_v_sv_pain_money_contrib']
+# regvarsnames = ['v_sv_pain_para', 'v_sv_money', 'v_sv_pain_money']
+
+# regvars = ['painlevel']
+# regvarsnames = ['painlevel']
+
+# regvars = ['v_sv_pain_para_Abslow_contrib', 'v_sv_pain_para_Absmid_contrib', 'v_sv_pain_para_Abshigh_contrib']
+# regvarsnames = ['v_pain_Abslow', 'v_pain_Absmid', 'v_pain_Abshigh']
+
+# regvars = ['v_sv_pain_para_contrib']
+# regvarsnames = ['v_sv_pain_para_contrib']
+
+regvars = ['sv_pain_para_SAI','sv_pain_para_TAI', 'sv_pain_para_PCS']         #'sv_pain_para_TAI', 
+regvarsnames = ['sv_pain_para_SAI', 'sv_pain_para_TAI' , 'sv_pain_para_PCS']    #  'sv_pain_para_TAI' 
 betas, betasnp = [], []
 
 all_epos = [[] for i in range(len(regvars))]
@@ -73,7 +96,7 @@ for p in part:
     df = mod_data[mod_data['participant'] == p]
     
     # Load single epochs file (cotains one epoch/trial)
-    epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',
+    epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   # for averaging over more electrodes: 'eeg', 'erps_2'
                               p + '_decision_cues_singletrials-epo.fif'))
     epo_1 = epo.copy()
 
@@ -112,10 +135,11 @@ for p in part:
     filtered_data.append(epo_2_filtered)
 
 epo_2_filtered_combined = pd.concat(filtered_data, ignore_index=True)
-epo_2_filtered_combined.to_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/epo_2_filtered_combined')
+#epo_2_filtered_combined.to_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/epo_2_filtered_combined')
 
 part_2_dat = mod_data
 part_2 = part_2_dat['participant'].unique().tolist()
+
 part_2.sort()
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
@@ -125,7 +149,7 @@ for pa in part_2:
     df2 = epo_2_filtered_combined[epo_2_filtered_combined['participant_id'] == pa]
     mod2 = part_2_dat[part_2_dat['participant'] == pa]
     
-    epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',
+    epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',                        # for averaging over more electrodes: 'eeg', 'erps_2'
                               pa + '_decision_cues_singletrials-epo.fif'))
     epo_cop = epo.copy()
     
@@ -152,6 +176,24 @@ for pa in part_2:
     scale = Scaler(scalings='mean')
     epo_z = mne.EpochsArray(scale.fit_transform(epo_filt.get_data()),
                             epo_filt.info)
+    
+    # small_value_threshold = 1e-3
+
+    # # exclude trials with very small data
+    # def filter_small_trials(epochs, threshold): 
+    #     keep_mask = np.max(np.abs(epochs.get_data()), axis=(1, 2)) > threshold
+    #     # mask to keep valid epochs
+    #     return epochs[keep_mask]
+    
+    # betasnp = []
+    
+    # for idx, regvar in enumerate(regvars):
+    #     keep = np.where(~np.isnan(mod2[regvar]))[0]
+    #     df_reg = mod2.iloc[keep]
+    #     epo_reg = epo_z.copy()[keep]
+    #     epo_keep = epo_filt.copy()[keep]
+
+    #     epo_reg = filter_small_trials(epo_reg, small_value_threshold)
 
     betasnp = []
     for idx, regvar in enumerate(regvars):
