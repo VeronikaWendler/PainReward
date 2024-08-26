@@ -1,3 +1,10 @@
+'''
+ # @ : -*- coding: utf-8 -*-
+ # @ Author: Michel-Pierre Coll (michel-pierre.coll@psy.ulaval.ca), edited by Veronika Wendler
+ # @ Date: 2024
+ # @ Description:
+ '''
+
 # Massunivariate Analysis and Second level test on betas
 
 
@@ -18,12 +25,12 @@ from scipy import stats
 basepath = "D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives"
 
 # Outpath for analysis
-outpath = opj(basepath, 'statistics')              # for averaging over more electrodes: 'statistics_2' 
+outpath = opj(basepath, 'statistics_2')              # for averaging over more electrodes: 'statistics_2' 
 if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 
-outpath = opj(outpath, 'erps_modelbased_v_sv_pain_para_Quest')
+outpath = opj(outpath, 'erps_modelbased_sv_money_OV_high')
 if not os.path.exists(outpath):
     os.mkdir(outpath)
 
@@ -57,7 +64,8 @@ param = {
 #mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_pain_para_contrib.csv')
 #mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Quest.csv)
 
-mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Quest.csv')
+mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_pain_para_contrib.csv')
+mod_data = mod_data[mod_data['OV_value'] == 'high_OV']
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate Regression from MP Code (for single regressors)
@@ -75,11 +83,11 @@ mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For
 # regvars = ['v_sv_pain_para_Abslow_contrib', 'v_sv_pain_para_Absmid_contrib', 'v_sv_pain_para_Abshigh_contrib']
 # regvarsnames = ['v_pain_Abslow', 'v_pain_Absmid', 'v_pain_Abshigh']
 
-# regvars = ['v_sv_pain_para_contrib']
-# regvarsnames = ['v_sv_pain_para_contrib']
+# regvars = ['sv_pain_para_SAI','sv_pain_para_TAI', 'sv_pain_para_PCS']         #'sv_pain_para_TAI', 
+# regvarsnames = ['sv_pain_para_SAI', 'sv_pain_para_TAI' , 'sv_pain_para_PCS']    #  'sv_pain_para_TAI' 
 
-regvars = ['sv_pain_para_SAI','sv_pain_para_TAI', 'sv_pain_para_PCS']         #'sv_pain_para_TAI', 
-regvarsnames = ['sv_pain_para_SAI', 'sv_pain_para_TAI' , 'sv_pain_para_PCS']    #  'sv_pain_para_TAI' 
+regvars = ['sv_money']
+regvarsnames = ['sv_money']
 betas, betasnp = [], []
 
 all_epos = [[] for i in range(len(regvars))]
@@ -96,7 +104,7 @@ for p in part:
     df = mod_data[mod_data['participant'] == p]
     
     # Load single epochs file (cotains one epoch/trial)
-    epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   # for averaging over more electrodes: 'eeg', 'erps_2'
+    epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_2',                   # for averaging over more electrodes: 'eeg', 'erps_2'
                               p + '_decision_cues_singletrials-epo.fif'))
     epo_1 = epo.copy()
 
@@ -149,7 +157,7 @@ for pa in part_2:
     df2 = epo_2_filtered_combined[epo_2_filtered_combined['participant_id'] == pa]
     mod2 = part_2_dat[part_2_dat['participant'] == pa]
     
-    epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',                        # for averaging over more electrodes: 'eeg', 'erps_2'
+    epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps_2',                        # for averaging over more electrodes: 'eeg', 'erps_2'
                               pa + '_decision_cues_singletrials-epo.fif'))
     epo_cop = epo.copy()
     

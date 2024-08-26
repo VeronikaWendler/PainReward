@@ -1,4 +1,9 @@
-# Using the cleaned data from 03-painreward_eeg_preprocess to create ERPs and TFR
+'''
+ # @ : -*- coding: utf-8 -*-
+ # @ Author: Michel-Pierre Coll (michel-pierre.coll@psy.ulaval.ca), edited by Veronika Wendler
+ # @ Date: 2024
+ # @ Description: Using the cleaned data from 03-painreward_eeg_preprocess to create ERPs and TFR
+ '''
 
 # importing libraries
 from mne.report import Report

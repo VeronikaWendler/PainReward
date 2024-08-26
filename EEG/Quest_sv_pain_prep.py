@@ -1,7 +1,5 @@
 # multiplying the questionnaire data scores with the sv_pain to get the interaction term which can be used in the EEG regression model
 
-
-
 import pandas as pd
 import numpy as np 
 import csv 
@@ -45,3 +43,4 @@ def sv_pain_para_Quest_contributions(data):
 
 sv_contribute = sv_pain_para_Quest_contributions(data)
 sv_contribute.to_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Quest.csv')
+
