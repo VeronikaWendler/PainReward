@@ -65,7 +65,7 @@ reject_stats = pd.DataFrame(data={'part': part, 'perc_removed_cues': 9999,
 
 
 for p in part:
-    # ______________________________________________________
+    # 
     # Make out dir
     indir = opj(outpath,  p, 'eeg')
 
