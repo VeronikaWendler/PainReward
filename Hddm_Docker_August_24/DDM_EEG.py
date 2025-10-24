@@ -2,10 +2,11 @@
 #
 # Pipeline for running hddm regression models for the PainReward task
 # Veronika Wendler
-# orientated to code structure from Jan Willem de Gee.
+# some inspiration comes from Python2 code from Jan Willem de Gee that I translated into Python3.
 #
 # TO DO: More models
 
+# import libraries  
 import pandas as pd
 import numpy as np
 import hddm
@@ -14,6 +15,8 @@ import datetime
 import math
 import scipy as sp
 import matplotlib
+matplotlib.use("Agg")                   # for backend (does not require GUI)
+import os, pathlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 import glob
@@ -27,24 +30,47 @@ import statsmodels.formula.api as sm
 from patsy import dmatrix
 from joblib import Parallel, delayed
 import time
+import arviz as az
+from joblib import Parallel, delayed
+import cloudpickle, dill
+cloudpickle.dump = dill.dump
+
+# for running on the cluster
+#dummy _gdbm module so “import _gdbm” never fails
+import types, sys
+sys.modules.setdefault('winreg', types.ModuleType('winreg'))
+sys.modules.setdefault('_gdbm', types.ModuleType('_gdbm'))
+# -------------------------------------------------------------------------
+
+import dill as pickle
+from copy import deepcopy   # for modfiying z to be 0.55 (like in Sebastian's Matlab)
+import argparse
+
 # warning settings
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 # Plotting
-import matplotlib.pyplot as plt
-import matplotlib
-import seaborn as sns
-# Stats functionality
+# Stats 
 from statsmodels.distributions.empirical_distribution import ECDF
 # HDDM
 from hddm.simulators.hddm_dataset_generators import simulator_h_c
 
-# import own libraries
-current_directory = os.getcwd()
-hddm_models_path = os.path.join(current_directory, 'DockerData', 'Hddm_models')
-sys.path.append(hddm_models_path)
-from helper_functions import prepare_data
+from pathlib import Path
+
+# Import my own libraries - I don't really use it anymore 
+#current_directory = os.getcwd()    # we don't use this on the cluster
+
+PROJECT_DIR = pathlib.Path(os.getenv("PROJECT_DIR", "/workspace"))
+
+def ensure_dir(path):
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+#from helper_functions_2 import prepare_data
 #import compact_models
+
+# for Z bias coding
+from scipy.special import expit   # for inverse‑logit 
+
 
 
 
@@ -53,67 +79,77 @@ from helper_functions import prepare_data
 # [mid_abs], and [high_abs], the code will raise an error. 
 #------------------------------------------------------------------------------------------------------------------
 # params:
-version = 17 
-run = False  # if True, the the models run, if False the models load
+
+nr_models       = 3         # number of MCMC chains
+nr_samples      = 6000      # samples per chain - do 6000 (+1000 for burn-in) but for now for a quick one we do 600
+parallel        = True      # parallel
+model_base_name = "painreward_behavioural_data_"
+model_versions  = {
+    "dec":      ["LPP_1","LPP_2","LPP_3","LPP_4","LPP_5","LPP_6","LPP_7","LPP_8","LPP_9"]     
+}
+
+PHASE_TO_SOURCE = {
+    "dec": "decision", 
+}
+
+# BATCH-RUN CONTROL
+PHASE_RUN_ORDER = ["dec"]                                      # order
+SKIP_PHASES     = {}                                             # ignored this phase
+RUN_ALL_MODELS  = True                                           # False = just load existing fits (but loading is done in the aDDM_Garcia_LE_ES_EE.py file)
+
+# selectivity
+start_phase = "dec"
+start_version = 1
+started = False
+
+# dir
+PROJECT_DIR   = pathlib.Path(os.getenv("PROJECT_DIR", "/workspace")).resolve()
+BASE_MODEL_DIR = PROJECT_DIR / "Hddm_Docker_August_24/models_dir"
+FIG_DIR_ROOT   = PROJECT_DIR / "Hddm_Docker_August_24/figures_dir"
 
 
-# standard params:
-model_base_name = 'painreward_behavioural_data_combined_new_'
-model_names = [
-               'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10',
-               'r11', 'r12', 'r13', 'r14', 'r15', 'r16', 'r17', 'r18','r19', 'r20',
-               'r21', 'r22', 'r23', 'r24','r25', 'r26', 'r27', 'r28', 'r29', 'r30',
-               'r31','r32', 'r33','r34','r35', 'r36', 'r37', 'r38', 'r39', 'r40',
-               'r41','r42', 'r43','r44','r45', 'r46', 'r47', 'r48', 'r49', 'r50', 
-               'r51', 'r52', 'r53','r54', 'r55', 'r56', 'r57',
-               ]
+# reporting function
+# can be seen in the cluster output
+def quick_report(data, phase, version, model_name, phase_key):
+    print(f"\n Phase = {phase}   Version = {version}")
+    print(f"Model name          : {model_name}")
+    print(f"Selected phase_key  : {phase_key}")
+    print(f"N trials            : {len(data):,}")
+    print(f"Participants        : {sorted(data['subj_idx'].unique())}")
 
-nr_samples = 500
-nr_models = 10
-parallel = True
-accuracy_coding = False
+    fig, ax = plt.subplots(figsize=(6,4))
+    for _, d in data.groupby('subj_idx'):
+        d['rt'].hist(bins=20, histtype='step', ax=ax, alpha=.4)
+    ax.set(
+        title=f"RT distribution – {phase} v{version}",
+        xlabel="RT (s)",
+        ylabel="count"
+    )
+    plt.show()
 
-# settings:
-model_name = model_names[version]
+# function to clean bits of the data that have not been cleaned yet, for instance remaining NAN's and so on
+def sanitize_infdata(infdata):
+    for group in infdata._groups_all:
+        if hasattr(infdata, group):
+            dataset = getattr(infdata, group)
+            for var in dataset.data_vars:
+                values = dataset[var].values
+                if isinstance(values, np.ndarray) and values.dtype == "object":
+                    mask = pd.isna(values)
+                    if mask.any():
+                        print(f"Sanitizing variable '{var}' in group '{group}' (contains pd.NA)")
+                        values[mask] = np.nan
+                        dataset[var].values = values
+    return infdata
 
-#data:
-hddm_models_path = os.path.join(current_directory,'Hddm_models')
-sys.path.append(hddm_models_path)
-data_path1 = os.path.join(current_directory, 'data_sets', 'behavioural_sv_cleaned_final_3.csv')
-data = pd.read_csv(data_path1, sep = ',')
-data.dropna(subset=['rt', "painlevel", "moneylevel", "accepted",'acceptance_pair','sv_money', 'sv_pain', 'sv_both', 'p_pain_all', 'Abs_Money_Pain','OV_Money_Pain', 'sv_pain_para','sv_both_para','k_pain_para','beta_para','bias_para','STA_SAI_Score','STA_TAI_Score','PCS_Score'], inplace = True)    #'STA_SAI_Score','STA_TAI_Score','PCS_Score'
+
+
 
 # drop entire participants for quest data only, NO FOR ENTIRE DATA, otherwise the operating system kills the worker
 # quest_vers = [x, z, u, i]  # questionnaire versions 
 # if version in quest_vers:
 #     data.dropna(subset=["STA_SAI_Score","STA_TAI_Score","PCS_Score"], inplace=True)
 
-# converting from object to category for the DDM
-data['Abs_Money_Pain'] = data['Abs_Money_Pain'].astype("category")
-data['OV_Money_Pain'] = data['OV_Money_Pain'].astype("category")
-data['Abs_value'] = data['Abs_value'].astype("category")
-data['OV_value'] = data['OV_value'].astype("category")
-data['acceptance_pair'] = data['acceptance_pair'].astype("category")
-
-def ensure_dir(directory):
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-
-# model dir:
-model_dir = 'model_dir/'
-ensure_dir(model_dir)
-
-# figures dir:
-fig_dir = os.path.join('figures', model_base_name + model_name)
-try:
-    os.system('mkdir {}'.format(fig_dir))
-    os.system('mkdir {}'.format(os.path.join(fig_dir, 'diagnostics')))
-except:
-    pass
-
-# subjects:
-subjects = np.unique(data.subj_idx)
-nr_subjects = subjects.shape[0]
 
 ## this is optional and depends on your data and requirements:
 # def standardize_data(data):
@@ -135,470 +171,172 @@ nr_subjects = subjects.shape[0]
 # drift diffusion models
 #------------------------------------------------------------------------------------------------------------------
 # function that runs the different versions of DDM regressions
-def run_model(trace_id,data,model_dir, model_name, version, samples=500, accuracy_coding=False):
+def run_model(trace_id, data, model_dir, model_name, version, phase, samples=6000, accuracy_coding=True): 
     import os
     import numpy as np
     import hddm
     from patsy import dmatrix  
 
-    ensure_dir(model_dir)   
+    # ensure_dir(model_dir)   
     
-    if version == 0:  # this is the 0 model
-        m = hddm.HDDM(data, 
-                      include=['a', 'z', 'v', 't', 'st', 'sz', 'sv'],
-                      p_outlier=.05,
-                      trace_subjs=True,
-                      is_group_model=True)
+    depends_on = {}
+    
+    if phase == 'dec':
+        depends_on = {}
+    
+        if version == 0:
+            # jsut start sampling
+
+            m = hddm.models.HDDM(data, 
+                                    p_outlier=.05, 
+                                    include=['a', 't', 'v', 'z'],   #'z'
+                                    depends_on=depends_on,
+                                    )
+            m.find_starting_values()
+            infdata = m.sample(samples,
+                               burn=1000,
+                               dbname=os.path.join(model_dir, model_name + f'_db{trace_id}'), 
+                               db='pickle',
+                               return_infdata=True, loglike=True, ppc=True)
+            return m, infdata
+        
+        elif version == 1:  # drift rate is dependent on the the sv_pain_para
+            v_reg = {'model': 'v ~ 1 + sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [v_reg]
+        elif version == 2:  # drift rate is dependent on the the sv_pain_para
+            a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [a_reg]
+        elif version == 3:  # drift rate is dependent on the the sv_pain_para
+            t_reg = {'model': 't ~ 1 + sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [t_reg]    
+        elif version == 4:  # drift rate is dependent on the the sv_pain_para
+            z_reg = {'model': 'z ~ 1 + sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [z_reg]
+        elif version == 5:  # drift rate is dependent on the the sv_pain_para
+            v_reg = {'model': 'v ~ sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [v_reg]
+        elif version == 6:  # drift rate is dependent on the the sv_pain_para
+            a_reg = {'model': 'a ~ sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [a_reg]
+        elif version == 7:  # drift rate is dependent on the the sv_pain_para
+            t_reg = {'model': 't ~ sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [t_reg]    
+        elif version == 8:  # drift rate is dependent on the the sv_pain_para
+            z_reg = {'model': 'z ~ sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [z_reg]       
+        else:
+            raise ValueError(f"Is this version illegal ?? It feels illegal...")   
+        
+
+        m = hddm.models.HDDMRegressor(data, 
+                                    reg_descr,
+                                    p_outlier=.05, 
+                                    include=['a', 't', 'v', 'z'],   #'z'
+                                    depends_on=depends_on,
+                                    group_only_regressors=False,
+                                    keep_regressor_trace=True
+                                    )
         m.find_starting_values()
-        m.sample(samples, burn=samples/2, dbname=os.path.join(model_dir, model_name + '_db{}'.format(trace_id)), db='pickle')
-        return m
-    elif version == 1:  # drift rate is dependent on the the sv_pain_para
-        v_reg = {'model': 'v ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 2:  # all parameters vary with the sv_pain_para
-        v_reg = {'model': 'v ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    elif version == 3:
-        v_reg = {'model': 'v ~ 1 + sv_money', 'link_func': lambda x: x}  # drift rate varies with the sv_money
-        reg_descr = [v_reg]
-    elif version == 4:  # all parameters vary with the sv_money
-        v_reg = {'model': 'v ~ 1 + sv_money', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 1 + sv_money', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 1 + sv_money', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 1 + sv_money', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    elif version == 5:  # only the non-decision time varies with the sv_pain_para, all other parameters are fixed
-        t_reg = {'model': 't ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-        reg_descr = [t_reg]
-    elif version == 6:  # only the threshold varies with the sv_pain_para, all other parameters are fixed
-        a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-        reg_descr = [a_reg]
-    elif version == 7:  # only the non-decision time varies with sv_money, all other parameters are fixed
-        t_reg = {'model': 't ~ 1 + sv_money', 'link_func': lambda x: x}
-        reg_descr = [t_reg]
-    elif version == 8:  # only the threshold varies with sv_money, all other parameters are fixed
-        a_reg = {'model': 'a ~ 1 + sv_money', 'link_func': lambda x: x}
-        reg_descr = [a_reg]
-    elif version == 9:  # the drift rate depends on the interaction between sv_money and sv_pain_para
-        v_reg = {'model': 'v ~ 1 + sv_pain_para + sv_money + sv_pain_para * sv_money', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 10:  # all parameters depend on the interaction between sv_pain_para and sv_money
-        v_reg = {'model': 'v ~ 1 + sv_pain_para + sv_money + sv_pain_para * sv_money', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 1 + sv_pain_para + sv_money + sv_pain_para * sv_money', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 1 + sv_pain_para + sv_money + sv_pain_para * sv_money', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 1 + sv_pain_para + sv_money + sv_pain_para * sv_money', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    elif version == 11:  # the drift rate depends on the main effects of sv_pain_para and sv_money
-        v_reg = {'model': 'v ~ 1 + sv_pain_para + sv_money', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 12:  # all parameters vary with the main effects of sv_pain_para and sv_money
-        v_reg = {'model': 'v ~ 1 + sv_pain_para + sv_money', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 1 + sv_pain_para + sv_money', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 1 + sv_pain_para + sv_money', 'link_func': lambda x: x}
-        z_reg = {'model': 'a ~ 1 + sv_pain_para + sv_money', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    elif version == 13:  # the drift rate depends on sv_both
-        v_reg = {'model': 'v ~ 1 + sv_both', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 14:  # the drift rate depends on the interaction between sv_both * sv_pain_para * sv_money
-        v_reg = {'model': 'v ~ 1 + sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 15:  # all parameters depend on the interaction between sv_both, sv_pain_para, and sv_money
-        v_reg = {'model': 'v ~ 1 + sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 1 + sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 1 + sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 1 + sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    elif version == 16:  # the drift rate depends on the interaction between sv_pain_para and the conditions of Abs_value
-        v_reg = {'model': 'v ~ sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 17:  # the drift rate depends on the interaction between sv_pain_para and the OV_value conditions
-        v_reg = {'model': 'v ~ sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 18:  # the drift rate depends on the interaction between sv_pain_para and the Abs_Money_Pain conditions
-        v_reg = {'model': 'v ~ sv_pain_para:C(Abs_Money_Pain)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 19:  # the drift rate depends on the interaction between sv_pain_para and the OV_Money_Pain conditions
-        v_reg = {'model': 'v ~ sv_pain_para:C(OV_Money_Pain)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-#------------------------------------------------------------------------------------------------------------------         
-    elif version == 20:  # the drift rate depends on the interaction between sv_pain_para and the OV_Money_Pain conditions
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_Money_Pain):C(Abs_Money_Pain)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 21:  # the drift rate depends on the interaction between sv_pain_para, the conditions of OV_value, and the conditions of acceptance pair
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 22:  # the drift rate depends on the interaction between sv_pain_para, the conditions of OV_value, and the conditions of acceptance pair
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 23:  # the drift rate depends on the interaction between sv_pain_para, the conditions of OV_value, and the conditions of acceptance pair
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value):C(Abs_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 24:  # the drift rate depends on the interaction between sv_pain_para, the conditions of OV_value, and the conditions of acceptance pair
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value):C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 25:  # the drift rate depends on the interaction between sv_pain_para, the conditions of OV_value, and the conditions of acceptance pair
-        v_reg = {'model': 'v ~ 0 + sv_pain_para + C(OV_value) + C(acceptance_pair) + sv_pain_para:C(OV_value) + sv_pain_para:C(acceptance_pair) + C(OV_value):C(acceptance_pair) + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 26:  # all parameters depend on the interaction between sv_pain_para and the conditions of Abs_value
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    elif version == 27:  # all parameters depend on the interaction between sv_pain_para and the OV_value conditions
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    elif version == 28:  # all parameters depend on the interaction between sv_pain_para, the conditions of OV_value, and the conditions of acceptance pair
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    elif version == 29:  # all parameters depend on the interaction between sv_pain_para, the conditions of Abs_value, and the conditions of acceptance pair
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    # elif version == 30:                                                 # all parameters depend on the interaction between sv_pain_para, the conditions of OV_value and the conditions of acceptance pair 
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para + C(OV_value) + C(acceptance_pair) + sv_pain_para:C(OV_value) + sv_pain_para:C(acceptance_pair) + C(OV_value):C(acceptance_pair) + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     t_reg = {'model': 't ~ 0 + sv_pain_para + C(OV_value) + C(acceptance_pair) + sv_pain_para:C(OV_value) + sv_pain_para:C(acceptance_pair) + C(OV_value):C(acceptance_pair) + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     a_reg = {'model': 'a ~ 0 + sv_pain_para + C(OV_value) + C(acceptance_pair) + sv_pain_para:C(OV_value) + sv_pain_para:C(acceptance_pair) + C(OV_value):C(acceptance_pair) + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     z_reg = {'model': 'z ~ 0 + sv_pain_para + C(OV_value) + C(acceptance_pair) + sv_pain_para:C(OV_value) + sv_pain_para:C(acceptance_pair) + C(OV_value):C(acceptance_pair) + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    # elif version == 31:                                                 # all parameters depend on the interaction between sv_pain_para, the conditions of Abs_value and the conditions of acceptance pair 
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para + C(Abs_value) + C(acceptance_pair) + sv_pain_para:C(Abs_value) + sv_pain_para:C(acceptance_pair) + C(Abs_value):C(acceptance_pair) + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     t_reg = {'model': 't ~ 0 + sv_pain_para + C(Abs_value) + C(acceptance_pair) + sv_pain_para:C(Abs_value) + sv_pain_para:C(acceptance_pair) + C(Abs_value):C(acceptance_pair) + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     a_reg = {'model': 'a ~ 0 + sv_pain_para + C(Abs_value) + C(acceptance_pair) + sv_pain_para:C(Abs_value) + sv_pain_para:C(acceptance_pair) + C(Abs_value):C(acceptance_pair) + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     z_reg = {'model': 'z ~ 0 + sv_pain_para + C(Abs_value) + C(acceptance_pair) + sv_pain_para:C(Abs_value) + sv_pain_para:C(acceptance_pair) + C(Abs_value):C(acceptance_pair) + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    # elif version == 32:  # all parameters depend on the interaction between sv_pain_para, the conditions of OV_value, Abs_value, and the conditions of acceptance pair
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value):C(Abs_value):C(acceptance_pair)','link_func': lambda x: x}
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value):C(Abs_value):C(acceptance_pair)','link_func': lambda x: x}
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value):C(Abs_value):C(acceptance_pair)','link_func': lambda x: x}
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value):C(Abs_value):C(acceptance_pair)','link_func': lambda x: x}
-    #     reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    elif version == 33:  # v and a parameters depend on the interaction between sv_pain_para, OV_value, and acceptance pair; z depends on the interaction between sv_pain_para and acceptance pair; t only depends on sv_pain_para
-        v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + sv_pain_para:C(OV_value):C(acceptance_pair)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    # elif version == 34:  # all parameters depend on the interaction between sv_pain_para, the conditions of Abs_value and the conditions of acceptance pair
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-    #     a_reg = {'model': 'a ~ 0 + sv_pain_para:C(Abs_value):C(acceptance_pair)', 'link_func': lambda x: x}
-    #     z_reg = {'model': 'z ~ 0 + sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-    #     reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    # elif version == 35:  # all parameters depend on the interaction between sv_pain_para and the conditions of Abs_value
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-    #     t_reg = {'model': 't ~ 0 + C(Abs_value) ', 'link_func': lambda x: x}
-    #     a_reg = {'model': 'a ~ 0 + sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-    #     z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-    #     reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    # elif version == 36:  # all parameters depend on the interaction between sv_pain_para and the OV_value conditions
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-    #     t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-    #     a_reg = {'model': 'a ~ 0 + sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-    #     z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-    #     reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    # elif version == 37:  # all parameters depend on the interaction between sv_pain_para and the Abs_Money_Pain conditions
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para:C(Abs_Money_Pain)', 'link_func': lambda x: x}
-    #     t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-    #     a_reg = {'model': 'a ~ 0 + sv_pain_para:C(Abs_Money_Pain)', 'link_func': lambda x: x}
-    #     z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-    #     reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    # elif version == 38:  # all parameters depend on the interaction between sv_pain_para and the OV_Money_Pain conditions
-    #     v_reg = {'model': 'v ~ 0 + sv_pain_para:C(OV_Money_Pain)', 'link_func': lambda x: x}
-    #     t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-    #     a_reg = {'model': 'a ~ 0 + sv_pain_para:C(OV_Money_Pain)', 'link_func': lambda x: x}
-    #     z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-    #     reg_descr = [v_reg, t_reg, a_reg, z_reg] 
-    
-#------------------------------------------------------------------------------------------------------------------         
-    # Questionnaire data    
-    elif version == 34:  # v depends on STA_SAI_Score
-        v_reg = {'model': 'v ~ STA_SAI_Score', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 35:  # a depends on STA_SAI_Score
-        a_reg = {'model': 'a ~ STA_SAI_Score', 'link_func': lambda x: x}
-        reg_descr = [a_reg]
-    elif version == 36:  # v depends on STA_TAI_Score
-        v_reg = {'model': 'v ~ STA_TAI_Score', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 37:  # a depends on STA_TAI_Score
-        a_reg = {'model': 'a ~ STA_TAI_Score', 'link_func': lambda x: x}
-        reg_descr = [a_reg]
-    elif version == 38:  # v depends on PCS_Score
-        v_reg = {'model': 'v ~ PCS_Score', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 39:  # a depends on PCS_Score
-        a_reg = {'model': 'a ~ PCS_Score', 'link_func': lambda x: x}
-        reg_descr = [a_reg]
-
-    elif version == 40: 
-        v_reg = {'model': 'v ~ STA_SAI_Score', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ STA_SAI_Score', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ STA_SAI_Score', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ STA_SAI_Score', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-
-    # STA-TAI 
-    elif version == 41:
-        v_reg = {'model': 'v ~ STA_TAI_Score', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ STA_TAI_Score', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ STA_TAI_Score', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ STA_TAI_Score', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-
-    # PCS 
-    elif version == 42:
-        v_reg = {'model': 'v ~ PCS_Score', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ PCS_Score', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ PCS_Score', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ PCS_Score', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-    
-    
-    elif version == 43:  # all parameters depend on STA_SAI_Score and sv_pain_para with OV_value interaction
-        v_reg = {'model': 'v ~ 0 + STA_SAI_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + STA_SAI_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + STA_SAI_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + STA_SAI_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-    elif version == 44:  # all parameters depend on STA_TAI_Score and sv_pain_para with OV_value interaction
-        v_reg = {'model': 'v ~ 0 + STA_TAI_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + STA_TAI_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + STA_TAI_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + STA_TAI_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-    elif version == 45:  # all parameters depend on PCS_Score and sv_pain_para with OV_value interaction
-        v_reg = {'model': 'v ~ 0 + PCS_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + PCS_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + PCS_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + PCS_Score:sv_pain_para:C(OV_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-    elif version == 46:  # all parameters depend on STA_SAI_Score and sv_pain_para with Abs_value interaction
-        v_reg = {'model': 'v ~ 0 + STA_SAI_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + STA_SAI_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + STA_SAI_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + STA_SAI_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-    elif version == 47:  # all parameters depend on STA_TAI_Score and sv_pain_para with Abs_value interaction
-        v_reg = {'model': 'v ~ 0 + STA_TAI_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + STA_TAI_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + STA_TAI_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + STA_TAI_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-    elif version == 48:  # all parameters depend on PCS_Score and sv_pain_para with Abs_value interaction
-        v_reg = {'model': 'v ~ 0 + PCS_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + PCS_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + PCS_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + PCS_Score:sv_pain_para:C(Abs_value)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-    elif version == 49:  # all parameters depend on STA_SAI_Score and sv_pain_para with acceptance_pair interaction
-        v_reg = {'model': 'v ~ 0 + STA_SAI_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + STA_SAI_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + STA_SAI_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + STA_SAI_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-    elif version == 50:  # all parameters depend on STA_TAI_Score and sv_pain_para with acceptance_pair interaction
-        v_reg = {'model': 'v ~ 0 + STA_TAI_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + STA_TAI_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + STA_TAI_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + STA_TAI_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-    elif version == 51:  # all parameters depend on PCS_Score and sv_pain_para with acceptance_pair interaction
-        v_reg = {'model': 'v ~ 0 + PCS_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 0 + PCS_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 0 + PCS_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 0 + PCS_Score:sv_pain_para:C(acceptance_pair)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
+        infdata = m.sample(samples,
+                   burn=1000,
+                   dbname=os.path.join(model_dir, model_name + f'_db{trace_id}'), 
+                   db='pickle',
+                   return_infdata=True, loglike=True, ppc=True)
+        return m, infdata
         
-    elif version == 52:  # v depends on the interaction between sv_pain_para and STA_SAI_Score, STA_TAI_Score, and PCS_Score
-        v_reg = {'model': 'v ~ 1 + sv_pain_para * STA_SAI_Score + sv_pain_para * STA_TAI_Score + sv_pain_para * PCS_Score + sv_pain_para * STA_SAI_Score * STA_TAI_Score * PCS_Score', 'link_func': lambda x: x}
-        reg_descr = [v_reg]
-    elif version == 53:  # all parameters depend on the interaction between sv_pain_para, STA_SAI_Score, STA_TAI_Score, and PCS_Score
-        v_reg = {'model': 'v ~ 1 + sv_pain_para * STA_SAI_Score + sv_pain_para * STA_TAI_Score + sv_pain_para * PCS_Score + sv_pain_para * STA_SAI_Score * STA_TAI_Score * PCS_Score', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 1 + sv_pain_para * STA_SAI_Score + sv_pain_para * STA_TAI_Score + sv_pain_para * PCS_Score + sv_pain_para * STA_SAI_Score * STA_TAI_Score * PCS_Score', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 1 + sv_pain_para * STA_SAI_Score + sv_pain_para * STA_TAI_Score + sv_pain_para * PCS_Score + sv_pain_para * STA_SAI_Score * STA_TAI_Score * PCS_Score', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 1 + sv_pain_para * STA_SAI_Score + sv_pain_para * STA_TAI_Score + sv_pain_para * PCS_Score + sv_pain_para * STA_SAI_Score * STA_TAI_Score * PCS_Score', 'link_func': lambda x: x}
-        reg_descr = [v_reg, t_reg, a_reg, z_reg]
-    
-    #------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    #------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    # best fitting model with Questionnaire data
-    elif version == 54:
-        v_reg = {'model': 'v ~ 1 + STA_SAI_Score * (sv_both * sv_pain_para * sv_money)', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ 1 + STA_SAI_Score * (sv_both * sv_pain_para * sv_money)', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ 1 + STA_SAI_Score * (sv_both * sv_pain_para * sv_money)', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ 1 + STA_SAI_Score * (sv_both * sv_pain_para * sv_money)', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-
-    # STA-TAI 
-    elif version == 55:
-        v_reg = {'model': 'v ~ STA_TAI_Score * sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ STA_TAI_Score * sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ STA_TAI_Score * sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ STA_TAI_Score * sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-
-    # PCS 
-    elif version == 56:
-        v_reg = {'model': 'v ~ PCS_Score * sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        z_reg = {'model': 'z ~ PCS_Score * sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        t_reg = {'model': 't ~ PCS_Score * sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        a_reg = {'model': 'a ~ PCS_Score * sv_both * sv_pain_para * sv_money', 'link_func': lambda x: x}
-        reg_descr = [v_reg, z_reg, t_reg, a_reg]
-        
-    #___________________________________________________________________________________________________________________________________________________________________________________________________________
-    # Regression models with ERP data
-    # first we need to adjust the erp meta data to fit the format and previous filtering process of the behavioural data frame
-    # elif version == 57:
-        
-    #     ensure_dir(model_dir)   
-
-    #     #creating new columns trialblocks and blocks_idx for the erp meta data
-    #     import pandas as pd
-    #     data_erpsmeta = pd.read_csv('/home/jovyan/OfficialTutorials/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives/decision_erpsmeta.csv')
-
-    #     participants = data_erpsmeta['participant_id'].unique()
-    #     trialblocks = []
-    #     blocks_idx = []
-
-    #     for participant in participants:
-    #         p_df = data_erpsmeta[data_erpsmeta['participant_id'] == participant]
-    #         blocks = list(range(25)) * 5
-    #         blocks_idx_participant = [i for i in range(5) for _ in range(25)]
-    #         trialblocks.extend(blocks)
-    #         blocks_idx.extend(blocks_idx_participant)
-            
-    #     data_erpsmeta['trialblocks'] = trialblocks
-    #     data_erpsmeta['blocks_idx'] = blocks_idx
-
-    #     data_erpsmeta.to_csv('/home/jovyan/OfficialTutorials/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives/decision_erpsmeta_2.csv', index=False)
-        
-    #     # adjusting the erps meta data frame so it fits the beahvioural data frame
-    #     erpsmeta_df = pd.read_csv('/home/jovyan/OfficialTutorials/EEG/decision_erpsmeta_worked.csv')
-    #     behavioural_df = pd.read_csv('/home/jovyan/OfficialTutorials/data_sets/behavioural_sv_cleaned_final_3.csv')
-        
-    #     # initializing the empty frame
-    #     final_filtered_erpsmeta_df = pd.DataFrame()
-    #     # filtering for unique participants in the behavioural frame
-    #     for participant in behavioural_df['participant'].unique():
-            
-    #         erps_participant_df = erpsmeta_df[erpsmeta_df['participant_id'] == participant]
-    #         behavioural_participant_df = behavioural_df[behavioural_df['participant'] == participant]
-            
-    #         # Loop through each unique block in the behavioral data for this participant
-    #         for block_x in behavioural_participant_df['blocks.thisRepN'].unique():
-    #             erps_block_df = erps_participant_df[erps_participant_df['blocks_idx'] == block_x]
-    #             behavioural_block_df = behavioural_participant_df[behavioural_participant_df['blocks.thisRepN'] == block_x]
-                
-    #             #filter ERP data to keep only  rows where trialblocks match trials.thisN in the behavioral data
-    #             filtered_block_df = erps_block_df[erps_block_df['trialblocks'].isin(behavioural_block_df['trials.thisN'])]
-    #             final_filtered_erpsmeta_df = pd.concat([final_filtered_erpsmeta_df, filtered_block_df], ignore_index=True)
-                
-    #     final_filtered_erpsmeta_df.to_csv('/home/jovyan/OfficialTutorials/EEG/filtered_erpsmeta_worked.csv', index=False)
-    #     behavioural_df.reset_index(drop=True, inplace=True)
-    #     final_filtered_erpsmeta_df.reset_index(drop=True, inplace=True)
-
-    #     dat = pd.concat([behavioural_df, final_filtered_erpsmeta_df], axis=1)
-    #     dat.to_csv('/home/jovyan/OfficialTutorials/data_sets/neuro_sv_cleaned_final_4.csv', index=False)
-        
-    #     data_path2 = os.path.join(current_directory, 'data_sets', 'neuro_sv_cleaned_final_4.csv')
-    #     data = pd.read_csv(data_path2, sep = ',')
-        
-    #     data['Abs_Money_Pain'] = data['Abs_Money_Pain'].astype("category")
-    #     data['OV_Money_Pain'] = data['OV_Money_Pain'].astype("category")
-    #     data['Abs_value'] = data['Abs_value'].astype("category")
-    #     data['OV_value'] = data['OV_value'].astype("category")
-    #     data['acceptance_pair'] = data['acceptance_pair'].astype("category")
-
-        
-        # # all parameters depend on the interaction between sv_both, sv_pain_para, and sv_money
-        # v_reg = {'model': 'v ~ 1 + sv_pain_para * amp_Fz_0.4-0.8', 'link_func':lambda x: x}
-        # t_reg = {'model': 't ~ 1 + sv_pain_para * amp_Fz_0.4-0.8', 'link_func': lambda x: x}
-        # a_reg = {'model': 'a ~ 1 + sv_pain_para * amp_Fz_0.4-0.8', 'link_func': lambda x: x}
-        # z_reg = {'model': 'z ~ 1 + sv_pain_para * amp_Fz_0.4-0.8', 'link_func': lambda x: x}
-        # reg_descr = [v_reg, t_reg, a_reg, z_reg]
-
-        # v_reg = {'model': 'v ~ 1 + (sv_both * sv_pain_para * sv_money) * (amp_Fz_0.4-0.8 * amp_FCz_0.4-0.8 * amp_POz_0.4-0.8 *	amp_Cz_0.4-0.8 * amp_CPz_0.4-0.8 * amp_Pz_0.4-0.8 *	amp_Oz_0.4-0.8) ', 'link_func': lambda x: x}
-        # t_reg = {'model': 't ~ 1 + (sv_both * sv_pain_para * sv_money) * amp_Fz_0.4-0.8 * amp_FCz_0.4-0.8	* amp_POz_0.4-0.8 *	amp_Cz_0.4-0.8 * amp_CPz_0.4-0.8 * amp_Pz_0.4-0.8 *	amp_Oz_0.4-0.8 ', 'link_func': lambda x: x}
-        # a_reg = {'model': 'a ~ 1 + (sv_both * sv_pain_para * sv_money) * amp_Fz_0.4-0.8 * amp_FCz_0.4-0.8	* amp_POz_0.4-0.8 *	amp_Cz_0.4-0.8 * amp_CPz_0.4-0.8 * amp_Pz_0.4-0.8 *	amp_Oz_0.4-0.8 ', 'link_func': lambda x: x}
-        # z_reg = {'model': 'z ~ 1 + (sv_both * sv_pain_para * sv_money) * amp_Fz_0.4-0.8 * amp_FCz_0.4-0.8	* amp_POz_0.4-0.8 *	amp_Cz_0.4-0.8 * amp_CPz_0.4-0.8 * amp_Pz_0.4-0.8 *	amp_Oz_0.4-0.8 ', 'link_func': lambda x: x}
-
-        # m = hddm.models.HDDMRegressor(data, 
-        #                           reg_descr, 
-        #                           p_outlier=.05, 
-        #                           include=['a','z','v','t','st', 'sz', 'sv'],
-        #                           group_only_regressors=False,
-        #                           keep_regressor_trace=True)
-        # m.find_starting_values()
-        # m.sample(samples, burn=samples/2, dbname=os.path.join(model_dir, model_name + '_db{}'.format(trace_id)), db='pickle')
-        # return m
-        
-# ___________________________________________________________________________________________________________________________________________________________________________________________________________
-          
-    m = hddm.models.HDDMRegressor(data, 
-                                  reg_descr, 
-                                  p_outlier=.05, 
-                                  include=['a','z','v','t','st', 'sz', 'sv'],
-                                  group_only_regressors=False,
-                                  keep_regressor_trace=True)
-    m.find_starting_values()
-    m.sample(samples, burn=samples/2, dbname=os.path.join(model_dir, model_name + '_db{}'.format(trace_id)), db='pickle')
-
-    return m
-#----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Main function for running/loading models
+import dill as pickle  # to create the pkl object
+
 def drift_diffusion_hddm(data, 
-                         samples=10000,
+                         samples=6000,
                          n_jobs=3,
                          run=True,
                          parallel=True,
                          model_name='model',
                          model_dir='.', 
-                         version=version,
-                         accuracy_coding=False):
+                         accuracy_coding=True,
+                         version=None,
+                         phase=None):
+
     if run:
         if parallel:
             start_time = time.time()
-            
             results = Parallel(n_jobs=n_jobs)(
-                delayed(run_model)(trace_id, data, model_dir, model_name, version, samples, accuracy_coding) 
+                delayed(run_model)(
+                    trace_id=trace_id,
+                    data=data,
+                    model_dir=model_dir,
+                    model_name=model_name,
+                    version=version,
+                    phase=phase,
+                    samples=samples,
+                    accuracy_coding=accuracy_coding
+                    )
                 for trace_id in range(n_jobs)
             )
-            
             print("Time elapsed:", time.time() - start_time, "s")
             
+           
             for i in range(n_jobs):
-                model = results[i]
-                model.save(os.path.join(model_dir, f"{model_name}_{i}"))
-        else:
-            model = run_model(1, data, model_dir, model_name, version, samples, accuracy_coding)
-            model.save(os.path.join(model_dir, model_name))
-    else:
-        print('Loading existing model(s)')
-        models = [hddm.load(os.path.join(model_dir, f"{model_name}_{i}")) for i in range(n_jobs)]
+                model, infdata = results[i]
+                model.save(os.path.join(model_dir, f"{model_name}_{i}.hddm"))
+                
+                with open(os.path.join(model_dir, f"{model_name}_{i}.pkl"), "wb") as f:
+                    pickle.dump(model, f)
+                infdata = sanitize_infdata(infdata)  # clean before saving
+                az.to_netcdf(infdata, os.path.join(model_dir, f"{model_name}_{i}.nc"))
 
+
+        else: 
+            model, infdata = run_model(1,
+                                       data,
+                                       model_dir,
+                                       model_name,
+                                       version, 
+                                       samples,
+                                       accuracy_coding 
+                                       )
+            model.save(os.path.join(model_dir, model_name + ".hddm"))
+
+            with open(os.path.join(model_dir, f"{model_name}.pkl"), "wb") as f:
+                pickle.dump(model, f)
+            infdata = sanitize_infdata(infdata)
+            az.to_netcdf(infdata, os.path.join(model_dir, f"{model_name}.nc"))
+
+    else:
+        print('Loading existing models')
+        models = [hddm.load(os.path.join(model_dir, f"{model_name}_{i}.hddm")) for i in range(n_jobs)]
         return models
     
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Function to plot the parameters
 #----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-def analyze_model(models, fig_dir, nr_models, version):
-    sns.set_theme(style='darkgrid', font='sans-serif', font_scale=0.5)
+def analyze_model(models, fig_dir, nr_models, version, phase):
+    # 'sns.set_theme(style='darkgrid', font='sans-serif', font_scale=0.5)
+    # # combine the 3 modles with kabuki utils
+    # combined_model = kabuki.utils.concat_models(models)'
     
-    combined_model = kabuki.utils.concat_models(models)
+    print(f"Analyzing {len(models)} models for {phase}, version {version}")
+    print(f"Saving figures to: {fig_dir}")
+
+    sns.set_theme(style='darkgrid', font='sans-serif', font_scale=0.5)
+
+    if not models or models[0] is None:
+        print("ERROR: Models are empty or invalid.")
+        return
+
+    # Try combining models
+    try:
+        combined_model = kabuki.utils.concat_models(models)
+        print("Models combined successfully.")
+    except Exception as e:
+        print(f"Error combining models: {e}")
+        return
+    
+    # names parameters 
+    
     if version == 0:
         params_of_interest = ['z', 'a', 't', 'v']
         params_of_interest_s = ['z_subj', 'a_subj', 't_subj', 'v_Intercept_subj']
@@ -782,6 +520,8 @@ def analyze_model(models, fig_dir, nr_models, version):
             'Inter-trial variability in starting point', 'Inter-trial variability in non-decision time',
             'Intercept drift rate',
             'Interaction: sv_pain_para * OV_value[low_OV]', 'Interaction: sv_pain_para * OV_value[high_OV]']
+        
+        
 #     elif version == 18:
 #         params_of_interest = [
 #             'z', 'a', 't', 'sv', 'sz', 'st',
@@ -1609,122 +1349,210 @@ def analyze_model(models, fig_dir, nr_models, version):
 #             'Interaction: sv_pain_para * STA_SAI_Score * STA_TAI_Score', 'Interaction: sv_pain_para * STA_SAI_Score * PCS_Score', 'Interaction: sv_pain_para * STA_TAI_Score * PCS_Score', 
 #             'Interaction: sv_pain_para * STA_SAI_Score * STA_TAI_Score * PCS_Score']
     
-    # Gelman-Rubin diagnostic
+    # diagnostics
+    diag_dir = Path(fig_dir) / "diagnostics"
+    ensure_dir(diag_dir)
+    
+    # Gelman-Rubin
     gr = hddm.analyze.gelman_rubin(models)
-    ensure_dir(os.path.join(fig_dir, 'diagnostics'))
-    with open(os.path.join(fig_dir, 'diagnostics', 'gelman_rubin.txt'), 'w') as text_file:
-        for p in gr.items():
-            text_file.write(f"{p[0]}: {p[1]}\n")
-
+    with open(diag_dir / "gelman_rubin.txt", "w") as f:
+        for param, val in gr.items():
+            f.write(f"{param}: {val}\n")
     # DIC
     dic = combined_model.dic
-    with open(os.path.join(fig_dir, 'diagnostics', 'DIC.txt'), 'w') as text_file:
-        text_file.write(f"DIC: {dic}\n")
-        
-    # Plots
+    (diag_dir / "DIC.txt").write_text(f"DIC: {dic}\n")
     size_plot = len(combined_model.data.subj_idx.unique()) / 3.0 * 1.5
-    combined_model.plot_posterior_predictive(samples=10, bins=100, figsize=(6, size_plot), save=True, path=os.path.join(fig_dir, 'diagnostics'), format='pdf')
-    matplotlib.rcParams.update({'font.size': 6}) 
-    combined_model.plot_posteriors(save=True, path=os.path.join(fig_dir, 'diagnostics'), format='pdf')
+    combined_model.plot_posterior_predictive(samples=10, bins=100, figsize=(6, size_plot), save=True, path=str(diag_dir), format="pdf")
     
-    # Reset to default
-    matplotlib.rcParams.update({'font.size': 12})
+    # shrink font 
+    matplotlib.rcParams.update({"font.size": 6})
+    combined_model.plot_posteriors(save=True,
+                                   path=str(diag_dir),
+                                   format="pdf")
+    matplotlib.rcParams.update({"font.size": 12})
 
-    # results
+    # stats table
     results = combined_model.gen_stats()
-    results.to_csv(os.path.join(fig_dir, 'diagnostics', 'results.csv'))
+    results.to_csv(diag_dir / "results.csv")
     
-    # Posterior analysis and fixed starting point as in J.W. de Gee code
+    # Posterior‐trace KDEs
     traces = [combined_model.nodes_db.node[p].trace() for p in params_of_interest]
-    traces[0] = 1 / (1 + np.exp(-(traces[0])))
-
-    #Posterior Statistics for parameter traces, significance testing
-    stats = []
-    for trace in traces:
-        stat = min(np.mean(trace > 0), np.mean(trace < 0))
-        stats.append(min(stat, 1 - stat))
-    stats = np.array(stats)
+    # optional alpha‐transform if RL is used for instance
+    if "alpha" in params_of_interest:
+        idx = params_of_interest.index("alpha")
+        traces[idx] = np.exp(traces[idx]) / (1 + np.exp(traces[idx]))
     
+    stats = [min(np.mean(t>0), np.mean(t<0)) for t in traces]
     n_cols = 5
-    n_rows = int(np.ceil(len(params_of_interest) / n_cols))
-
-    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(n_cols * 3, n_rows * 4))
+    n_rows = int(np.ceil(len(traces) / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols*3, n_rows*4))
     axes = axes.flatten()
-
-    for ax_nr, (trace, title) in enumerate(zip(traces, titles)):
-        sns.kdeplot(trace, vertical=True, shade=True, color='purple', ax=axes[ax_nr])
-        if ax_nr % n_cols == 0:
-            axes[ax_nr].set_ylabel('Parameter estimate (a.u.)')
-        if ax_nr >= len(params_of_interest) - n_cols:
-            axes[ax_nr].set_xlabel('Posterior probability')
-        axes[ax_nr].set_title(f'{title}\np={round(stats[ax_nr], 3)}', fontsize=6)  
-        axes[ax_nr].set_xlim(xmin=0)
-        for axis in ['top', 'bottom', 'left', 'right']:
-            axes[ax_nr].spines[axis].set_linewidth(0.5)
-            axes[ax_nr].tick_params(width=0.5, labelsize=6)  
-
-    for ax in axes[len(params_of_interest):]:
+    
+    for i, (trace, title) in enumerate(zip(traces, titles)):
+        sns.kdeplot(trace, vertical=True, shade=True, color='purple', ax=axes[i])
+        axes[i].set_title(f"{title}\np={stats[i]:.3f}", fontsize=6)
+        axes[i].set_xlim(left=0)
+        if i % n_cols == 0:
+            axes[i].set_ylabel("Parameter estimate (a.u.)")
+        if i >= len(traces) - n_cols:
+            axes[i].set_xlabel("Posterior probability")
+        for side in ["top","bottom","left","right"]:
+            axes[i].spines[side].set_linewidth(0.5)
+            axes[i].tick_params(width=0.5, labelsize=6)   
+            
+    for ax in axes[len(traces):]:
         fig.delaxes(ax)
-
     sns.despine(offset=10, trim=True)
     plt.tight_layout()
-    fig.savefig(os.path.join(fig_dir, 'posteriors.pdf'), bbox_inches='tight') 
-
-        
+    fig.savefig(diag_dir / "posteriors.pdf", bbox_inches="tight")
+    plt.close(fig) 
+    
+    
+    # save inidviudal parameters
     parameters = []
     for p in params_of_interest_s:
         param_values = []
         for s in np.unique(combined_model.data.subj_idx):
             param_name = f"{p}.{s}"
             try:
-                param_value = results.loc[results.index == param_name, 'mean'].values
-                if len(param_value) > 0:
-                    param_values.append(param_value[0])
+                val = results.loc[results.index == param_name, 'mean'].values
+                if len(val):
+                    v = val[0]
+                    if 'alpha' in p:
+                        # inverse‐logit transform for alpha‐params
+                        v = np.exp(v) / (1 + np.exp(v))
+                    param_values.append(v)
             except KeyError:
-                print(f"Param {param_name} missing. Skipping...")
-                continue
+                print(f"Param {param_name} missing. Skipping…")
         parameters.append(param_values)
 
-    parameters = pd.DataFrame(parameters).T
-    parameters.columns = params_of_interest_s
-    parameters.to_csv(os.path.join(fig_dir, 'diagnostics', 'params_of_interest_s.csv'))
+    # turn into DataFrame, transpose so each subj is a row
+    param_df = pd.DataFrame(parameters).T
+    param_df.columns = params_of_interest_s
+    param_df.to_csv(diag_dir / "params_of_interest_s.csv", index=False)
+    
 
 # directories
-model_dir = 'model_dir/'
-ensure_dir(model_dir)
+#model_dir = 'models_dir_garcia/'
+#ensure_dir(model_dir)
 
-#_________________________________________________________________________________________________________________________________________________________________________________________________
-# for if you want to loop over multiple models
+model_dir = BASE_MODEL_DIR
 
-# # Loop over versions and process each one
-# for version in range(20, 28):  
-#     model_base_name = 'painreward_behavioural_data_combined_new_'
-#     model_names = [
-#                'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10',
-#                'r11', 'r12', 'r13', 'r14', 'r15', 'r16', 'r17', 'r18','r19', 'r20',
-#                'r21', 'r22', 'r23', 'r24','r25', 'r26', 'r27', 'r28', 'r29', 'r30',
-#                'r31','r32', 'r33','r34','r35', 'r36', 'r37', 'r38', 'r39', 'r40',
-#                'r41','r42', 'r43','r44','r45', 'r46', 'r47', 'r48', 'r49', 'r50', 
-#                'r51', 'r52', 'r53'
-#                ]
 
-#     parallel = True
-#     accuracy_coding = False
-#     model_name = model_names[version]
-#     fig_dir = os.path.join('figures', model_base_name + model_name)
-#     ensure_dir(fig_dir)
-#     ensure_dir(os.path.join(fig_dir, 'diagnostics'))
+if __name__ == "__main__":
     
-#     # Debugging
-#     print(f"Processing version {version} with model name: {model_name}")
-#     try:
-#         models = drift_diffusion_hddm(data=data, samples=nr_samples, n_jobs=nr_models, run=False, parallel=parallel, model_name= model_base_name + model_name, model_dir=model_dir, version=version, accuracy_coding=accuracy_coding)
-#         #plotting params
-#         analyze_model(models, fig_dir, nr_models, version)
-#         print(f"Completed analysis for version {version}\n")
-#     except:
-#         pass
-# Load models or run
+    
+    #data:
+    # hddm_models_path = os.path.join(current_directory,'Hddm_models')
+    # sys.path.append(hddm_models_path)
+    # data_path1 = os.path.join(current_directory, 'data_sets', 'behavioural_sv_cleaned_final_3.csv')
+    # data = pd.read_csv(data_path1, sep = ',')
+    # data.dropna(subset=['rt', "painlevel", "moneylevel", "accepted",'acceptance_pair','sv_money', 'sv_pain', 'sv_both', 'p_pain_all', 'Abs_Money_Pain','OV_Money_Pain', 'sv_pain_para','sv_both_para','k_pain_para','beta_para','bias_para','STA_SAI_Score','STA_TAI_Score','PCS_Score'], inplace = True)    #'STA_SAI_Score','STA_TAI_Score','PCS_Score'
+    
+    # drop entire participants for quest data only, NO FOR ENTIRE DATA, otherwise the operating system kills the worker
+    # quest_vers = [x, z, u, i]  # questionnaire versions 
+    # if version in quest_vers:
+    #     data.dropna(subset=["STA_SAI_Score","STA_TAI_Score","PCS_Score"], inplace=True)
+    
+
+
+    data_full = pd.read_csv((PROJECT_DIR / "Hddm_Docker_August_24" / "data_sets" / "behavioural_sv_cleaned_final_3").as_posix(), sep=",")
+    # loop over phases and versions
+    for phase in PHASE_RUN_ORDER:
+        if phase in SKIP_PHASES:
+            continue                    
+        
+        phase_key = phase
+
+
+        for version, model_name in enumerate(model_versions[phase]):
+            if not started:
+                if phase == start_phase and version >= start_version:
+                    started = True
+                elif PHASE_RUN_ORDER.index(phase) > PHASE_RUN_ORDER.index(start_phase):
+                    started = True
+                else:
+                    continue 
+            
+            full_model_name = model_base_name + model_name
+            print(f"\n===  PHASE {phase} : {model_name}  ===")
+            
+            # filter data for this phase
+            source_phase = PHASE_TO_SOURCE.get(phase, phase)   #assignes ES_ZBIAS
+
+            if phase == "dec":
+                data = data_full[data_full["TaskName"].isin(["decision"])].copy()
+            elif phase == "pas":
+                data = data_full[data_full["TaskName"].isin(["passive"])].copy()
+            else:
+                data = data_full[data_full["TaskName"] == source_phase].copy() 
+            
+            if data.empty:
+                raise ValueError(f"No rows left after filtering for phase '{phase}' "
+                                 f"(source = '{source_phase}')")
+
+
+            data['Abs_Money_Pain'] = data['Abs_Money_Pain'].astype("category")
+            data['OV_Money_Pain'] = data['OV_Money_Pain'].astype("category")
+            data['Abs_value'] = data['Abs_value'].astype("category")
+            data['OV_value'] = data['OV_value'].astype("category")
+            data['acceptance_pair'] = data['acceptance_pair'].astype("category")
+
+            data                = data[data["rt"] > 0.250]
+            data["response"]    = pd.to_numeric(data["corr"], errors="coerce")
+
+            data["subj_idx"]    = data["sub_id"]
+            subjects = np.unique(data.subj_idx)
+            nr_subjects = subjects.shape[0]
+            print(nr_subjects)
+            
+                       
+            # keep only trials with strictly positive dwell time on both sides, this can be changed; depends on the goal
+            #data = data[(data["DwellLeft"] > -1) & (data["DwellRight"] > -1)]
+            #data = data[~data["subj_idx"].isin({})]
+            data.dropna(subset=['rt', 
+                                "painlevel",
+                                "moneylevel",
+                                "accepted",
+                                'acceptance_pair',
+                                'sv_money',
+                                'sv_pain',
+                                'sv_both',
+                                'p_pain_all',
+                                'Abs_Money_Pain',
+                                'OV_Money_Pain',
+                                'sv_pain_para',
+                                'sv_both_para',
+                                'k_pain_para',
+                                'beta_para',
+                                'bias_para',
+                                'STA_SAI_Score',
+                                'STA_TAI_Score',
+                                'PCS_Score'], inplace = True)    #'STA_SAI_Score','STA_TAI_Score','PCS_Score'
+
+            # quick report at the start
+            quick_report(data, phase, version, model_name, phase_key)
+
+            # fig_dir = os.path.join("figures_dir_garcia", full_model_name)
+            # ensure_dir(os.path.join(fig_dir, "diagnostics"))
+            
+            fig_dir = FIG_DIR_ROOT / full_model_name
+            ensure_dir(fig_dir / "diagnostics")
+
+            # # run hddm function 
+            drift_diffusion_hddm(
+                data=data,
+                samples=nr_samples,
+                n_jobs=nr_models,
+                run=RUN_ALL_MODELS,
+                parallel=parallel,
+                model_name=full_model_name,
+                model_dir=BASE_MODEL_DIR,        
+                version=version,
+                phase=phase,
+                accuracy_coding=True
+            )
+
 
 #_________________________________________________________________________________________________________________________________________________________________________________________________
 # Getting the tiral-by trial param betas (influenced by sv_pain_para) for the EEG regression analysis
@@ -1753,6 +1581,89 @@ def v_sv_pain_para_contributions(models, data):
             data_with_v_sv_pain_para.loc[idx, 'v_sv_pain_para_contrib'] = v_sv_pain_para_contrib_mean  
 
     return data_with_v_sv_pain_para
+
+
+def a_sv_pain_para_contributions(models, data):
+    
+    data_with_a_sv_pain_para = data.copy()
+    data_with_a_sv_pain_para['a_sv_pain_para_contrib'] = np.nan
+   
+   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        a_sv_pain_para = model.nodes_db.loc[f'a_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        a_sv_pain_para_contrib_list = []
+        
+        # sv_pain_para weight on dirft rate for every trial and participant
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para'] 
+            # weight of sv_pain_para on the drift rate from model 1
+            a_sv_pain_para_contrib_samples = a_sv_pain_para * trial_sv_pain_para
+            # simple trace mean just for v_sv_pain_para
+            a_sv_pain_para_contrib_mean = a_sv_pain_para_contrib_samples.mean()    
+            a_sv_pain_para_contrib_list.append(a_sv_pain_para_contrib_mean)
+            data_with_a_sv_pain_para.loc[idx, 'a_sv_pain_para_contrib'] = a_sv_pain_para_contrib_mean  
+
+    return data_with_a_sv_pain_para
+
+
+def t_sv_pain_para_contributions(models, data):
+    
+    data_with_t_sv_pain_para = data.copy()
+    data_with_t_sv_pain_para['t_sv_pain_para_contrib'] = np.nan
+   
+   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        t_sv_pain_para = model.nodes_db.loc[f't_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        t_sv_pain_para_contrib_list = []
+        
+        # sv_pain_para weight on dirft rate for every trial and participant
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para'] 
+            # weight of sv_pain_para on the drift rate from model 1
+            t_sv_pain_para_contrib_samples = t_sv_pain_para * trial_sv_pain_para
+            # simple trace mean just for v_sv_pain_para
+            t_sv_pain_para_contrib_mean = t_sv_pain_para_contrib_samples.mean()    
+            t_sv_pain_para_contrib_list.append(t_sv_pain_para_contrib_mean)
+            data_with_t_sv_pain_para.loc[idx, 't_sv_pain_para_contrib'] = t_sv_pain_para_contrib_mean  
+
+    return data_with_t_sv_pain_para
+
+
+
+def z_sv_pain_para_contributions(models, data):
+    
+    data_with_z_sv_pain_para = data.copy()
+    data_with_z_sv_pain_para['z_sv_pain_para_contrib'] = np.nan
+   
+   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        z_sv_pain_para = model.nodes_db.loc[f'z_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        z_sv_pain_para_contrib_list = []
+        
+        # sv_pain_para weight on dirft rate for every trial and participant
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para'] 
+            # weight of sv_pain_para on the drift rate from model 1
+            z_sv_pain_para_contrib_samples = z_sv_pain_para * trial_sv_pain_para
+            # simple trace mean just for v_sv_pain_para
+            z_sv_pain_para_contrib_mean = z_sv_pain_para_contrib_samples.mean()    
+            z_sv_pain_para_contrib_list.append(z_sv_pain_para_contrib_mean)
+            data_with_z_sv_pain_para.loc[idx, 'z_sv_pain_para_contrib'] = z_sv_pain_para_contrib_mean  
+
+    return data_with_z_sv_pain_para
+
+
+
+
+
+
+
 
 # for model NR2
 def full_sv_pain_para_contributions(models, data):
@@ -1901,44 +1812,43 @@ def v_sv_pain_para_OV_contributions(models, data):
             
     return data_ov_sv_pain_para
     
-# Function to run the models or load and analyse the models
-if run:
-    print('Running {}'.format(model_base_name + model_name))
-    models = drift_diffusion_hddm(data=data,
-                                  samples=nr_samples,
-                                  n_jobs=nr_models,
-                                  run=run,
-                                  parallel=parallel,
-                                  model_name=model_base_name + model_name,
-                                  model_dir=model_dir, 
-                                  version=version,
-                                  accuracy_coding=False)
-else:
-    models = drift_diffusion_hddm(data=data,
-                                  samples=nr_samples,
-                                  n_jobs=nr_models,
-                                  run=run, 
-                                  parallel=parallel, 
-                                  model_name=model_base_name + model_name, 
-                                  model_dir=model_dir, 
-                                  version=version, 
-                                  accuracy_coding=False)
-    analyze_model(models, fig_dir, nr_models, version)
-    if version == 1:
-        sv_contribute = v_sv_pain_para_contributions(models, data)
-        sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_pain_para_contrib.csv'), index=False)
-    elif version == 2:
-        sv_contribute = full_sv_pain_para_contributions(models, data)
-        sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_full_sv_pain_para_contrib.csv'), index=False)
-    elif version == 3:
-        sv_contribute = v_sv_money_contributions(models, data)
-        sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_money_contrib.csv' ))
-    elif version == 16:
-        sv_contribute = v_sv_pain_para_Abs_contributions(models, data)
-        sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_Abs_contrib.csv' ))
-    elif version == 17:
-        sv_contribute = v_sv_pain_para_OV_contributions(models, data)
-        sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_OV_contrib.csv' ))
-
+## Function to run the models or load and analyse the models
+# if run:
+#     print('Running {}'.format(model_base_name + model_name))
+#     models = drift_diffusion_hddm(data=data,
+#                                   samples=nr_samples,
+#                                   n_jobs=nr_models,
+#                                   run=run,
+#                                   parallel=parallel,
+#                                   model_name=model_base_name + model_name,
+#                                   model_dir=model_dir, 
+#                                   version=version,
+#                                   accuracy_coding=False)
+# else:
+#     models = drift_diffusion_hddm(data=data,
+#                                   samples=nr_samples,
+#                                   n_jobs=nr_models,
+#                                   run=run, 
+#                                   parallel=parallel, 
+#                                   model_name=model_base_name + model_name, 
+#                                   model_dir=model_dir, 
+#                                   version=version, 
+#                                   accuracy_coding=False)
+#     analyze_model(models, fig_dir, nr_models, version)
+#     if version == 1:
+#         sv_contribute = v_sv_pain_para_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_pain_para_contrib.csv'), index=False)
+#     elif version == 2:
+#         sv_contribute = full_sv_pain_para_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_full_sv_pain_para_contrib.csv'), index=False)
+#     elif version == 3:
+#         sv_contribute = v_sv_money_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_money_contrib.csv' ))
+#     elif version == 16:
+#         sv_contribute = v_sv_pain_para_Abs_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_Abs_contrib.csv' ))
+#     elif version == 17:
+#         sv_contribute = v_sv_pain_para_OV_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_OV_contrib.csv' ))
 
 
