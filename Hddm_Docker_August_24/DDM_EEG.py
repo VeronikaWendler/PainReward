@@ -1499,7 +1499,7 @@ if __name__ == "__main__":
             data['acceptance_pair'] = data['acceptance_pair'].astype("category")
 
             data                = data[data["rt"] > 0.250]
-            data["response"]    = pd.to_numeric(data["corr"], errors="coerce")
+            data["response"]    = pd.to_numeric(data["response"], errors="coerce")
 
             data["subj_idx"]    = data["sub_id"]
             subjects = np.unique(data.subj_idx)
