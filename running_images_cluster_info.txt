@@ -1,0 +1,23 @@
+# Steps involved in getting the images running on the cluster (HDDM & MNE)
+
+
+# go to https://remote.abdn.ac.uk/vdesk/webtop.eui?webtop=/Common/remote.abnd.ac.uk_Azure_SP_Access_Profile-RemoteAccess_SSL_Webtop_Full&webtop_type=webtop_full
+# and log into macleod1
+# you need to log in with your uni account (email) and password
+# once on the cluster, cd into sharedscratch which is the location you can keep all your files and output and folders and so on
+# but cd outside of sharedscratch for now, there you need set up a containers folder which holds your images, see below for code:
+
+
+# Load Singularity
+~cd containers
+module load singularity
+
+# Pull the prebuilt MNE image
+singularity pull mne_latest.sif docker://ghcr.io/mne-tools/mne-python-plot:latest
+
+# Pull the prebuilt HDDM image
+singularity pull hddm_latest.sif docker://hcp4715/hddm:latest
+
+
+
+

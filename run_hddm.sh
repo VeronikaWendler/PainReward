@@ -10,13 +10,13 @@
 #Singularity module 
 module load singularity/3.8.5
 
-export PYTHONUNBUFFERED=1                     # prints appear immediately
+export PYTHONUNBUFFERED=1                     # prints appear immediatelyy
 export MPLCONFIGDIR=/tmp/mplcache
 
 
 # path for container and workspace
 IMAGE=$HOME/containers/hddm_latest.sif
-PROJECT=$HOME/sharedscratch/HDDM_Vero
+PROJECT=$HOME/sharedscratch/PainReward_ULaval
 
 export PROJECT_DIR=/workspace
 export MPLBACKEND=Agg
@@ -25,5 +25,5 @@ export MPLBACKEND=Agg
 singularity exec \
     --bind ${PROJECT}:/workspace \
     ${IMAGE} \
-    python /workspace/CCT_MAP_Garcia.py
+    python /workspace/Hddm_Docker_August_24/DDM_EEG.py
 
