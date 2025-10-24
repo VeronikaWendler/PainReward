@@ -1501,7 +1501,7 @@ if __name__ == "__main__":
             data                = data[data["rt"] > 0.250]
             data["response"]    = pd.to_numeric(data["response"], errors="coerce")
 
-            data["subj_idx"]    = data["sub_id"]
+            data["subj_idx"]    = data["subj_idx"]
             subjects = np.unique(data.subj_idx)
             nr_subjects = subjects.shape[0]
             print(nr_subjects)
