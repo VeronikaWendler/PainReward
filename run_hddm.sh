@@ -10,7 +10,7 @@
 #Singularity module 
 module load singularity/3.8.5
 
-export PYTHONUNBUFFERED=1                     # prints appear immediately
+export PYTHONUNBUFFERED=1                     # prints appear immediatelyy
 export MPLCONFIGDIR=/tmp/mplcache
 
 
