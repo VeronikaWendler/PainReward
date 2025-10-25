@@ -1051,13 +1051,121 @@ def analyze_rl(infdatas, fig_dir, version):
     else:
         print("ERROR")
     
-    
-    
-    
 
-    
 model_dir = BASE_MODEL_DIR
 ensure_dir(model_dir)
+
+
+#------------------------------------------------------------------------------------------------------------
+# functions for trial by trial drift 
+
+# for model NR1
+def v_sv_pain_para_contributions(models, data):
+    
+    data_with_v_sv_pain_para = data.copy()
+    data_with_v_sv_pain_para['v_sv_pain_para_contrib'] = np.nan
+   
+   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        v_sv_pain_para = model.nodes_db.loc[f'v_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        v_sv_pain_para_contrib_list = []
+        
+        # sv_pain_para weight on dirft rate for every trial and participant
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para'] 
+            # weight of sv_pain_para on the drift rate from model 1
+            v_sv_pain_para_contrib_samples = v_sv_pain_para * trial_sv_pain_para
+            # simple trace mean just for v_sv_pain_para
+            v_sv_pain_para_contrib_mean = v_sv_pain_para_contrib_samples.mean()    
+            v_sv_pain_para_contrib_list.append(v_sv_pain_para_contrib_mean)
+            data_with_v_sv_pain_para.loc[idx, 'v_sv_pain_para_contrib'] = v_sv_pain_para_contrib_mean  
+
+    return data_with_v_sv_pain_para
+
+
+def a_sv_pain_para_contributions(models, data):
+    
+    data_with_a_sv_pain_para = data.copy()
+    data_with_a_sv_pain_para['a_sv_pain_para_contrib'] = np.nan
+   
+   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        a_sv_pain_para = model.nodes_db.loc[f'a_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        a_sv_pain_para_contrib_list = []
+        
+        # sv_pain_para weight on dirft rate for every trial and participant
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para'] 
+            # weight of sv_pain_para on the drift rate from model 1
+            a_sv_pain_para_contrib_samples = a_sv_pain_para * trial_sv_pain_para
+            # simple trace mean just for v_sv_pain_para
+            a_sv_pain_para_contrib_mean = a_sv_pain_para_contrib_samples.mean()    
+            a_sv_pain_para_contrib_list.append(a_sv_pain_para_contrib_mean)
+            data_with_a_sv_pain_para.loc[idx, 'a_sv_pain_para_contrib'] = a_sv_pain_para_contrib_mean  
+
+    return data_with_a_sv_pain_para
+
+
+def t_sv_pain_para_contributions(models, data):
+    
+    data_with_t_sv_pain_para = data.copy()
+    data_with_t_sv_pain_para['t_sv_pain_para_contrib'] = np.nan
+   
+   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        t_sv_pain_para = model.nodes_db.loc[f't_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        t_sv_pain_para_contrib_list = []
+        
+        # sv_pain_para weight on dirft rate for every trial and participant
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para'] 
+            # weight of sv_pain_para on the drift rate from model 1
+            t_sv_pain_para_contrib_samples = t_sv_pain_para * trial_sv_pain_para
+            # simple trace mean just for v_sv_pain_para
+            t_sv_pain_para_contrib_mean = t_sv_pain_para_contrib_samples.mean()    
+            t_sv_pain_para_contrib_list.append(t_sv_pain_para_contrib_mean)
+            data_with_t_sv_pain_para.loc[idx, 't_sv_pain_para_contrib'] = t_sv_pain_para_contrib_mean  
+
+    return data_with_t_sv_pain_para
+
+
+
+def z_sv_pain_para_contributions(models, data):
+    
+    data_with_z_sv_pain_para = data.copy()
+    data_with_z_sv_pain_para['z_sv_pain_para_contrib'] = np.nan
+   
+   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        z_sv_pain_para = model.nodes_db.loc[f'z_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        z_sv_pain_para_contrib_list = []
+        
+        # sv_pain_para weight on dirft rate for every trial and participant
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para'] 
+            # weight of sv_pain_para on the drift rate from model 1
+            z_sv_pain_para_contrib_samples = z_sv_pain_para * trial_sv_pain_para
+            # simple trace mean just for v_sv_pain_para
+            z_sv_pain_para_contrib_mean = z_sv_pain_para_contrib_samples.mean()    
+            z_sv_pain_para_contrib_list.append(z_sv_pain_para_contrib_mean)
+            data_with_z_sv_pain_para.loc[idx, 'z_sv_pain_para_contrib'] = z_sv_pain_para_contrib_mean  
+
+    return data_with_z_sv_pain_para
+
+
+
+
+
+
+
 
 
 #ingle model running version - use for manual
@@ -1093,6 +1201,19 @@ else:
             accuracy_coding=True
         )
         analyze_model(models, fig_dir, nr_models, version, phase)
+        
+        if version == 1:
+            sv_contribute = v_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_pain_para_contrib.csv'), index=False)
+        elif version == 2:
+            sv_contribute = a_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_full_sv_pain_para_contrib.csv'), index=False)
+        elif version == 3:
+            sv_contribute = t_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_money_contrib.csv' ))
+        elif version == 4:
+            sv_contribute = z_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_Abs_contrib.csv' ))
 
         # diag_dir = Path(fig_dir) / "diagnostics"
         # plot_inatt_forest(
@@ -1118,3 +1239,48 @@ else:
         )
         analyze_model(models, fig_dir, nr_models, version, phase)
     
+
+
+
+
+
+## Function to run the models or load and analyse the models
+# if run:
+#     print('Running {}'.format(model_base_name + model_name))
+#     models = drift_diffusion_hddm(data=data,
+#                                   samples=nr_samples,
+#                                   n_jobs=nr_models,
+#                                   run=run,
+#                                   parallel=parallel,
+#                                   model_name=model_base_name + model_name,
+#                                   model_dir=model_dir, 
+#                                   version=version,
+#                                   accuracy_coding=False)
+# else:
+#     models = drift_diffusion_hddm(data=data,
+#                                   samples=nr_samples,
+#                                   n_jobs=nr_models,
+#                                   run=run, 
+#                                   parallel=parallel, 
+#                                   model_name=model_base_name + model_name, 
+#                                   model_dir=model_dir, 
+#                                   version=version, 
+#                                   accuracy_coding=False)
+#     analyze_model(models, fig_dir, nr_models, version)
+#     if version == 1:
+#         sv_contribute = v_sv_pain_para_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_pain_para_contrib.csv'), index=False)
+#     elif version == 2:
+#         sv_contribute = full_sv_pain_para_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_full_sv_pain_para_contrib.csv'), index=False)
+#     elif version == 3:
+#         sv_contribute = v_sv_money_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_money_contrib.csv' ))
+#     elif version == 16:
+#         sv_contribute = v_sv_pain_para_Abs_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_Abs_contrib.csv' ))
+#     elif version == 17:
+#         sv_contribute = v_sv_pain_para_OV_contributions(models, data)
+#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_OV_contrib.csv' ))
+
+
