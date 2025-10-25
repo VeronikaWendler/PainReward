@@ -16,6 +16,11 @@ import numpy as np
 import mne
 from mne.datasets import eegbci, fetch_fsaverage
 from mayavi import mlab
+import os
+os.environ["MNE_3D_OPTION_ANTIALIAS"] = "true"
+os.environ["ETS_TOOLKIT"] = "null"
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
 
 # 3D head + electrodes alignment (rendered offscreen)
 mne.viz.set_3d_backend('pyvistaqt')  # use the MNE-3D compatible backend

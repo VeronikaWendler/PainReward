@@ -95,12 +95,12 @@ FIG_DIR_ROOT   = PROJECT_DIR / "Hddm_Docker_August_24/figures_dir"
 
 model_base_name = "painreward_behavioural_data_"
 
-nr_models       = 3         # number of MCMC chains
-nr_samples      = 2000      # samples per chain - do 6000 (+1000 for burn-in) but for now for a quick one we do 600
+nr_models       = 4         # number of MCMC chains
+nr_samples      = 6000      # samples per chain - do 6000 (+1000 for burn-in) but for now for a quick one we do 600
 parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
-    "dec":      ["LPP_1","LPP_2","LPP_3","LPP_4","LPP_5","LPP_6","LPP_7","LPP_8","LPP_9"]     
+    "dec":      ["LPP_0","LPP_1","LPP_2","LPP_3","LPP_4","LPP_5","LPP_6","LPP_7","LPP_8","LPP_9"]     
 }
 
 # debugging, tip, python starts at 0, unlike Matlab
@@ -301,7 +301,7 @@ print(subjects)
 #------------------------------------------------------------------------------------------------------------------
 # function that runs/defines the different versions/models of DDM regressions for the selected phase or phases
 
-def run_model(trace_id, data, model_dir, model_name, version, phase, samples=2000, accuracy_coding=True): 
+def run_model(trace_id, data, model_dir, model_name, version, phase, samples=6000, accuracy_coding=True): 
     import os
     import numpy as np
     import hddm
@@ -383,8 +383,8 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=200
 import dill as pickle  # to create the pkl object
 
 def drift_diffusion_hddm(data, 
-                         samples=2000,
-                         n_jobs=3,
+                         samples=6000,
+                         n_jobs=4,
                          run=True,
                          parallel=True,
                          model_name='model',
@@ -579,6 +579,17 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                 'Boundary sep.', 
                 'Non-dec. time',
                 'Drift Intercept',
+                'Drift sv_pain_para']
+        elif version == 2:
+            params_of_interest = ['z',
+                                  'a',
+                                  't',  
+                                  'v_sv_pain_para']
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = [
+                'Starting point',
+                'Boundary sep.', 
+                'Non-dec. time',
                 'Drift sv_pain_para']
         else:
             raise ValueError(f"Invalid version {version}")
