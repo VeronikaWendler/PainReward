@@ -118,15 +118,15 @@ model_name = model_versions[phase][version]
 #data_path1 = os.path.join(current_directory, 'data_sets/data_sets_Garcia', 'GarciaParticipants_Eye_Response_Feed_Allfix_addm_OV_Abs_CCT.csv')
 #data = pd.read_csv(data_path1, sep=',')
 
-data_full = pd.read_csv((PROJECT_DIR / "Hddm_Docker_August_24" / "data_sets" / "behavioural_sv_cleaned_final_3.csv").as_posix(), sep=",")
+data = pd.read_csv((PROJECT_DIR / "Hddm_Docker_August_24" / "data_sets" / "behavioural_sv_cleaned_final_3.csv").as_posix(), sep=",")
 source_phase = PHASE_TO_SOURCE.get(phase, phase)  
 
 if phase == "dec":
-    data = data_full[data_full["TaskName"].isin(["decision"])].copy()
+    data = data[data["TaskName"].isin(["decision"])].copy()
 elif phase == "pas":
-    data = data_full[data_full["TaskName"].isin(["passive"])].copy()
+    data = data[data["TaskName"].isin(["passive"])].copy()
 else:
-    data = data_full[data_full["TaskName"] == source_phase].copy() 
+    data = data[data["TaskName"] == source_phase].copy() 
 
 if data.empty:
     raise ValueError(f"No rows left after filtering for phase '{phase}' "
@@ -170,14 +170,14 @@ data.dropna(subset=['rt', "painlevel","moneylevel",
 
 # debugging information
 print(f"\nFiltering data for phase: {phase}")
-print("Unique phases in filtered data:", data['phase'].unique())
+print("Unique phases in filtered data:", data['TaskName'].unique())
 print(f"Data shape after filtering: {data.shape}")
 print(f"Unique participants in filtered data: {data['subj_idx'].unique()}")
 category_counts = data['OVcate'].value_counts()
 print("\nOVcate Category Counts:\n", category_counts)
 print(f"Selected phase_key: {phase_key}")
 print(f"Model to run: {model_base_name + model_name}")
-print(f"Filtered Data Unique Phases: {data['phase'].unique()}")
+print(f"Filtered Data Unique Phases: {data['TaskName'].unique()}")
 print(f"Data Shape After Filtering: {data.shape}")   
 
 
