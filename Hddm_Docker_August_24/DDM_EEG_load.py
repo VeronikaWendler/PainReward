@@ -81,16 +81,12 @@ run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
 
-# Determines whether to use a single phase or the combined ESEE model
-if phase == 'dec':
-    phase_key = 'dec'  
-elif phase == 'pas':
-    phase_key = 'pas'
+if len(phase) == 1:
+    phase_key = phase[0]  # single phase model (LE, ES, or EE)
 else:
     raise ValueError(f"Invalid phase: {phase}")
 
-# update the phase variable so the rest of the code works seamlessly
-phase = phase_key   
+phase = phase_key    
 
 PROJECT_DIR   = pathlib.Path(os.getenv("PROJECT_DIR", "/workspace")).resolve()
 
