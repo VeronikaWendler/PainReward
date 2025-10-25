@@ -79,13 +79,13 @@ numba.config.CACHE_ENABLE = False
 version = 1    # defining version #
 run = False        # if True, the the models run, if False the models load
 
-phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
+phase = ['decision']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
 
 # Determines whether to use a single phase or the combined ESEE model
-if phase == 'dec':
-    phase_key = 'decision'  
-elif phase == 'pas':
-    phase_key = 'passive'
+if phase == 'decision':
+    phase_key = 'dec'  
+elif phase == 'passive':
+    phase_key = 'pas'
 else:
     raise ValueError(f"Invalid phase: {phase}")
 
