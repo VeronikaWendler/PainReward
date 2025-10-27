@@ -75,7 +75,7 @@ numba.config.CACHE_ENABLE = False
 # V_sub = value of the worse option
 
 # params:
-version = 2    # defining version #
+version = 3    # defining version #
 run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
@@ -335,7 +335,6 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
         elif version == 2:  # drift rate is dependent on the the sv_pain_para
             v_reg = {'model': 'v ~ sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [v_reg]
-            
         elif version == 3:  # drift rate is dependent on the the sv_pain_para
             a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [a_reg]    
@@ -721,10 +720,10 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
     # HORIZONTAL KDE PANEL FOR ATTENTION/INATTENTION WEIGHTS
     panel_params = [
         ("z",   "Starting point"),
-        ("a",   "Boundary sep."),
+        ("v",   "Drift Rate"),
         ("t",   "Non-dec. time"),
-        ("v_Intercept", "Drift Intercept"),
-        ("v_sv_pain_para", "Drift sv_pain_para"),   
+        ("a_Intercept", "Threshold Intercept"),
+        ("a_sv_pain_para", "Threshold sv_pain_para"),   
     ]
     panel_traces = []
     panel_labels = []
@@ -769,10 +768,10 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
     
     group_params_to_plot = [
         'z',
-        'a',
+        'v',
         't',
-        'v_Intercept',
-        'v_sv_pain_para'
+        'a_Intercept',
+        'a_sv_pain_para'
         ]
     
     group_vplot_dir = diag_dir / "group_param_vertical_kdes"
