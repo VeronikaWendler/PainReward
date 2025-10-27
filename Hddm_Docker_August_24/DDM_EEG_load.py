@@ -59,7 +59,6 @@ numba.config.CACHE_ENABLE = False
 
 #------------------------------------------------------------------------------------------------------------------
 # Structure of saving:
-
 #------------------------------------------------------------------------------------------------------------------
 
 # addm regression formula
@@ -334,26 +333,27 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
             v_reg = {'model': 'v ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [v_reg]
         elif version == 2:  # drift rate is dependent on the the sv_pain_para
-            a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [a_reg]
-        elif version == 3:  # drift rate is dependent on the the sv_pain_para
-            t_reg = {'model': 't ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [t_reg]    
-        elif version == 4:  # drift rate is dependent on the the sv_pain_para
-            z_reg = {'model': 'z ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [z_reg]
-        elif version == 5:  # drift rate is dependent on the the sv_pain_para
             v_reg = {'model': 'v ~ sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [v_reg]
-        elif version == 6:  # drift rate is dependent on the the sv_pain_para
+            
+        elif version == 3:  # drift rate is dependent on the the sv_pain_para
+            a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [a_reg]    
+        elif version == 4:  # drift rate is dependent on the the sv_pain_para
             a_reg = {'model': 'a ~ sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [a_reg]
+        elif version == 5:  # drift rate is dependent on the the sv_pain_para
+            z_reg = {'model': 'z ~ 1 + sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [z_reg]
+        elif version == 6:  # drift rate is dependent on the the sv_pain_para
+            z_reg = {'model': 'z ~ sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [z_reg]    
         elif version == 7:  # drift rate is dependent on the the sv_pain_para
-            t_reg = {'model': 't ~ sv_pain_para', 'link_func': lambda x: x}
+            t_reg = {'model': 't ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [t_reg]    
         elif version == 8:  # drift rate is dependent on the the sv_pain_para
-            z_reg = {'model': 'z ~ sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [z_reg]       
+            t_reg = {'model': 't ~ sv_pain_para', 'link_func': lambda x: x}
+            reg_descr = [t_reg]       
         else:
             raise ValueError(f"Is this version illegal ?? It feels illegal...")   
         
@@ -574,23 +574,93 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                                   'v_Intercept', 
                                   'v_sv_pain_para']
             params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
-            titles = [
-                'Starting point',
-                'Boundary sep.', 
-                'Non-dec. time',
-                'Drift Intercept',
-                'Drift sv_pain_para']
+            titles = ['Starting point',
+                      'Boundary sep.', 
+                      'Non-dec. time',
+                      'Drift Intercept',
+                      'Drift sv_pain_para']
+            
         elif version == 2:
             params_of_interest = ['z',
                                   'a',
                                   't',  
                                   'v_sv_pain_para']
             params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
-            titles = [
-                'Starting point',
-                'Boundary sep.', 
-                'Non-dec. time',
-                'Drift sv_pain_para']
+            titles = ['Starting point',
+                      'Boundary sep.', 
+                      'Non-dec. time',
+                      'Drift sv_pain_para']
+            
+        elif version == 3:
+            params_of_interest = ['z',
+                                  'v',
+                                  't', 
+                                  'a_Intercept', 
+                                  'a_sv_pain_para']
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Starting point',
+                      'Drift Rate', 
+                      'Non-dec. time',
+                      'Threshold Intercept',
+                      'Drift Threshold']
+            
+        elif version == 4:
+            params_of_interest = ['z',
+                                  'v',
+                                  't', 
+                                  'a_sv_pain_para']
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Starting point',
+                      'Drift Rate', 
+                      'Non-dec. time',
+                      'Drift Threshold']
+            
+        elif version == 5:
+            params_of_interest = ['a',
+                                  'v',
+                                  't', 
+                                  'z_Intercept',
+                                  'z_sv_pain_para']
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Threshold',
+                      'Drift Rate', 
+                      'Non-dec. time',
+                      'Starting Point Intercept',
+                      'Starting Point']
+            
+        elif version == 6:
+            params_of_interest = ['a',
+                                  'v',
+                                  't', 
+                                  'z_sv_pain_para']
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Threshold',
+                      'Drift Rate', 
+                      'Non-dec. time',
+                      'Starting Point']
+            
+        elif version == 7:
+            params_of_interest = ['a',
+                                  'v',
+                                  'z', 
+                                  't_Intercept',
+                                  't_sv_pain_para']
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Threshold',
+                      'Drift Rate', 
+                      'Starting Point Bias',
+                      'Non-dec. time Intercept',
+                      'Non-dec. time']
+        elif version == 8:
+            params_of_interest = ['a',
+                                  'v',
+                                  'z', 
+                                  't_sv_pain_para']
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Threshold',
+                      'Drift Rate', 
+                      'Starting Point Bias',
+                      'Non-dec. time']
         else:
             raise ValueError(f"Invalid version {version}")
         
@@ -1069,8 +1139,8 @@ def v_sv_pain_para_contributions(models, data):
     
     data_with_v_sv_pain_para = data.copy()
     data_with_v_sv_pain_para['v_sv_pain_para_contrib'] = np.nan
-   
-   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    
+    # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
     for subj_id in data['subj_idx'].unique():
         model = kabuki.utils.concat_models(models)  
         subj_data = data[data['subj_idx'] == subj_id]
@@ -1095,7 +1165,7 @@ def a_sv_pain_para_contributions(models, data):
     data_with_a_sv_pain_para = data.copy()
     data_with_a_sv_pain_para['a_sv_pain_para_contrib'] = np.nan
    
-   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
     for subj_id in data['subj_idx'].unique():
         model = kabuki.utils.concat_models(models)  
         subj_data = data[data['subj_idx'] == subj_id]
@@ -1119,8 +1189,8 @@ def t_sv_pain_para_contributions(models, data):
     
     data_with_t_sv_pain_para = data.copy()
     data_with_t_sv_pain_para['t_sv_pain_para_contrib'] = np.nan
-   
-   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    
+    # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
     for subj_id in data['subj_idx'].unique():
         model = kabuki.utils.concat_models(models)  
         subj_data = data[data['subj_idx'] == subj_id]
@@ -1140,13 +1210,12 @@ def t_sv_pain_para_contributions(models, data):
     return data_with_t_sv_pain_para
 
 
-
 def z_sv_pain_para_contributions(models, data):
     
     data_with_z_sv_pain_para = data.copy()
     data_with_z_sv_pain_para['z_sv_pain_para_contrib'] = np.nan
-   
-   # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
+    
+    # looping through subjects and concatenate all thhe models, get the sub-specific paramter from the posterior nodes
     for subj_id in data['subj_idx'].unique():
         model = kabuki.utils.concat_models(models)  
         subj_data = data[data['subj_idx'] == subj_id]
@@ -1209,16 +1278,29 @@ else:
         
         if version == 1:
             sv_contribute = v_sv_pain_para_contributions(models, data)
-            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_pain_para_contrib.csv'), index=False)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'v_sv_pain_para_with_Intercept.csv'), index=False)
         elif version == 2:
-            sv_contribute = a_sv_pain_para_contributions(models, data)
-            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_full_sv_pain_para_contrib.csv'), index=False)
+            sv_contribute = v_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'v_sv_pain_para.csv'), index=False)
         elif version == 3:
-            sv_contribute = t_sv_pain_para_contributions(models, data)
-            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_money_contrib.csv' ))
+            sv_contribute = a_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'a_sv_pain_para_with_Intercept.csv' ))
         elif version == 4:
+            sv_contribute = a_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'a_sv_pain_para.csv' ))
+        elif version == 5:
             sv_contribute = z_sv_pain_para_contributions(models, data)
-            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_Abs_contrib.csv' ))
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'z_sv_pain_para_with_Intercept.csv' ))
+        elif version == 6:
+            sv_contribute = z_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'z_sv_pain_para.csv' ))
+        elif version == 7:
+            sv_contribute = t_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 't_sv_pain_para_with_Intercept.csv' ))
+        elif version == 8:
+            sv_contribute = t_sv_pain_para_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 't_sv_pain_para.csv' ))
+
 
         # diag_dir = Path(fig_dir) / "diagnostics"
         # plot_inatt_forest(
@@ -1244,48 +1326,4 @@ else:
         )
         analyze_model(models, fig_dir, nr_models, version, phase)
     
-
-
-
-
-
-## Function to run the models or load and analyse the models
-# if run:
-#     print('Running {}'.format(model_base_name + model_name))
-#     models = drift_diffusion_hddm(data=data,
-#                                   samples=nr_samples,
-#                                   n_jobs=nr_models,
-#                                   run=run,
-#                                   parallel=parallel,
-#                                   model_name=model_base_name + model_name,
-#                                   model_dir=model_dir, 
-#                                   version=version,
-#                                   accuracy_coding=False)
-# else:
-#     models = drift_diffusion_hddm(data=data,
-#                                   samples=nr_samples,
-#                                   n_jobs=nr_models,
-#                                   run=run, 
-#                                   parallel=parallel, 
-#                                   model_name=model_base_name + model_name, 
-#                                   model_dir=model_dir, 
-#                                   version=version, 
-#                                   accuracy_coding=False)
-#     analyze_model(models, fig_dir, nr_models, version)
-#     if version == 1:
-#         sv_contribute = v_sv_pain_para_contributions(models, data)
-#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_pain_para_contrib.csv'), index=False)
-#     elif version == 2:
-#         sv_contribute = full_sv_pain_para_contributions(models, data)
-#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_full_sv_pain_para_contrib.csv'), index=False)
-#     elif version == 3:
-#         sv_contribute = v_sv_money_contributions(models, data)
-#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_v_sv_money_contrib.csv' ))
-#     elif version == 16:
-#         sv_contribute = v_sv_pain_para_Abs_contributions(models, data)
-#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_Abs_contrib.csv' ))
-#     elif version == 17:
-#         sv_contribute = v_sv_pain_para_OV_contributions(models, data)
-#         sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'data_with_sv_pain_para_OV_contrib.csv' ))
-
 
