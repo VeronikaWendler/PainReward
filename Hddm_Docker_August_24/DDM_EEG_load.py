@@ -75,7 +75,7 @@ numba.config.CACHE_ENABLE = False
 # V_sub = value of the worse option
 
 # params:
-version = 3    # defining version #
+version = 2    # defining version #
 run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
@@ -367,7 +367,7 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
                                     )
         m.find_starting_values()
         infdata = m.sample(samples,
-                   burn=500,
+                   burn=2000,
                    dbname=os.path.join(model_dir, model_name + f'_db{trace_id}'), 
                    db='pickle',
                    return_infdata=True, loglike=True, ppc=True)

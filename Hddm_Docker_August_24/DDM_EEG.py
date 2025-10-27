@@ -81,7 +81,7 @@ from scipy.special import expit   # for inverse‑logit
 # params:
 
 nr_models       = 4         # number of MCMC chains
-nr_samples      = 6000      # samples per chain - do 6000 (+1000 for burn-in) but for now for a quick one we do 600
+nr_samples      = 12000      # samples per chain - do 6000 (+1000 for burn-in) but for now for a quick one we do 600
 parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
@@ -99,7 +99,7 @@ RUN_ALL_MODELS  = True                                           # False = just 
 
 # selectivity
 start_phase = "dec"
-start_version = 3
+start_version = 1
 started = False
 
 # dir
@@ -171,7 +171,7 @@ def sanitize_infdata(infdata):
 # drift diffusion models
 #------------------------------------------------------------------------------------------------------------------
 # function that runs the different versions of DDM regressions
-def run_model(trace_id, data, model_dir, model_name, version, phase, samples=6000, accuracy_coding=True): 
+def run_model(trace_id, data, model_dir, model_name, version, phase, samples=12000, accuracy_coding=True): 
     import os
     import numpy as np
     import hddm
@@ -194,7 +194,7 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
                                     )
             m.find_starting_values()
             infdata = m.sample(samples,
-                               burn=1000,
+                               burn=2000,
                                dbname=os.path.join(model_dir, model_name + f'_db{trace_id}'), 
                                db='pickle',
                                return_infdata=True, loglike=True, ppc=True)
@@ -204,31 +204,28 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
             v_reg = {'model': 'v ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [v_reg]
         elif version == 2:  # drift rate is dependent on the the sv_pain_para
-            v_reg = {'model': 'v ~ sv_pain_para', 'link_func': lambda x: x}
+            v_reg = {'model': 'v ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [v_reg]
-            
         elif version == 3:  # drift rate is dependent on the the sv_pain_para
             a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [a_reg]    
         elif version == 4:  # drift rate is dependent on the the sv_pain_para
-            a_reg = {'model': 'a ~ sv_pain_para', 'link_func': lambda x: x}
+            a_reg = {'model': 'a ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [a_reg]
-            
         elif version == 5:  # drift rate is dependent on the the sv_pain_para
             z_reg = {'model': 'z ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [z_reg]
         elif version == 6:  # drift rate is dependent on the the sv_pain_para
-            z_reg = {'model': 'z ~ sv_pain_para', 'link_func': lambda x: x}
+            z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [z_reg]
-            
         elif version == 7:  # drift rate is dependent on the the sv_pain_para
             t_reg = {'model': 't ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [t_reg]    
         elif version == 8:  # drift rate is dependent on the the sv_pain_para
-            t_reg = {'model': 't ~ sv_pain_para', 'link_func': lambda x: x}
+            t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [t_reg]       
         else:
-            raise ValueError(f"Is this version illegal ?? It feels illegal...")   
+            raise ValueError(f"Is this version correct ? ")   
         
 
         m = hddm.models.HDDMRegressor(data, 
@@ -241,7 +238,7 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
                                     )
         m.find_starting_values()
         infdata = m.sample(samples,
-                   burn=500,
+                   burn=2000,
                    dbname=os.path.join(model_dir, model_name + f'_db{trace_id}'), 
                    db='pickle',
                    return_infdata=True, loglike=True, ppc=True)
@@ -253,7 +250,7 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
 import dill as pickle  # to create the pkl object
 
 def drift_diffusion_hddm(data, 
-                         samples=6000,
+                         samples=12000,
                          n_jobs=4,
                          run=True,
                          parallel=True,
