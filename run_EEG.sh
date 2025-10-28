@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=eeg_clean
-#SBATCH --partition=compute                # same as HDDM
-#SBATCH --cpus-per-task=4                  # adjust if needed
-#SBATCH --mem=64G                          # EEG usually doesn't need 180G
-#SBATCH --time=48:00:00                    # adjust depending on dataset size
+#SBATCH --partition=compute                
+#SBATCH --cpus-per-task=2                  
+#SBATCH --mem=20G                          # EEG 
+#SBATCH --time=24:00:00                    
 #SBATCH -o logs/eeg_%j.out
 #SBATCH -e logs/eeg_%j.err
 #SBATCH --mail-type=ALL
