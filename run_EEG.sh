@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=eeg_clean
 #SBATCH --partition=compute                
-#SBATCH --cpus-per-task=2                  
-#SBATCH --mem=20G                          # EEG 
+#SBATCH --cpus-per-task=6                  
+#SBATCH --mem=80G                          # EEG 
 #SBATCH --time=24:00:00                    
 #SBATCH -o logs/eeg_%j.out
 #SBATCH -e logs/eeg_%j.err
@@ -20,6 +20,10 @@ export MPLCONFIGDIR=/tmp/mplcache
 # Path to your container and project directory
 IMAGE=$HOME/containers/mne_latest.sif
 PROJECT=$HOME/sharedscratch/PainReward_ULaval
+
+export PROJECT_DIR=/workspace
+export PATH=$HOME/.local/bin:$PATH
+
 
 # Bind the EEG folder too (important!)
 singularity exec \
