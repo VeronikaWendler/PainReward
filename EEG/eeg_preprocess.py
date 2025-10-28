@@ -27,15 +27,9 @@ from os.path import join as opj
 from mne.report import Report
 from mne_icalabel import label_components
 from scipy.stats import pearsonr
-
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
-# Plotting
-# Stats 
 from statsmodels.distributions.empirical_distribution import ECDF
-# HDDM
-from hddm.simulators.hddm_dataset_generators import simulator_h_c
-
 from pathlib import Path
 
 PROJECT_DIR = pathlib.Path(os.getenv("PROJECT_DIR", "/workspace"))
@@ -45,11 +39,10 @@ def ensure_dir(path):
     Path(path).mkdir(parents=True, exist_ok=True)
 import re
 from pathlib import Path
-
 import os
-# disable _all_ Numba JIT caching & compilation
-os.environ["NUMBA_DISABLE_JIT"] = "1"
 
+# disable Numba JIT caching & compilation
+os.environ["NUMBA_DISABLE_JIT"] = "1"
 import numba
 numba.config.CACHE_ENABLE = False
 
