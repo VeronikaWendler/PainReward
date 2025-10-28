@@ -24,8 +24,7 @@ PROJECT=$HOME/sharedscratch/PainReward_ULaval
 export PROJECT_DIR=/workspace
 export PATH=$HOME/.local/bin:$PATH
 
-
-# Bind the EEG folder too (important!)
+# Bind the EEG folder too
 singularity exec \
     --bind ${PROJECT}:/workspace \
     ${IMAGE} \
