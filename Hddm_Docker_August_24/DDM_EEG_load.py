@@ -725,7 +725,6 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
         ("z",   "Starting point"),
         ("a",   "Drift Rate"),
         ("t",   "Non-dec. time"),
-        ("v_Intercept", "Drift Intercept"),
         ("v_sv_pain_para", "Drift sv_pain_para"),   
     ]
     
@@ -774,8 +773,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
         'z',
         'v',
         't',
-        'a_Intercept',
-        'a_sv_pain_para'
+        'v_sv_pain_para'
         ]
     
     group_vplot_dir = diag_dir / "group_param_vertical_kdes"
