@@ -771,7 +771,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
     
     group_params_to_plot = [
         'z',
-        'v',
+        'a',
         't',
         'v_sv_pain_para'
         ]
