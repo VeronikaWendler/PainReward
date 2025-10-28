@@ -15,6 +15,7 @@ Description (for both passive and decision task):
 - Interpolate bad channels
 - Save cleaned continous data
 """
+
 import seaborn as sns
 import pandas as pd
 import mne
@@ -27,11 +28,12 @@ from mne.report import Report
 from mne_icalabel import label_components
 from scipy.stats import pearsonr
 
-# Set bids directory
-basepath = "D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/EEG/PainReward_sub-001-050/painrewardeegdata"
+
+basepath = "/workspace/EEG/PainReward_sub-001-050/painrewardeegdata"
 
 # Choose output directory
 outpath = opj(basepath, "derivatives")
+os.makedirs(outpath, exist_ok=True)
 
 # List participants
 part = [p for p in os.listdir(opj(basepath)) if "sub" in p]
@@ -333,7 +335,7 @@ for p in part:
             event_id=id_list,
             baseline=None,
             tmin=-1,
-            tmax=3,
+            tmax=2,
             preload=True,
             events=events,
         )

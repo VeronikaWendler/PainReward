@@ -333,25 +333,25 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
             v_reg = {'model': 'v ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [v_reg]
         elif version == 2:  # drift rate is dependent on the the sv_pain_para
-            v_reg = {'model': 'v ~ sv_pain_para', 'link_func': lambda x: x}
+            v_reg = {'model': 'v ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [v_reg]
         elif version == 3:  # drift rate is dependent on the the sv_pain_para
             a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [a_reg]    
         elif version == 4:  # drift rate is dependent on the the sv_pain_para
-            a_reg = {'model': 'a ~ sv_pain_para', 'link_func': lambda x: x}
+            a_reg = {'model': 'a ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [a_reg]
         elif version == 5:  # drift rate is dependent on the the sv_pain_para
             z_reg = {'model': 'z ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [z_reg]
         elif version == 6:  # drift rate is dependent on the the sv_pain_para
-            z_reg = {'model': 'z ~ sv_pain_para', 'link_func': lambda x: x}
+            z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [z_reg]    
         elif version == 7:  # drift rate is dependent on the the sv_pain_para
             t_reg = {'model': 't ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [t_reg]    
         elif version == 8:  # drift rate is dependent on the the sv_pain_para
-            t_reg = {'model': 't ~ sv_pain_para', 'link_func': lambda x: x}
+            t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [t_reg]       
         else:
             raise ValueError(f"Is this version illegal ?? It feels illegal...")   
@@ -863,7 +863,6 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
         if safe != f:
             os.rename(diag_dir / f, diag_dir / safe)
 
-# you can use this function in case you are interestd inseeign whether, at the individual level, parameter differences include 0 in HDI. THis is important because the group level estimate might hide lots of individual varibaility
 
 # def plot_inatt_forest(
 #     fig_dir,
@@ -977,154 +976,6 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
 
     
 
-def analyze_rl(infdatas, fig_dir, version):
-    fig_dir = Path(fig_dir)
-    diag_dir = fig_dir / "diagnostics"
-    diag_dir.mkdir(parents=True, exist_ok=True)
-    # infdata is an arviz specific object
-    # concatenate chains
-    idata = az.concat(infdatas, dim="chain")
-    print(idata)
-    print(idata.posterior)
-    print("Data variables in posterior:", list(idata.posterior.data_vars))
-
-            
-    rhat = az.rhat(idata)
-    with open(diag_dir / "gelman_rubin.txt", "w") as f:
-        for var in rhat.data_vars:
-            val = float(rhat[var].values)  # extract scalar
-            f.write(f"{var}: {val:.3f}\n")
-
-    # optional other scores
-    # waic_res = az.waic(idata)
-    # dic_df = pd.DataFrame({
-    #     "metric": ["DIC", "DIC_se"],
-    #     "value":  [waic_res.waic, waic_res.waic_se]
-    # })
-    # dic_df.to_csv(diag_dir/"dic.csv", index=False)
-
-    # Posterior predictive check
-    # az.plot_ppc(idata)  
-    # plt.savefig(diag_dir / "posterior_predictive.pdf")
-    # plt.close()
-
-    # stats table
-    summary = az.summary(idata)
-    summary.to_csv(diag_dir / "results.csv")
-
-    # Collect posterior arrays
-    if "alpha" not in idata.posterior.data_vars:
-        print("[alpha-transform] No 'alpha' in posterior; skipping transformed CSV.")
-        return
-
-    # Transforming group-level alpha
-    alpha_draws = idata.posterior["alpha"].values.reshape(-1)  # (chains*draws,)
-    alpha_prob  = _inv_logit(alpha_draws)
-    alpha_summ  = _summ_from_samples(alpha_prob)
-
-    # Transform subject-level alphas (if present)
-    subj_vars = [v for v in idata.posterior.data_vars if v.startswith("alpha_subj.")]
-    subj_summ_rows = {}
-    subj_prob_matrix = []  # will become shape (n_draws, n_subj) for SD on prob-scale
-
-    if subj_vars:
-        # build matrix: columns = subjects, rows = draws (all chains collapsed)
-        for v in sorted(subj_vars, key=lambda x: int(x.split("alpha_subj.")[-1])):
-            arr = idata.posterior[v].values.reshape(-1)
-            arr_prob = _inv_logit(arr)
-            subj_prob_matrix.append(arr_prob)
-            subj_summ_rows[v] = _summ_from_samples(arr_prob)
-
-        subj_prob_matrix = np.vstack(subj_prob_matrix).T  # (draws, subj)
-        # group SD on probability scale, computed correctly across subjects per draw
-        sd_draws = np.std(subj_prob_matrix, axis=1, ddof=1)
-        alpha_std_summ = _summ_from_samples(sd_draws)
-    else:
-        alpha_std_summ = None
-
-    # transformed copy of the ArviZ summary --> replace alpha rows 
-    summary_t = summary.copy()
-
-    if "alpha" in summary_t.index:
-        for k, v in alpha_summ.items():
-            summary_t.loc["alpha", k] = v
-
-    # Replace alpha_std row (if present & we could compute it) #
-    if ("alpha_std" in summary_t.index) and (alpha_std_summ is not None):
-        for k, v in alpha_std_summ.items():
-            summary_t.loc["alpha_std", k] = v
-
-    # Replace subject rows
-    for v, stats in subj_summ_rows.items():
-        if v in summary_t.index:
-            for k, val in stats.items():
-                summary_t.loc[v, k] = val
-
-    out_csv = diag_dir / "results_alpha_transformed.csv"
-    summary_t.to_csv(out_csv)
-
-    # write per-subject means (prob. scale) for convenience
-    if subj_vars:
-        means = []
-        for v in sorted(subj_vars, key=lambda x: int(x.split("alpha_subj.")[-1])):
-            arr = idata.posterior[v].values.reshape(-1)
-            arr_prob = _inv_logit(arr)
-            means.append({"param": v, "mean_prob": float(np.mean(arr_prob))})
-        pd.DataFrame(means).to_csv(diag_dir / "params_of_interest_s_alpha_transformed.csv", index=False)
-
-    print(f"[alpha-transform] Wrote:\n  - {out_csv}")
-    if subj_vars:
-        print(f"  - {diag_dir / 'params_of_interest_s_alpha_transformed.csv'}")
-
-
-    #Posterior‐trace + KDE plots (one PDF each)
-    var_names = ["alpha"]
-    titles = ["alpha"]
-    # Trace
-    az.plot_trace(idata, var_names=var_names)
-    plt.tight_layout()
-    plt.savefig(diag_dir / "trace_plots.pdf")
-    plt.close()
-    # Posterior KDEs
-    matplotlib.rcParams.update({"font.size": 6})
-    fig, axes = plt.subplots(1, len(var_names), figsize=(len(var_names) * 2, 4))
-    axes_flat = np.atleast_1d(axes).flatten()
-    
-    for i, p in enumerate(var_names):
-        ax = axes_flat[i]
-        arr = idata.posterior[p].values.reshape(-1)
-        if p == "alpha":
-            arr = np.exp(arr) / (1 + np.exp(arr))
-        sns.kdeplot(y=arr, fill=True, ax=ax)
-
-        ax.set_title(p)
-        ax.set_xlim(0, 15)      # x-axis from 0 to 15
-        ax.set_ylim(0, 0.5)     # y-axis (density) from 0 to 0.5
-        ax.set_ylabel("Density")
-        ax.set_xlabel("Value")
-
-    
-    plt.tight_layout()
-    plt.savefig(diag_dir / "posteriors.pdf", bbox_inches="tight")
-    plt.close(fig)
-        # Per-subject parameter CSV
-        # Per-subject parameter CSV
-    subj_vars = [v for v in idata.posterior.data_vars if v.startswith("alpha_subj.")]
-    if subj_vars:
-        subj_means = {}
-        for var in subj_vars:
-            subj = int(var.split("alpha_subj.")[-1])
-            arr  = idata.posterior[var].values  
-            subj_means[subj] = arr.reshape(-1).mean()
-        df = pd.DataFrame.from_dict(
-            subj_means, orient="index", columns=["alpha_subj"]
-        )
-        df.index.name = "subj_idx"
-        df.reset_index(inplace=True)
-        df.to_csv(diag_dir/"params_of_interest_s.csv", index=False)
-    else:
-        print("ERROR")
-    
 
 model_dir = BASE_MODEL_DIR
 ensure_dir(model_dir)
@@ -1209,6 +1060,7 @@ def t_sv_pain_para_contributions(models, data):
     return data_with_t_sv_pain_para
 
 
+
 def z_sv_pain_para_contributions(models, data):
     
     data_with_z_sv_pain_para = data.copy()
@@ -1234,6 +1086,153 @@ def z_sv_pain_para_contributions(models, data):
     return data_with_z_sv_pain_para
 
 
+# for model NR2
+def full_sv_pain_para_contributions(models, data):
+    data_full_sv_pain_para = data.copy()
+
+    data_full_sv_pain_para['full_v_sv_pain_para_contrib'] = np.nan
+    data_full_sv_pain_para['full_a_sv_pain_para_contrib'] = np.nan
+    data_full_sv_pain_para['full_t_sv_pain_para_contrib'] = np.nan
+    data_full_sv_pain_para['full_z_sv_pain_para_contrib'] = np.nan
+
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+
+        #Get subject-specific paramter from the posteriors
+        v_sv_pain_para = model.nodes_db.loc[f'v_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        a_sv_pain_para = model.nodes_db.loc[f'a_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        t_sv_pain_para = model.nodes_db.loc[f't_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        z_sv_pain_para = model.nodes_db.loc[f'z_sv_pain_para_subj.{subj_id}', 'node'].trace()
+
+        v_sv_pain_para_contrib_list = []
+        a_sv_pain_para_contrib_list = []
+        t_sv_pain_para_contrib_list = []
+        z_sv_pain_para_contrib_list = []
+        
+        # sv_pain_para weight on dirft rate for every trial and participant
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para']
+            
+            # weight of sv_pain_para on the params from model 2
+            v_sv_pain_para_contrib_samples = v_sv_pain_para * trial_sv_pain_para
+            a_sv_pain_para_contrib_samples = a_sv_pain_para * trial_sv_pain_para
+            t_sv_pain_para_contrib_samples = t_sv_pain_para * trial_sv_pain_para
+            z_sv_pain_para_contrib_samples = z_sv_pain_para * trial_sv_pain_para
+            
+            # simple trace mean just for v_sv_pain_para
+            v_sv_pain_para_trace_mean = v_sv_pain_para.mean()  
+            v_sv_pain_para_contrib_mean = v_sv_pain_para_contrib_samples.mean()
+            a_sv_pain_para_trace_mean = a_sv_pain_para.mean()  
+            a_sv_pain_para_contrib_mean = a_sv_pain_para_contrib_samples.mean()
+            t_sv_pain_para_trace_mean = t_sv_pain_para.mean()  
+            t_sv_pain_para_contrib_mean = t_sv_pain_para_contrib_samples.mean()
+            z_sv_pain_para_trace_mean = z_sv_pain_para.mean()  
+            z_sv_pain_para_contrib_mean = z_sv_pain_para_contrib_samples.mean()
+            
+            v_sv_pain_para_contrib_list.append(v_sv_pain_para_contrib_mean)
+            a_sv_pain_para_contrib_list.append(a_sv_pain_para_contrib_mean)
+            t_sv_pain_para_contrib_list.append(t_sv_pain_para_contrib_mean)
+            z_sv_pain_para_contrib_list.append(z_sv_pain_para_contrib_mean)
+
+            data_full_sv_pain_para.loc[idx, 'full_v_sv_pain_para_contrib'] = v_sv_pain_para_contrib_mean 
+            data_full_sv_pain_para.loc[idx, 'full_a_sv_pain_para_contrib'] = a_sv_pain_para_contrib_mean  
+            data_full_sv_pain_para.loc[idx, 'full_t_sv_pain_para_contrib'] = t_sv_pain_para_contrib_mean 
+            data_full_sv_pain_para.loc[idx, 'full_z_sv_pain_para_contrib'] = z_sv_pain_para_contrib_mean  
+
+    return data_full_sv_pain_para
+    
+
+# for model NR3
+def v_sv_money_contributions(models, data):
+    data_sv_money = data.copy()
+    data_sv_money['v_sv_money_contrib'] = np.nan
+    
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        v_sv_money_contrib_list = []
+        v_sv_money = model.nodes_db.loc[f'v_sv_money_subj.{subj_id}', 'node'].trace()
+        v_sv_money_contrib_list = []
+        
+        for idx, trial in subj_data.iterrows():
+            trial_sv_money = trial['sv_money']
+            v_sv_money_contrib_samples = v_sv_money * trial_sv_money
+            v_sv_money_contrib_mean = v_sv_money_contrib_samples.mean()  
+            v_sv_money_contrib_list.append(v_sv_money_contrib_mean)
+            data_sv_money.loc[idx, 'v_sv_money_contrib'] = v_sv_money_contrib_mean  
+
+    return data_sv_money
+
+
+# model NR.16
+def v_sv_pain_para_Abs_contributions(models, data):
+    data_abs_sv_pain_para = data.copy()
+    data_abs_sv_pain_para['v_sv_pain_para_Abslow_contrib'] = np.nan
+    data_abs_sv_pain_para['v_sv_pain_para_Absmid_contrib'] = np.nan
+    data_abs_sv_pain_para['v_sv_pain_para_Abshigh_contrib'] = np.nan
+
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        
+        v_sv_pain_para_Abslow = model.nodes_db.loc[f'v_sv_pain_para:C(Abs_value)[low_abs]_subj.{subj_id}', 'node'].trace()
+        v_sv_pain_para_Absmid = model.nodes_db.loc[f'v_sv_pain_para:C(Abs_value)[mid_abs]_subj.{subj_id}', 'node'].trace()
+        v_sv_pain_para_Abshigh = model.nodes_db.loc[f'v_sv_pain_para:C(Abs_value)[high_abs]_subj.{subj_id}', 'node'].trace()
+
+        v_sv_pain_para_Abslow_contrib_list = []
+        v_sv_pain_para_Absmid_contrib_list = []
+        v_sv_pain_para_Abshigh_contrib_list = []
+
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para'] 
+            v_sv_pain_para_Abslow_contrib_samples = v_sv_pain_para_Abslow * trial_sv_pain_para
+            v_sv_pain_para_Absmid_contrib_samples = v_sv_pain_para_Absmid * trial_sv_pain_para
+            v_sv_pain_para_Abshigh_contrib_samples = v_sv_pain_para_Abshigh * trial_sv_pain_para
+
+            v_sv_pain_para_Abslow_contrib_mean = v_sv_pain_para_Abslow_contrib_samples.mean()    
+            v_sv_pain_para_Absmid_contrib_mean = v_sv_pain_para_Absmid_contrib_samples.mean()    
+            v_sv_pain_para_Abshigh_contrib_mean = v_sv_pain_para_Abshigh_contrib_samples.mean()    
+            
+            v_sv_pain_para_Abslow_contrib_list.append(v_sv_pain_para_Abslow_contrib_mean)
+            data_abs_sv_pain_para.loc[idx, 'v_sv_pain_para_Abslow_contrib'] = v_sv_pain_para_Abslow_contrib_mean  
+            v_sv_pain_para_Absmid_contrib_list.append(v_sv_pain_para_Absmid_contrib_mean)
+            data_abs_sv_pain_para.loc[idx, 'v_sv_pain_para_Absmid_contrib'] = v_sv_pain_para_Absmid_contrib_mean  
+            v_sv_pain_para_Abshigh_contrib_list.append(v_sv_pain_para_Abshigh_contrib_mean)
+            data_abs_sv_pain_para.loc[idx, 'v_sv_pain_para_Abshigh_contrib'] = v_sv_pain_para_Abshigh_contrib_mean  
+
+    return data_abs_sv_pain_para
+
+# model NR.17
+def v_sv_pain_para_OV_contributions(models, data):
+    data_ov_sv_pain_para = data.copy()
+    data_ov_sv_pain_para['v_sv_pain_para_OVlow_contrib'] = np.nan
+    data_ov_sv_pain_para['v_sv_pain_para_OVhigh_contrib'] = np.nan
+
+    for subj_id in data['subj_idx'].unique():
+        model = kabuki.utils.concat_models(models)  
+        subj_data = data[data['subj_idx'] == subj_id]
+        
+        v_sv_pain_para_ovlow = model.nodes_db.loc[f'v_sv_pain_para:C(OV_value)[low_OV]_subj.{subj_id}', 'node'].trace()
+        v_sv_pain_para_ovhigh = model.nodes_db.loc[f'v_sv_pain_para:C(OV_value)[high_OV]_subj.{subj_id}', 'node'].trace()
+        v_sv_pain_para_ovlow_contrib_list = []
+        v_sv_pain_para_ovhigh_contrib_list = []
+
+        for idx, trial in subj_data.iterrows():
+            trial_sv_pain_para = trial['sv_pain_para'] 
+            v_sv_pain_para_ovlow_contrib_samples = v_sv_pain_para_ovlow * trial_sv_pain_para
+            v_sv_pain_para_ovhigh_contrib_samples = v_sv_pain_para_ovhigh * trial_sv_pain_para
+
+            v_sv_pain_para_ovlow_contrib_mean = v_sv_pain_para_ovlow_contrib_samples.mean()    
+            v_sv_pain_para_ovshigh_contrib_mean = v_sv_pain_para_ovhigh_contrib_samples.mean()    
+            
+            v_sv_pain_para_ovlow_contrib_list.append(v_sv_pain_para_ovlow_contrib_mean)
+            data_ov_sv_pain_para.loc[idx, 'v_sv_pain_para_OVlow_contrib'] = v_sv_pain_para_ovlow_contrib_mean  
+            v_sv_pain_para_ovhigh_contrib_list.append(v_sv_pain_para_ovshigh_contrib_mean)
+            data_ov_sv_pain_para.loc[idx, 'v_sv_pain_para_OVhigh_contrib'] = v_sv_pain_para_ovshigh_contrib_mean  
+            
+    return data_ov_sv_pain_para
+    
 
 
 

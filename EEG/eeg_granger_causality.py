@@ -12,7 +12,7 @@ import time
 
 
 def plot_granger_causality(freqs, gc_ab_data, gc_ba_data, trgc_data, outdir, fname):
-    """Plot Granger causality results and save the plot."""
+    """Plot Granger causality results and save the plot"""
     net_gc = gc_ab_data - gc_ba_data  # Compute net Granger causality
     
     # Plot individual Granger causality (A => B, B => A)
