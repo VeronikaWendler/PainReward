@@ -32,7 +32,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 from statsmodels.distributions.empirical_distribution import ECDF
 from pathlib import Path
 
-PROJECT_DIR = pathlib.Path(os.getenv("PROJECT_DIR", "/workspace"))
+PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
 basepath = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"
 
 def ensure_dir(path):
