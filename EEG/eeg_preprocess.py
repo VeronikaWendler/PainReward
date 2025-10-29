@@ -42,7 +42,7 @@ from pathlib import Path
 import os
 
 # disable Numba JIT caching & compilation
-os.environ["NUMBA_DISABLE_JIT"] = "1"
+#os.environ["NUMBA_DISABLE_JIT"] = "1"
 import numba
 numba.config.CACHE_ENABLE = False
 
