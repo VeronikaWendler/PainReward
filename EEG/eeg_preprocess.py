@@ -159,7 +159,7 @@ for p in part:
     }
     events = events[events[:, 2] != 99999]
 
-    # Remove the "DIN7" event (photosensor)
+    # Remove the DIN7 event (photosensor)
     if "DIN7" in events_id.keys():
         events = events[events[:, 2] != events_id["DIN7"]]
         events_id = {k: v for k, v in events_id.items() if k != "DIN7"}
