@@ -208,7 +208,8 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
             reg_descr = [v_reg]
         elif version == 3:  # drift rate is dependent on the the sv_pain_para
             a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [a_reg]    
+            reg_descr = [a_reg] 
+            #this model (NR 4) doesn't work and fails to find starting values   
         elif version == 4:  # drift rate is dependent on the the sv_pain_para
             a_reg = {'model': 'a ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [a_reg]
