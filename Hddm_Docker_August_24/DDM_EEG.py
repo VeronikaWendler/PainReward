@@ -99,7 +99,7 @@ RUN_ALL_MODELS  = True                                           # False = just 
 
 # selectivity
 start_phase = "dec"
-start_version = 4
+start_version = 5
 started = False
 
 # dir
