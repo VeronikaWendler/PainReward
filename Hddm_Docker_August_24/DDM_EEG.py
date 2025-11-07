@@ -85,7 +85,7 @@ nr_samples      = 12000      # samples per chain - do 6000 (+1000 for burn-in) b
 parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
-    "dec":      ["LPP_0","LPP_1","LPP_2","LPP_3","LPP_4","LPP_5","LPP_6","LPP_7","LPP_8"]     
+    "dec":      ["LPP_0","LPP_1","LPP_2","LPP_3","LPP_4","LPP_5","LPP_6","LPP_7","LPP_8", "LPP_9"]     
 }
 
 PHASE_TO_SOURCE = {
@@ -99,7 +99,7 @@ RUN_ALL_MODELS  = True                                           # False = just 
 
 # selectivity
 start_phase = "dec"
-start_version = 5
+start_version = 9
 started = False
 
 # dir
@@ -225,6 +225,9 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         elif version == 8:  # drift rate is dependent on the the sv_pain_para
             t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [t_reg]       
+        elif version == 9:
+            v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+            reg_descr = [v_reg]
         else:
             raise ValueError(f"Is this version correct ? ")   
         
@@ -232,7 +235,7 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         m = hddm.models.HDDMRegressor(data, 
                                     reg_descr,
                                     p_outlier=.05, 
-                                    include=['a', 't', 'v', 'z'],   #'z'
+                                    include=['a', 't', 'v'],   #'z'
                                     depends_on=depends_on,
                                     group_only_regressors=False,
                                     keep_regressor_trace=True
