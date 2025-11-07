@@ -75,7 +75,7 @@ numba.config.CACHE_ENABLE = False
 # V_sub = value of the worse option
 
 # params:
-version = 3    # defining version #
+version = 1    # defining version #
 run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
@@ -103,8 +103,7 @@ model_versions  = {
 }
 
 # debugging, tip, python starts at 0, unlike Matlab
-# honestly, for whoever wants to run this I am really sorry because it's still quite messy, essentially, 
-# if you want to run a model e.g. model 1, you load the data from 0 (because of the indexing mismatch)
+# 
 
 if phase not in model_versions:
     raise ValueError(f"Invalid phase '{phase}'. Choose from: {list(model_versions.keys())}")
