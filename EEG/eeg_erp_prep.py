@@ -26,6 +26,8 @@ from statsmodels.distributions.empirical_distribution import ECDF
 from pathlib import Path
 
 # Set bids directory
+
+
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
 basepath = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"
 
@@ -34,6 +36,8 @@ def ensure_dir(path):
 import re
 from pathlib import Path
 import os
+
+layout = BIDSLayout(basepath)
 
 # disable Numba JIT caching & compilation
 #os.environ["NUMBA_DISABLE_JIT"] = "1"
