@@ -1107,153 +1107,207 @@ def z_sv_pain_para_contributions(models, data):
 
     return data_with_z_sv_pain_para
 
+# for mod 9
+def v_pain_money_interaction_contributions(models, data):
 
-# for model NR2
-def full_sv_pain_para_contributions(models, data):
-    data_full_sv_pain_para = data.copy()
+    combined = kabuki.utils.concat_models(models)
+    data_out = data.copy()
 
-    data_full_sv_pain_para['full_v_sv_pain_para_contrib'] = np.nan
-    data_full_sv_pain_para['full_a_sv_pain_para_contrib'] = np.nan
-    data_full_sv_pain_para['full_t_sv_pain_para_contrib'] = np.nan
-    data_full_sv_pain_para['full_z_sv_pain_para_contrib'] = np.nan
+    # allocate space
+    cols = [
+        "v_intercept_subj", 
+        "v_painlevel_subj", 
+        "v_moneylevel_subj",
+        "v_interaction_subj",
+        "v_intercept_contrib",
+        "v_pain_contrib",
+        "v_money_contrib",
+        "v_interaction_contrib",
+        "v_full_trial"
+    ]
+    for c in cols:
+        data_out[c] = np.nan
 
-    for subj_id in data['subj_idx'].unique():
-        model = kabuki.utils.concat_models(models)  
-        subj_data = data[data['subj_idx'] == subj_id]
+    for subj in data['subj_idx'].unique():
+        subj_mask = data_out['subj_idx'] == subj
+        subj_data = data_out.loc[subj_mask]
 
-        #Get subject-specific paramter from the posteriors
-        v_sv_pain_para = model.nodes_db.loc[f'v_sv_pain_para_subj.{subj_id}', 'node'].trace()
-        a_sv_pain_para = model.nodes_db.loc[f'a_sv_pain_para_subj.{subj_id}', 'node'].trace()
-        t_sv_pain_para = model.nodes_db.loc[f't_sv_pain_para_subj.{subj_id}', 'node'].trace()
-        z_sv_pain_para = model.nodes_db.loc[f'z_sv_pain_para_subj.{subj_id}', 'node'].trace()
+        # Subject-specific posterior means
+        b0 = combined.nodes_db.loc[f"v_Intercept_subj.{subj}", "node"].trace().mean()
+        b1 = combined.nodes_db.loc[f"v_painlevel_subj.{subj}", "node"].trace().mean()
+        b2 = combined.nodes_db.loc[f"v_moneylevel_subj.{subj}", "node"].trace().mean()
+        b3 = combined.nodes_db.loc[f"v_painlevel_moneylevel_subj.{subj}", "node"].trace().mean()
 
-        v_sv_pain_para_contrib_list = []
-        a_sv_pain_para_contrib_list = []
-        t_sv_pain_para_contrib_list = []
-        z_sv_pain_para_contrib_list = []
+        # stable subject-level params
+        data_out.loc[subj_mask, "v_intercept_subj"] = b0
+        data_out.loc[subj_mask, "v_painlevel_subj"] = b1
+        data_out.loc[subj_mask, "v_moneylevel_subj"] = b2
+        data_out.loc[subj_mask, "v_interaction_subj"] = b3
+
+        # trial level contributions
+        data_out.loc[subj_mask, "v_intercept_contrib"] = b0
+        data_out.loc[subj_mask, "v_pain_contrib"] = b1 * subj_data["painlevel"]
+        data_out.loc[subj_mask, "v_money_contrib"] = b2 * subj_data["moneylevel"]
+        data_out.loc[subj_mask, "v_interaction_contrib"] = b3 * (subj_data["painlevel"] * subj_data["moneylevel"])
+
+        # full drift per trial
+        data_out.loc[subj_mask, "v_full_trial"] = (
+            data_out.loc[subj_mask, "v_intercept_contrib"]
+            + data_out.loc[subj_mask, "v_pain_contrib"]
+            + data_out.loc[subj_mask, "v_money_contrib"]
+            + data_out.loc[subj_mask, "v_interaction_contrib"]
+        )
+
+    return data_out
+
+
+
+# # for model NR2
+# def full_sv_pain_para_contributions(models, data):
+#     data_full_sv_pain_para = data.copy()
+
+#     data_full_sv_pain_para['full_v_sv_pain_para_contrib'] = np.nan
+#     data_full_sv_pain_para['full_a_sv_pain_para_contrib'] = np.nan
+#     data_full_sv_pain_para['full_t_sv_pain_para_contrib'] = np.nan
+#     data_full_sv_pain_para['full_z_sv_pain_para_contrib'] = np.nan
+
+#     for subj_id in data['subj_idx'].unique():
+#         model = kabuki.utils.concat_models(models)  
+#         subj_data = data[data['subj_idx'] == subj_id]
+
+#         #Get subject-specific paramter from the posteriors
+#         v_sv_pain_para = model.nodes_db.loc[f'v_sv_pain_para_subj.{subj_id}', 'node'].trace()
+#         a_sv_pain_para = model.nodes_db.loc[f'a_sv_pain_para_subj.{subj_id}', 'node'].trace()
+#         t_sv_pain_para = model.nodes_db.loc[f't_sv_pain_para_subj.{subj_id}', 'node'].trace()
+#         z_sv_pain_para = model.nodes_db.loc[f'z_sv_pain_para_subj.{subj_id}', 'node'].trace()
+
+#         v_sv_pain_para_contrib_list = []
+#         a_sv_pain_para_contrib_list = []
+#         t_sv_pain_para_contrib_list = []
+#         z_sv_pain_para_contrib_list = []
         
-        # sv_pain_para weight on dirft rate for every trial and participant
-        for idx, trial in subj_data.iterrows():
-            trial_sv_pain_para = trial['sv_pain_para']
+#         # sv_pain_para weight on dirft rate for every trial and participant
+#         for idx, trial in subj_data.iterrows():
+#             trial_sv_pain_para = trial['sv_pain_para']
             
-            # weight of sv_pain_para on the params from model 2
-            v_sv_pain_para_contrib_samples = v_sv_pain_para * trial_sv_pain_para
-            a_sv_pain_para_contrib_samples = a_sv_pain_para * trial_sv_pain_para
-            t_sv_pain_para_contrib_samples = t_sv_pain_para * trial_sv_pain_para
-            z_sv_pain_para_contrib_samples = z_sv_pain_para * trial_sv_pain_para
+#             # weight of sv_pain_para on the params from model 2
+#             v_sv_pain_para_contrib_samples = v_sv_pain_para * trial_sv_pain_para
+#             a_sv_pain_para_contrib_samples = a_sv_pain_para * trial_sv_pain_para
+#             t_sv_pain_para_contrib_samples = t_sv_pain_para * trial_sv_pain_para
+#             z_sv_pain_para_contrib_samples = z_sv_pain_para * trial_sv_pain_para
             
-            # simple trace mean just for v_sv_pain_para
-            v_sv_pain_para_trace_mean = v_sv_pain_para.mean()  
-            v_sv_pain_para_contrib_mean = v_sv_pain_para_contrib_samples.mean()
-            a_sv_pain_para_trace_mean = a_sv_pain_para.mean()  
-            a_sv_pain_para_contrib_mean = a_sv_pain_para_contrib_samples.mean()
-            t_sv_pain_para_trace_mean = t_sv_pain_para.mean()  
-            t_sv_pain_para_contrib_mean = t_sv_pain_para_contrib_samples.mean()
-            z_sv_pain_para_trace_mean = z_sv_pain_para.mean()  
-            z_sv_pain_para_contrib_mean = z_sv_pain_para_contrib_samples.mean()
+#             # simple trace mean just for v_sv_pain_para
+#             v_sv_pain_para_trace_mean = v_sv_pain_para.mean()  
+#             v_sv_pain_para_contrib_mean = v_sv_pain_para_contrib_samples.mean()
+#             a_sv_pain_para_trace_mean = a_sv_pain_para.mean()  
+#             a_sv_pain_para_contrib_mean = a_sv_pain_para_contrib_samples.mean()
+#             t_sv_pain_para_trace_mean = t_sv_pain_para.mean()  
+#             t_sv_pain_para_contrib_mean = t_sv_pain_para_contrib_samples.mean()
+#             z_sv_pain_para_trace_mean = z_sv_pain_para.mean()  
+#             z_sv_pain_para_contrib_mean = z_sv_pain_para_contrib_samples.mean()
             
-            v_sv_pain_para_contrib_list.append(v_sv_pain_para_contrib_mean)
-            a_sv_pain_para_contrib_list.append(a_sv_pain_para_contrib_mean)
-            t_sv_pain_para_contrib_list.append(t_sv_pain_para_contrib_mean)
-            z_sv_pain_para_contrib_list.append(z_sv_pain_para_contrib_mean)
+#             v_sv_pain_para_contrib_list.append(v_sv_pain_para_contrib_mean)
+#             a_sv_pain_para_contrib_list.append(a_sv_pain_para_contrib_mean)
+#             t_sv_pain_para_contrib_list.append(t_sv_pain_para_contrib_mean)
+#             z_sv_pain_para_contrib_list.append(z_sv_pain_para_contrib_mean)
 
-            data_full_sv_pain_para.loc[idx, 'full_v_sv_pain_para_contrib'] = v_sv_pain_para_contrib_mean 
-            data_full_sv_pain_para.loc[idx, 'full_a_sv_pain_para_contrib'] = a_sv_pain_para_contrib_mean  
-            data_full_sv_pain_para.loc[idx, 'full_t_sv_pain_para_contrib'] = t_sv_pain_para_contrib_mean 
-            data_full_sv_pain_para.loc[idx, 'full_z_sv_pain_para_contrib'] = z_sv_pain_para_contrib_mean  
+#             data_full_sv_pain_para.loc[idx, 'full_v_sv_pain_para_contrib'] = v_sv_pain_para_contrib_mean 
+#             data_full_sv_pain_para.loc[idx, 'full_a_sv_pain_para_contrib'] = a_sv_pain_para_contrib_mean  
+#             data_full_sv_pain_para.loc[idx, 'full_t_sv_pain_para_contrib'] = t_sv_pain_para_contrib_mean 
+#             data_full_sv_pain_para.loc[idx, 'full_z_sv_pain_para_contrib'] = z_sv_pain_para_contrib_mean  
 
-    return data_full_sv_pain_para
+#     return data_full_sv_pain_para
     
 
-# for model NR3
-def v_sv_money_contributions(models, data):
-    data_sv_money = data.copy()
-    data_sv_money['v_sv_money_contrib'] = np.nan
+# # for model NR3
+# def v_sv_money_contributions(models, data):
+#     data_sv_money = data.copy()
+#     data_sv_money['v_sv_money_contrib'] = np.nan
     
-    for subj_id in data['subj_idx'].unique():
-        model = kabuki.utils.concat_models(models)  
-        subj_data = data[data['subj_idx'] == subj_id]
-        v_sv_money_contrib_list = []
-        v_sv_money = model.nodes_db.loc[f'v_sv_money_subj.{subj_id}', 'node'].trace()
-        v_sv_money_contrib_list = []
+#     for subj_id in data['subj_idx'].unique():
+#         model = kabuki.utils.concat_models(models)  
+#         subj_data = data[data['subj_idx'] == subj_id]
+#         v_sv_money_contrib_list = []
+#         v_sv_money = model.nodes_db.loc[f'v_sv_money_subj.{subj_id}', 'node'].trace()
+#         v_sv_money_contrib_list = []
         
-        for idx, trial in subj_data.iterrows():
-            trial_sv_money = trial['sv_money']
-            v_sv_money_contrib_samples = v_sv_money * trial_sv_money
-            v_sv_money_contrib_mean = v_sv_money_contrib_samples.mean()  
-            v_sv_money_contrib_list.append(v_sv_money_contrib_mean)
-            data_sv_money.loc[idx, 'v_sv_money_contrib'] = v_sv_money_contrib_mean  
+#         for idx, trial in subj_data.iterrows():
+#             trial_sv_money = trial['sv_money']
+#             v_sv_money_contrib_samples = v_sv_money * trial_sv_money
+#             v_sv_money_contrib_mean = v_sv_money_contrib_samples.mean()  
+#             v_sv_money_contrib_list.append(v_sv_money_contrib_mean)
+#             data_sv_money.loc[idx, 'v_sv_money_contrib'] = v_sv_money_contrib_mean  
 
-    return data_sv_money
+#     return data_sv_money
 
 
-# model NR.16
-def v_sv_pain_para_Abs_contributions(models, data):
-    data_abs_sv_pain_para = data.copy()
-    data_abs_sv_pain_para['v_sv_pain_para_Abslow_contrib'] = np.nan
-    data_abs_sv_pain_para['v_sv_pain_para_Absmid_contrib'] = np.nan
-    data_abs_sv_pain_para['v_sv_pain_para_Abshigh_contrib'] = np.nan
+# # model NR.16
+# def v_sv_pain_para_Abs_contributions(models, data):
+#     data_abs_sv_pain_para = data.copy()
+#     data_abs_sv_pain_para['v_sv_pain_para_Abslow_contrib'] = np.nan
+#     data_abs_sv_pain_para['v_sv_pain_para_Absmid_contrib'] = np.nan
+#     data_abs_sv_pain_para['v_sv_pain_para_Abshigh_contrib'] = np.nan
 
-    for subj_id in data['subj_idx'].unique():
-        model = kabuki.utils.concat_models(models)  
-        subj_data = data[data['subj_idx'] == subj_id]
+#     for subj_id in data['subj_idx'].unique():
+#         model = kabuki.utils.concat_models(models)  
+#         subj_data = data[data['subj_idx'] == subj_id]
         
-        v_sv_pain_para_Abslow = model.nodes_db.loc[f'v_sv_pain_para:C(Abs_value)[low_abs]_subj.{subj_id}', 'node'].trace()
-        v_sv_pain_para_Absmid = model.nodes_db.loc[f'v_sv_pain_para:C(Abs_value)[mid_abs]_subj.{subj_id}', 'node'].trace()
-        v_sv_pain_para_Abshigh = model.nodes_db.loc[f'v_sv_pain_para:C(Abs_value)[high_abs]_subj.{subj_id}', 'node'].trace()
+#         v_sv_pain_para_Abslow = model.nodes_db.loc[f'v_sv_pain_para:C(Abs_value)[low_abs]_subj.{subj_id}', 'node'].trace()
+#         v_sv_pain_para_Absmid = model.nodes_db.loc[f'v_sv_pain_para:C(Abs_value)[mid_abs]_subj.{subj_id}', 'node'].trace()
+#         v_sv_pain_para_Abshigh = model.nodes_db.loc[f'v_sv_pain_para:C(Abs_value)[high_abs]_subj.{subj_id}', 'node'].trace()
 
-        v_sv_pain_para_Abslow_contrib_list = []
-        v_sv_pain_para_Absmid_contrib_list = []
-        v_sv_pain_para_Abshigh_contrib_list = []
+#         v_sv_pain_para_Abslow_contrib_list = []
+#         v_sv_pain_para_Absmid_contrib_list = []
+#         v_sv_pain_para_Abshigh_contrib_list = []
 
-        for idx, trial in subj_data.iterrows():
-            trial_sv_pain_para = trial['sv_pain_para'] 
-            v_sv_pain_para_Abslow_contrib_samples = v_sv_pain_para_Abslow * trial_sv_pain_para
-            v_sv_pain_para_Absmid_contrib_samples = v_sv_pain_para_Absmid * trial_sv_pain_para
-            v_sv_pain_para_Abshigh_contrib_samples = v_sv_pain_para_Abshigh * trial_sv_pain_para
+#         for idx, trial in subj_data.iterrows():
+#             trial_sv_pain_para = trial['sv_pain_para'] 
+#             v_sv_pain_para_Abslow_contrib_samples = v_sv_pain_para_Abslow * trial_sv_pain_para
+#             v_sv_pain_para_Absmid_contrib_samples = v_sv_pain_para_Absmid * trial_sv_pain_para
+#             v_sv_pain_para_Abshigh_contrib_samples = v_sv_pain_para_Abshigh * trial_sv_pain_para
 
-            v_sv_pain_para_Abslow_contrib_mean = v_sv_pain_para_Abslow_contrib_samples.mean()    
-            v_sv_pain_para_Absmid_contrib_mean = v_sv_pain_para_Absmid_contrib_samples.mean()    
-            v_sv_pain_para_Abshigh_contrib_mean = v_sv_pain_para_Abshigh_contrib_samples.mean()    
+#             v_sv_pain_para_Abslow_contrib_mean = v_sv_pain_para_Abslow_contrib_samples.mean()    
+#             v_sv_pain_para_Absmid_contrib_mean = v_sv_pain_para_Absmid_contrib_samples.mean()    
+#             v_sv_pain_para_Abshigh_contrib_mean = v_sv_pain_para_Abshigh_contrib_samples.mean()    
             
-            v_sv_pain_para_Abslow_contrib_list.append(v_sv_pain_para_Abslow_contrib_mean)
-            data_abs_sv_pain_para.loc[idx, 'v_sv_pain_para_Abslow_contrib'] = v_sv_pain_para_Abslow_contrib_mean  
-            v_sv_pain_para_Absmid_contrib_list.append(v_sv_pain_para_Absmid_contrib_mean)
-            data_abs_sv_pain_para.loc[idx, 'v_sv_pain_para_Absmid_contrib'] = v_sv_pain_para_Absmid_contrib_mean  
-            v_sv_pain_para_Abshigh_contrib_list.append(v_sv_pain_para_Abshigh_contrib_mean)
-            data_abs_sv_pain_para.loc[idx, 'v_sv_pain_para_Abshigh_contrib'] = v_sv_pain_para_Abshigh_contrib_mean  
+#             v_sv_pain_para_Abslow_contrib_list.append(v_sv_pain_para_Abslow_contrib_mean)
+#             data_abs_sv_pain_para.loc[idx, 'v_sv_pain_para_Abslow_contrib'] = v_sv_pain_para_Abslow_contrib_mean  
+#             v_sv_pain_para_Absmid_contrib_list.append(v_sv_pain_para_Absmid_contrib_mean)
+#             data_abs_sv_pain_para.loc[idx, 'v_sv_pain_para_Absmid_contrib'] = v_sv_pain_para_Absmid_contrib_mean  
+#             v_sv_pain_para_Abshigh_contrib_list.append(v_sv_pain_para_Abshigh_contrib_mean)
+#             data_abs_sv_pain_para.loc[idx, 'v_sv_pain_para_Abshigh_contrib'] = v_sv_pain_para_Abshigh_contrib_mean  
 
-    return data_abs_sv_pain_para
+#     return data_abs_sv_pain_para
 
-# model NR.17
-def v_sv_pain_para_OV_contributions(models, data):
-    data_ov_sv_pain_para = data.copy()
-    data_ov_sv_pain_para['v_sv_pain_para_OVlow_contrib'] = np.nan
-    data_ov_sv_pain_para['v_sv_pain_para_OVhigh_contrib'] = np.nan
+# # model NR.17
+# def v_sv_pain_para_OV_contributions(models, data):
+#     data_ov_sv_pain_para = data.copy()
+#     data_ov_sv_pain_para['v_sv_pain_para_OVlow_contrib'] = np.nan
+#     data_ov_sv_pain_para['v_sv_pain_para_OVhigh_contrib'] = np.nan
 
-    for subj_id in data['subj_idx'].unique():
-        model = kabuki.utils.concat_models(models)  
-        subj_data = data[data['subj_idx'] == subj_id]
+#     for subj_id in data['subj_idx'].unique():
+#         model = kabuki.utils.concat_models(models)  
+#         subj_data = data[data['subj_idx'] == subj_id]
         
-        v_sv_pain_para_ovlow = model.nodes_db.loc[f'v_sv_pain_para:C(OV_value)[low_OV]_subj.{subj_id}', 'node'].trace()
-        v_sv_pain_para_ovhigh = model.nodes_db.loc[f'v_sv_pain_para:C(OV_value)[high_OV]_subj.{subj_id}', 'node'].trace()
-        v_sv_pain_para_ovlow_contrib_list = []
-        v_sv_pain_para_ovhigh_contrib_list = []
+#         v_sv_pain_para_ovlow = model.nodes_db.loc[f'v_sv_pain_para:C(OV_value)[low_OV]_subj.{subj_id}', 'node'].trace()
+#         v_sv_pain_para_ovhigh = model.nodes_db.loc[f'v_sv_pain_para:C(OV_value)[high_OV]_subj.{subj_id}', 'node'].trace()
+#         v_sv_pain_para_ovlow_contrib_list = []
+#         v_sv_pain_para_ovhigh_contrib_list = []
 
-        for idx, trial in subj_data.iterrows():
-            trial_sv_pain_para = trial['sv_pain_para'] 
-            v_sv_pain_para_ovlow_contrib_samples = v_sv_pain_para_ovlow * trial_sv_pain_para
-            v_sv_pain_para_ovhigh_contrib_samples = v_sv_pain_para_ovhigh * trial_sv_pain_para
+#         for idx, trial in subj_data.iterrows():
+#             trial_sv_pain_para = trial['sv_pain_para'] 
+#             v_sv_pain_para_ovlow_contrib_samples = v_sv_pain_para_ovlow * trial_sv_pain_para
+#             v_sv_pain_para_ovhigh_contrib_samples = v_sv_pain_para_ovhigh * trial_sv_pain_para
 
-            v_sv_pain_para_ovlow_contrib_mean = v_sv_pain_para_ovlow_contrib_samples.mean()    
-            v_sv_pain_para_ovshigh_contrib_mean = v_sv_pain_para_ovhigh_contrib_samples.mean()    
+#             v_sv_pain_para_ovlow_contrib_mean = v_sv_pain_para_ovlow_contrib_samples.mean()    
+#             v_sv_pain_para_ovshigh_contrib_mean = v_sv_pain_para_ovhigh_contrib_samples.mean()    
             
-            v_sv_pain_para_ovlow_contrib_list.append(v_sv_pain_para_ovlow_contrib_mean)
-            data_ov_sv_pain_para.loc[idx, 'v_sv_pain_para_OVlow_contrib'] = v_sv_pain_para_ovlow_contrib_mean  
-            v_sv_pain_para_ovhigh_contrib_list.append(v_sv_pain_para_ovshigh_contrib_mean)
-            data_ov_sv_pain_para.loc[idx, 'v_sv_pain_para_OVhigh_contrib'] = v_sv_pain_para_ovshigh_contrib_mean  
+#             v_sv_pain_para_ovlow_contrib_list.append(v_sv_pain_para_ovlow_contrib_mean)
+#             data_ov_sv_pain_para.loc[idx, 'v_sv_pain_para_OVlow_contrib'] = v_sv_pain_para_ovlow_contrib_mean  
+#             v_sv_pain_para_ovhigh_contrib_list.append(v_sv_pain_para_ovshigh_contrib_mean)
+#             data_ov_sv_pain_para.loc[idx, 'v_sv_pain_para_OVhigh_contrib'] = v_sv_pain_para_ovshigh_contrib_mean  
             
-    return data_ov_sv_pain_para
+#     return data_ov_sv_pain_para
     
 
 
@@ -1320,8 +1374,11 @@ else:
         elif version == 8:
             sv_contribute = t_sv_pain_para_contributions(models, data)
             sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 't_sv_pain_para.csv' ))
-
-
+        elif version == 9:
+            sv_contribute = v_pain_money_interaction_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'v_pain_money_interaction.csv' ))
+        else:
+            print('None')
         # diag_dir = Path(fig_dir) / "diagnostics"
         # plot_inatt_forest(
         #     fig_dir=fig_dir,
