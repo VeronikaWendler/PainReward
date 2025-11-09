@@ -7,9 +7,8 @@
 
 # Massunivariate Analysis and Second level test on betas
 
-
+#----------------------------------------------------------------------------
 # import libraries
-
 import mne
 from os.path import join as opj
 import pandas as pd
@@ -20,23 +19,44 @@ import scipy
 from bids import BIDSLayout
 from mne.stats import spatio_temporal_cluster_1samp_test as st_clust_1s_ttest
 from scipy import stats
+import os
+import re
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+from statsmodels.distributions.empirical_distribution import ECDF
+from pathlib import Path
 
 # Set bids directory
-basepath = "D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives"
+PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
+basepath = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives"
+
+def ensure_dir(path):
+    Path(path).mkdir(parents=True, exist_ok=True)
+import re
+from pathlib import Path
+import os
+
+layout = BIDSLayout(basepath)
+
+# disable Numba JIT caching & compilation
+#os.environ["NUMBA_DISABLE_JIT"] = "1"
+import numba
+numba.config.CACHE_ENABLE = False
+
 
 # Outpath for analysis
-outpath = opj(basepath, 'statistics_2')              # for averaging over more electrodes: 'statistics_2' 
+outpath = opj(basepath, 'statistics')       
 if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 
-outpath = opj(outpath, 'erps_modelbased_sv_money_OV_high')
+outpath = opj(outpath, 'erps_massuni_drift_mod_9')
 if not os.path.exists(outpath):
     os.mkdir(outpath)
 
 # participants
-part_csv = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/EEG/PainReward_sub-001-050/painrewardeegdata/participants.tsv', sep='\t')
-part = part_csv['participant_id'].unique().tolist()
+part_csv = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "participants.tsv"
+part = pd.read_csv(part_csv, sep="\t")["participant_id"].unique().tolist()
 part.sort()
 
 # Silence pandas warning
@@ -64,8 +84,9 @@ param = {
 #mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_pain_para_contrib.csv')
 #mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Quest.csv)
 
-mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_pain_para_contrib.csv')
-mod_data = mod_data[mod_data['OV_value'] == 'high_OV']
+mod_data = PROJECT_DIR / "Hddm_Docker_August_24" / "derivatives" / "figures_dir" / "painreward_behavioural_data_LPP_9" / "diagnostics" / "v_pain_money_interaction.csv"
+
+#mod_data = mod_data[mod_data['OV_value'] == 'high_OV']
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate Regression from MP Code (for single regressors)
@@ -86,8 +107,8 @@ mod_data = mod_data[mod_data['OV_value'] == 'high_OV']
 # regvars = ['sv_pain_para_SAI','sv_pain_para_TAI', 'sv_pain_para_PCS']         #'sv_pain_para_TAI', 
 # regvarsnames = ['sv_pain_para_SAI', 'sv_pain_para_TAI' , 'sv_pain_para_PCS']    #  'sv_pain_para_TAI' 
 
-regvars = ['sv_money']
-regvarsnames = ['sv_money']
+regvars = ['painlevel','moneylevel','v_painlevel_subj','v_moneylevel_subj','v_intercept_subj','v_interaction_subj', 'v_pain_contrib','v_money_contrib','v_intercept_contrib','v_interaction_contrib']
+regvarsnames = ['painlevel','moneylevel','v_painlevel_subj','v_moneylevel_subj','v_intercept_subj','v_interaction_subj', 'v_pain_contrib','v_money_contrib','v_intercept_contrib','v_interaction_contrib']
 betas, betasnp = [], []
 
 all_epos = [[] for i in range(len(regvars))]
@@ -104,7 +125,7 @@ for p in part:
     df = mod_data[mod_data['participant'] == p]
     
     # Load single epochs file (cotains one epoch/trial)
-    epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_2',                   # for averaging over more electrodes: 'eeg', 'erps_2'
+    epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   # for averaging over more electrodes: 'eeg', 'erps_2'
                               p + '_decision_cues_singletrials-epo.fif'))
     epo_1 = epo.copy()
 
@@ -124,7 +145,7 @@ for p in part:
     epo_1.metadata['blocks_idx'] = blocks_idx
 
     # Initialize dataFrame for filtered block data for part
-    epo_2_filtered = pd.DataFrame()
+    epo_1_filtered = pd.DataFrame()
 
     # filter for unique participants in the behavioral frame
     for participant in df['participant'].unique():
@@ -138,36 +159,37 @@ for p in part:
                 
             # keep only the rows where trialblocks col match trials.thisN col
             filtered_block_df = erps_block_df[erps_block_df['trialblocks'].isin(df_block_df['trials.thisN'])]            
-            epo_2_filtered = pd.concat([epo_2_filtered, filtered_block_df], ignore_index=True)
+            epo_1_filtered = pd.concat([epo_1_filtered, filtered_block_df], ignore_index=True)
     
-    filtered_data.append(epo_2_filtered)
+    filtered_data.append(epo_1_filtered)
 
-epo_2_filtered_combined = pd.concat(filtered_data, ignore_index=True)
+epo_1_filtered_combined = pd.concat(filtered_data, ignore_index=True)
 #epo_2_filtered_combined.to_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/epo_2_filtered_combined')
 
-part_2_dat = mod_data
-part_2 = part_2_dat['participant'].unique().tolist()
+part_1_dat = mod_data
+part_1 = part_1_dat['participant'].unique().tolist()
 
-part_2.sort()
+part_1.sort()
+
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate 
 
-for pa in part_2:
-    df2 = epo_2_filtered_combined[epo_2_filtered_combined['participant_id'] == pa]
-    mod2 = part_2_dat[part_2_dat['participant'] == pa]
+for pa in part_1:
+    df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
+    mod2 = part_1_dat[part_1_dat['participant'] == pa]
     
-    epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps_2',                        # for averaging over more electrodes: 'eeg', 'erps_2'
+    epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',                        # for averaging over more electrodes: 'eeg', 'erps_2'
                               pa + '_decision_cues_singletrials-epo.fif'))
     epo_cop = epo.copy()
     
-    # 1: Matching Trials (trialsnum col)
+    # Matching Trials (trialsnum col)
     matching= epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
     
-    # 2: Filter the Epochs object and metadata to keep matching trials
+    # Filter the Epochs object and metadata to keep matching trials
     epo_filt = epo_cop[matching]
     
-    # Step 3: Update metadata in filtered Epochs object
+    # Update metadata in filtered Epochs object
     epo_filt.metadata = epo_filt.metadata[matching]
     
     # downsample if necessary
@@ -239,9 +261,6 @@ for idx, regvar in enumerate(regvars):
 
     
 
-# # _________________________________________________________________
-# # Second level test on betas
-
 # _________________________________________________________________
 # Second level test on betas
 
@@ -287,7 +306,7 @@ tvals = np.stack(tvals)
 pvals = np.stack(pvalues)
 
 np.save(opj(outpath, 'ols_2ndlevel_tvals.npy'), tvals)
-np.save(opj(outpath, 'ols_2ndlevel_pvals.npy'), pvalues)
+np.save(opj(outpath, 'ols_2ndlevel_pvals.npy'), pvals)
 np.save(opj(outpath, 'ols_2ndlevel_betas.npy'), allbetas)
 
 for idx, regvar in enumerate(regvars):
