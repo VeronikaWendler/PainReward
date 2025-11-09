@@ -85,7 +85,7 @@ param = {
 #mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Quest.csv)
 
 mod_data_path = PROJECT_DIR / "Hddm_Docker_August_24" / "figures_dir" / "painreward_behavioural_data_LPP_9" / "diagnostics" / "v_pain_money_interaction.csv"
-mod_data = pd.read_csv(mod_data_path, sep="\t")
+mod_data = pd.read_csv(mod_data_path, sep=None, engine="python")
 #mod_data = mod_data[mod_data['OV_value'] == 'high_OV']
 
 
