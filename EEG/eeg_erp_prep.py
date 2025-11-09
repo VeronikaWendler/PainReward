@@ -311,7 +311,7 @@ def average_time_win_strials(strials, chans_to_average, amp_lat):
             strials.metadata['amp_' + '_'.join(c) + '_' + str(a[0]) + '-'
                              + str(a[1])] = all_amps
     return strials
-#%%
+
 # Parameters to define
 chans_to_average = [['Fz'], ['FCz'], ['POz'], ['Cz'], ['CPz'], ['Pz'], ['Oz']]    #for averaging over more channels: [['F3'], ['F4'], ['Fz'], ['FC5'], ['FC6'], ['FC1'], ['FC2'], ['FCz'], ['C3'], ['C4'], ['CP1'], ['CP2'], ['CP5'], ['CP6'], ['P3'], ['Pz'], ['P4'], ['P7'], ['P8'], ['PO3'], ['PO7'], ['PO4'], ['O1'], ['Oz'], ['O2']]                                                                          
 amp_lat = [[0.4, 0.8]] 
@@ -491,5 +491,3 @@ all_meta.to_csv(opj(outpath, 'decision_erpsmeta.csv'), index=False)             
 #removed_frame.to_csv(opj(outpath, 'decision_tfr_rejectionstats.csv'))
 #
 #
-## %%
-##
