@@ -7,7 +7,7 @@ EEG/PainReward_sub-001-050/painrewardeegdata/
 Hddm_Docker_August_24/models_dir/
 EEG/EEG_models_dir/
 Hddm_Docker_August_24/derivatives/
-
+EEG/eeg_mvpa_decode_timecourse.py
 
 
 
