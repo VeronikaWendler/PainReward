@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=eeg_clean
 #SBATCH --partition=compute                
-#SBATCH --cpus-per-task=6                  
-#SBATCH --mem=80G                          # EEG 
+#SBATCH --cpus-per-task=12                  
+#SBATCH --mem=180G                          # EEG 
 #SBATCH --time=24:00:00                    
 #SBATCH -o logs/eeg_%j.out
 #SBATCH -e logs/eeg_%j.err
@@ -28,6 +28,6 @@ export PATH=$HOME/.local/bin:$PATH
 singularity exec \
     --bind ${PROJECT}:/workspace \
     ${IMAGE} \
-    python /workspace/EEG/eeg_preprocess.py
+    python /workspace/EEG/eeg_erp_prep.py
 
 
