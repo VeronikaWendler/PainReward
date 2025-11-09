@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=eeg_clean
 #SBATCH --partition=compute                
-#SBATCH --cpus-per-task=12                  
+#SBATCH --cpus-per-task=8                  
 #SBATCH --mem=180G                          # EEG 
 #SBATCH --time=24:00:00                    
 #SBATCH -o logs/eeg_%j.out
