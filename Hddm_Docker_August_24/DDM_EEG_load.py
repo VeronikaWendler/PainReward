@@ -75,7 +75,7 @@ numba.config.CACHE_ENABLE = False
 # V_sub = value of the worse option
 
 # params:
-version = 8    # defining version #
+version = 9    # defining version #
 run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
@@ -354,8 +354,11 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
         elif version == 8:  # drift rate is dependent on the the sv_pain_para
             t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [t_reg]       
+        elif version == 9:
+            v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+            reg_descr = [v_reg]
         else:
-            raise ValueError(f"Is this version illegal ?? It feels illegal...")   
+            raise ValueError(f"Is this version correct ? ")   
         
 
         m = hddm.models.HDDMRegressor(data, 
@@ -662,10 +665,28 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                       'Drift Rate', 
                       'Starting Point Bias',
                       'Non-dec. time']
+        elif version == 9:
+            params_of_interest = ['a',
+                                  'v',
+                                  't', 
+                                  'v_Intercept',
+                                  'v_painlevel',
+                                  'v_moneylevel',
+                                  'v_painlevel_moneylevel'
+                                  ]
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Threshold',
+                      'Drift Rate', 
+                      'Non-dec. time',
+                      'v_Intercept',
+                      'v_painlevel',
+                      'v_moneylevel',
+                      'v_painlevel_moneylevel'
+                      ]
         else:
             raise ValueError(f"Invalid version {version}")
         
-            
+            painlevel + moneylevel + painlevel * moneylevel
     elif phase == "LE_RL":
         if version == 0:
             params_of_interest = [
