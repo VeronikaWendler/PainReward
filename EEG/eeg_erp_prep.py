@@ -14,7 +14,7 @@ from os.path import join as opj
 import pandas as pd
 import numpy as np
 from mne.viz import plot_evoked_joint as pej
-#from bids import BIDSLayout
+from bids import BIDSLayout
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import seaborn as sns
