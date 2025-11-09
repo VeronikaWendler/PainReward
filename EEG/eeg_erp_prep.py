@@ -14,10 +14,16 @@ from os.path import join as opj
 import pandas as pd
 import numpy as np
 from mne.viz import plot_evoked_joint as pej
-from bids import BIDSLayout
+#from bids import BIDSLayout
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-
+import seaborn as sns
+import os
+from scipy.stats import pearsonr
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+from statsmodels.distributions.empirical_distribution import ECDF
+from pathlib import Path
 
 # Set bids directory
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
