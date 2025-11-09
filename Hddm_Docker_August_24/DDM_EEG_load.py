@@ -672,7 +672,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                                   'v_Intercept',
                                   'v_painlevel',
                                   'v_moneylevel',
-                                  'v_painlevel_moneylevel'
+                                  'v_painlevel:moneylevel'
                                   ]
             params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
             titles = ['Threshold',
@@ -681,7 +681,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                       'v_Intercept',
                       'v_painlevel',
                       'v_moneylevel',
-                      'v_painlevel_moneylevel'
+                      'v_painlevel:moneylevel'
                       ]
         else:
             raise ValueError(f"Invalid version {version}")
@@ -1136,7 +1136,7 @@ def v_pain_money_interaction_contributions(models, data):
         b0 = combined.nodes_db.loc[f"v_Intercept_subj.{subj}", "node"].trace().mean()
         b1 = combined.nodes_db.loc[f"v_painlevel_subj.{subj}", "node"].trace().mean()
         b2 = combined.nodes_db.loc[f"v_moneylevel_subj.{subj}", "node"].trace().mean()
-        b3 = combined.nodes_db.loc[f"v_painlevel_moneylevel_subj.{subj}", "node"].trace().mean()
+        b3 = combined.nodes_db.loc[f"v_painlevel:moneylevel_subj.{subj}", "node"].trace().mean()
 
         # stable subject-level params
         data_out.loc[subj_mask, "v_intercept_subj"] = b0
