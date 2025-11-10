@@ -86,6 +86,25 @@ param = {
 
 mod_data_path = PROJECT_DIR / "Hddm_Docker_August_24" / "figures_dir" / "painreward_behavioural_data_LPP_9" / "diagnostics" / "v_pain_money_interaction.csv"
 mod_data = pd.read_csv(mod_data_path, sep=None, engine="python")
+
+# Subjects in EEG (participants.tsv)
+eeg_participants = set(part)
+
+# Subjects in behavioral HDDM CSV
+beh_participants = set(mod_data["participant"].unique())
+
+# Subjects present in both datasets
+common_participants = sorted(list(eeg_participants & beh_participants))
+
+print("\n Subjects used:", common_participants)
+print("EEG only:", eeg_participants - beh_participants)
+print("Behavior only:", beh_participants - eeg_participants)
+
+# Overwrite participant list
+part = common_participants
+
+part_1_dat = mod_data[mod_data["participant"].isin(part)]
+part_1 = part
 #mod_data = mod_data[mod_data['OV_value'] == 'high_OV']
 
 
@@ -167,10 +186,6 @@ for p in part:
 epo_1_filtered_combined = pd.concat(filtered_data, ignore_index=True)
 #epo_2_filtered_combined.to_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/epo_2_filtered_combined')
 
-part_1_dat = mod_data
-part_1 = part_1_dat['participant'].unique().tolist()
-
-part_1.sort()
 
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
@@ -191,7 +206,7 @@ for pa in part_1:
     epo_filt = epo_cop[matching]
     
     # Update metadata in filtered Epochs object
-    epo_filt.metadata = epo_filt.metadata[matching]
+    #epo_filt.metadata = epo_filt.metadata[matching]
     
     # downsample if necessary
     if epo_filt.info['sfreq'] != param['testresampfreq']:
