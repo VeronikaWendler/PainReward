@@ -482,38 +482,51 @@ for ridx, regvar in enumerate(regvars):
                         'fig_ols_erps_amp_bins_' + regvar + '_'
                         + c + '.svg'),
                     dpi=600, bbox_inches='tight')
-
-    bins_topo = list(range(nbins))
-    for idx, binnum in enumerate([str(i+1) for i in bins_topo]):
+        
+    # Use only actual bins that exist in evokeds
+    bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
+    
+    for idx, binnum in enumerate(bin_ids):
         fig, topo_axis = plt.subplots(figsize=(1, 1))
+    
+        # safe indexing — no more KeyError
         tidx = np.argmin(np.abs(evokeds[binnum].times - 0.6))
-        dat = evokeds[binnum].data[:, tidx]*1000000
-
-        im, _ = plot_topomap(dat,
-                             pos=evokeds[binnum].info,
-                             cmap=cmap,
-                             show=False,
-                             ch_type='eeg',
-                             outlines='head',
-                             vlim=(-vminmax, vminmax),
-                             extrapolate='head',
-                             axes=topo_axis,
-                             sensors=False,
-                             contours=0,)
+        dat = evokeds[binnum].data[:, tidx] * 1000000
+    
+        im, _ = plot_topomap(
+            dat,
+            pos=evokeds[binnum].info,
+            cmap=cmap,
+            show=False,
+            ch_type='eeg',
+            outlines='head',
+            vlim=(-vminmax, vminmax),
+            extrapolate='head',
+            axes=topo_axis,
+            sensors=False,
+            contours=0,
+        )
         topo_axis.set_title(bina + ' ' + binnum,
-                            fontdict={'size': param['labelfontsize']-1}, pad=0.1)
-
-        fig.savefig(opj(outfigpath, 'fig_binsamp_topo_'
-                        + regvar + '_bin' + binnum + '.svg'),
+                            fontdict={'size': param['labelfontsize']-1},
+                            pad=0.1)
+    
+        fig.savefig(opj(outfigpath,
+                        f'fig_binsamp_topo_{regvar}_bin{binnum}.svg'),
                     dpi=600, bbox_inches='tight')
-        if idx+1 == len(bins_topo):
+    
+        # add colorbar at last bin
+        if idx + 1 == len(bin_ids):
             fig, ax = plt.subplots(figsize=(0.2, 1))
-            cbar1 = fig.colorbar(im, cax=ax,
-                                 orientation='vertical', aspect=1)
-            cbar1.set_label('Amplitude (uV)', rotation=270,
-                            labelpad=12, fontdict={'fontsize': param["labelfontsize"]-1})
+            cbar1 = fig.colorbar(im, cax=ax, orientation='vertical', aspect=1)
+            cbar1.set_label(
+                'Amplitude (uV)',
+                rotation=270,
+                labelpad=12,
+                fontdict={'fontsize': param["labelfontsize"]-1}
+            )
             cbar1.ax.tick_params(labelsize=param['ticksfontsize']-2)
-            fig.savefig(opj(outfigpath, 'fig_topo_bins_cbar' + str(ridx) + '.svg'),
+            fig.savefig(opj(outfigpath,
+                            f'fig_topo_bins_cbar{ridx}.svg'),
                         dpi=600, bbox_inches='tight')
 
     for c in chan_to_plot:
