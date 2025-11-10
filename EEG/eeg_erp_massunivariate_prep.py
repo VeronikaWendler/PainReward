@@ -127,7 +127,7 @@ part_1 = part
 # regvars = ['sv_pain_para_SAI','sv_pain_para_TAI', 'sv_pain_para_PCS']         #'sv_pain_para_TAI', 
 # regvarsnames = ['sv_pain_para_SAI', 'sv_pain_para_TAI' , 'sv_pain_para_PCS']    #  'sv_pain_para_TAI' 
 #
-regvars = ['painlevel','moneylevel', 'v_pain_contrib','v_money_contrib','v_intercept_contrib','v_interaction_contrib']
+regvars = ['painlevel','moneylevel', 'v_pain_contrib','v_money_contrib','v_interaction_contrib']
 regvarsnames = ['painlevel','moneylevel', 'v_pain_contrib','v_money_contrib','v_intercept_contrib','v_interaction_contrib']
 
 all_epos = [[] for i in range(len(regvars))]
