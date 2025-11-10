@@ -126,10 +126,9 @@ part_1 = part
 
 # regvars = ['sv_pain_para_SAI','sv_pain_para_TAI', 'sv_pain_para_PCS']         #'sv_pain_para_TAI', 
 # regvarsnames = ['sv_pain_para_SAI', 'sv_pain_para_TAI' , 'sv_pain_para_PCS']    #  'sv_pain_para_TAI' 
-
-regvars = ['painlevel','moneylevel','v_painlevel_subj','v_moneylevel_subj','v_intercept_subj','v_interaction_subj', 'v_pain_contrib','v_money_contrib','v_intercept_contrib','v_interaction_contrib']
-regvarsnames = ['painlevel','moneylevel','v_painlevel_subj','v_moneylevel_subj','v_intercept_subj','v_interaction_subj', 'v_pain_contrib','v_money_contrib','v_intercept_contrib','v_interaction_contrib']
-betas, betasnp = [], []
+#
+regvars = ['painlevel','moneylevel', 'v_pain_contrib','v_money_contrib','v_intercept_contrib','v_interaction_contrib']
+regvarsnames = ['painlevel','moneylevel', 'v_pain_contrib','v_money_contrib','v_intercept_contrib','v_interaction_contrib']
 
 all_epos = [[] for i in range(len(regvars))]
 allbetasnp = []
