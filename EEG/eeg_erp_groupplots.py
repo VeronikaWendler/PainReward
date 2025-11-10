@@ -447,14 +447,18 @@ for ridx, regvar in enumerate(regvars):
         cbarout[0].axes[0].remove()
         cbarout[0].savefig(opj(outfigpath, 'fig_ols_erps_betas_line_cbar' + regvar + '_' + c + '.svg'),
                            dpi=800, bbox_inches='tight')
-        for idx, bin in enumerate([str(i+1) for i in range(nbins)]):
-
-            line_axis.plot(all_epos[0].times * 1000,
-                           evokeds[bin].data[pick, :] * 1000000,
-                           label=str(idx + 1),
-                           linewidth=2,
-                           color=plt.cm.get_cmap(cmap,
-                                                 nbins)(idx / nbins))
+        
+        bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
+        
+        for idx, bin_id in enumerate(bin_ids):
+            line_axis.plot(
+                all_epos[0].times * 1000,
+                evokeds[bin_id].data[pick, :] * 1000000,
+                label=str(idx + 1),
+                linewidth=2,
+                color=plt.get_cmap(cmap)(idx / len(bin_ids))
+            )
+        
 
         line_axis.tick_params(labelsize=12)
         line_axis.set_xlabel('Time (ms)',
