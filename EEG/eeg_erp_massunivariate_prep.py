@@ -6,7 +6,6 @@
  '''
 
 # Massunivariate Analysis and Second level test on betas
-
 #----------------------------------------------------------------------------
 # import libraries
 import mne
