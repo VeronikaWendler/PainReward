@@ -29,7 +29,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 # part = part_csv['participant_id'].unique().tolist()
 
-#layout = BIDSLayout(basepath)
+layout = BIDSLayout(basepath)
 
 # Outpath for analysis
 outpath = opj(outpathall, 'statistics_2/erps_modelbased_sv_money_OV_high')    # for averaging over more electrodes: statistics_2
