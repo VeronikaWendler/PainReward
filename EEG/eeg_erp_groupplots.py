@@ -66,7 +66,7 @@ param = {
 }
 
 plt.rc("axes.spines", top=False, right=False)
-plt.rcParams['font.family'] = 'Verdana'
+plt.rcParams['font.family'] = 'Liberation Sans'
 
 ##-----------------------------------------------------------------------------------------------------
 ## Multivariate Regression Plots from MP for only 1 regressor
@@ -389,10 +389,16 @@ for ridx, regvar in enumerate(regvars):
             bina = 'Ventile'
             nbins = 5
         all_epos.metadata['bin'] = 0
+        unique_vals = all_epos.metadata[regvar].nunique()
+        nbins_eff = min(nbins, unique_vals)
+
         all_epos.metadata['bin'], bins = pd.qcut(all_epos.metadata[regvar],
-                                                 nbins,
-                                                 labels=False, retbins=True)
+                                                q=nbins_eff,
+                                                labels=False,
+                                                retbins=True,
+                                                duplicates='drop')
         all_epos.metadata['bin' + '_' + regvar] = all_epos.metadata['bin']
+        
         # Bin labels
         bin_labels = []
         for bidx, b in enumerate(bins):
