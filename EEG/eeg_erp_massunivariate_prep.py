@@ -37,7 +37,7 @@ from pathlib import Path
 import os
 
 layout = BIDSLayout(basepath)
-
+#
 # disable Numba JIT caching & compilation
 #os.environ["NUMBA_DISABLE_JIT"] = "1"
 import numba
