@@ -55,7 +55,8 @@ if not os.path.exists(outfigpath):
     os.mkdir(outfigpath)
 param = {
     # Alpha Threshold
-    'alpha': 0.05/3,
+    'alpha': 0.05/3,           # because we have 3 regressors, but MP, perhaps this is actually too conservative -
+    #                          how about FDR, holm or other? I ran this without correction before and got interesting sig. activation for money and the pain*money interaction
     # Font sizez in plot
     'titlefontsize': 12,
     'labelfontsize': 12,
@@ -317,7 +318,7 @@ regvarsnames = ['v_pain_contrib','v_money_contrib','v_interaction_contrib']
 plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
 times_pos = [np.abs(beta_gavg[0].times-0.2 - t).argmin() for t in plot_times]
 
-chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz' ] 
+chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz'] 
   
 for ridx, regvar in enumerate(regvars):
 
@@ -466,7 +467,7 @@ for ridx, regvar in enumerate(regvars):
         line_axis.set_ylabel('Amplitude (uV)',
                              fontdict={'size': param['labelfontsize']})
         line_axis.axhline(0, linestyle='--', color='gray')
-        line_axis.axvline(0, ymin=0,
+        line_axis.axvline(0, ymin=-0.2,
                           ymax=0.2,
                           linestyle='--', color='gray')
         line_axis.get_xaxis().tick_bottom()
@@ -560,7 +561,7 @@ for ridx, regvar in enumerate(regvars):
                                mean - sem, mean + sem, alpha=0.3,
                                facecolor=clrs[0])
         # Make it nice
-        line_axis.set_ylim((-0.02, 0.25))
+        line_axis.set_ylim((-0.25, 0.25))
 
         line_axis.axhline(0, linestyle='--', color='gray')
         line_axis.axvline(0, ymin=0,

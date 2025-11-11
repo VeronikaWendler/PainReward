@@ -36,7 +36,7 @@ from pathlib import Path
 import os
 
 layout = BIDSLayout(basepath)
-#
+# for cluster
 # disable Numba JIT caching & compilation
 #os.environ["NUMBA_DISABLE_JIT"] = "1"
 import numba
@@ -69,7 +69,6 @@ param = {
     'nperms': 5000,
     # Random state to get same permutations each time
     'random_state': 23,
-    # Downsample to this frequency prior to analysis
     'testresampfreq': 1024,
     # clustering threshold
     'cluster_threshold': 0.01}
@@ -86,10 +85,10 @@ param = {
 mod_data_path = PROJECT_DIR / "Hddm_Docker_August_24" / "figures_dir" / "painreward_behavioural_data_LPP_9" / "diagnostics" / "v_pain_money_interaction.csv"
 mod_data = pd.read_csv(mod_data_path, sep=None, engine="python")
 
-# Subjects in EEG (participants.tsv)
+# Subjects in EEG
 eeg_participants = set(part)
 
-# Subjects in behavioral HDDM CSV
+# Subjects in HDDM CSV
 beh_participants = set(mod_data["participant"].unique())
 
 # Subjects present in both datasets
@@ -99,7 +98,6 @@ print("\n Subjects used:", common_participants)
 print("EEG only:", eeg_participants - beh_participants)
 print("Behavior only:", beh_participants - eeg_participants)
 
-# Overwrite participant list
 part = common_participants
 
 part_1_dat = mod_data[mod_data["participant"].isin(part)]
@@ -143,7 +141,7 @@ for p in part:
     df = mod_data[mod_data['participant'] == p]
     
     # Load single epochs file (cotains one epoch/trial)
-    epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   # for averaging over more electrodes: 'eeg', 'erps_2'
+    epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
                               p + '_decision_cues_singletrials-epo.fif'))
     epo_1 = epo.copy()
 
@@ -162,7 +160,6 @@ for p in part:
     epo_1.metadata['trialblocks'] = trialblocks
     epo_1.metadata['blocks_idx'] = blocks_idx
 
-    # Initialize dataFrame for filtered block data for part
     epo_1_filtered = pd.DataFrame()
 
     # filter for unique participants in the behavioral frame
@@ -175,7 +172,6 @@ for p in part:
             erps_block_df = erps_p_df[erps_p_df['blocks_idx'] == block_x]
             df_block_df = df_unique[df_unique['blocks.thisRepN'] == block_x]
                 
-            # keep only the rows where trialblocks col match trials.thisN col
             filtered_block_df = erps_block_df[erps_block_df['trialblocks'].isin(df_block_df['trials.thisN'])]            
             epo_1_filtered = pd.concat([epo_1_filtered, filtered_block_df], ignore_index=True)
     
@@ -197,7 +193,6 @@ for pa in part_1:
                               pa + '_decision_cues_singletrials-epo.fif'))
     epo_cop = epo.copy()
     
-    # Matching Trials (trialsnum col)
     matching= epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
     
     # Filter the Epochs object and metadata to keep matching trials
@@ -216,7 +211,6 @@ for pa in part_1:
     mod2 = mod2.iloc[goodtrials]
     epo_filt = epo_filt[goodtrials]
     
-    # Robust standardize data before regression
     scale = Scaler(scalings='mean')
     epo_z = mne.EpochsArray(scale.fit_transform(epo_filt.get_data()),
                             epo_filt.info)
@@ -241,7 +235,6 @@ for pa in part_1:
 
     betasnp = []
     for idx, regvar in enumerate(regvars):
-        # Keep only rows with values on regressor
         keep = np.where(~np.isnan(mod2[regvar]))[0]
         df_reg = mod2.iloc[keep]
         epo_reg = epo_z.copy()[keep]
@@ -278,14 +271,12 @@ for idx, regvar in enumerate(regvars):
 # _________________________________________________________________
 # Second level test on betas
 
-# Get channels connectivity
+# connectivity
 connect, names = mne.channels.find_ch_adjacency(epo_filt.info, ch_type='eeg')
-
 
 # Get cluster entering threshold
 if type(param['cluster_threshold']) is not dict:
-    # Get cluster entering treshold
-    p_thresh = param['cluster_threshold'] / 2  # two sided
+    p_thresh = param['cluster_threshold'] / 2  
     n_samples = allbetas.shape[0]
     param['cluster_threshold'] = -stats.t.ppf(p_thresh, n_samples - 1)
 
@@ -303,15 +294,14 @@ for idx, regvar in enumerate(regvars):
                                                             n_permutations=param['nperms'],
                                                             buffer_size=None)
 
-    # Reshape p-values to match data
+    # Reshape p-values
     pvals = np.ones_like(tval)
     for c, p_val in zip(clusters, cluster_p_values):
         pvals[c] = p_val
 
-    # In a list for each regressor
+    # list for each regressor
     tvals.append(tval)
     pvalues.append(pvals)
-    # Save for each regressor in case crash/stop
     np.save(opj(outpath, 'ols_2ndlevel_tval_' + regvar + '.npy'), tvals[-1])
     np.save(opj(outpath, 'ols_2ndlevel_pval_' + regvar + '.npy'), pvalues[-1])
 
