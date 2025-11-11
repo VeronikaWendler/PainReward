@@ -48,14 +48,14 @@ part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
 # Outpath for analysis
-outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9')   
+outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9_2')   
 # Outpath for figures
-outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9')   
+outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_2')   
 if not os.path.exists(outfigpath):
     os.mkdir(outfigpath)
 param = {
     # Alpha Threshold
-    'alpha': 0.05,
+    'alpha': 0.05/3,
     # Font sizez in plot
     'titlefontsize': 12,
     'labelfontsize': 12,
@@ -310,11 +310,11 @@ allbetas = np.load(opj(outpath, 'ols_2ndlevel_betas.npy'),
 
 # Must be in the same order as in the stats code
 regvars = ['painlevel','moneylevel', 'v_pain_contrib','v_money_contrib','v_interaction_contrib']
-regvarsnames = ['painlevel','moneylevel', 'v_pain_contrib','v_money_contrib','v_interaction_contrib']
+regvarsnames = ['v_pain_contrib','v_money_contrib','v_interaction_contrib']
 
 # ## Plot
 # Plot descritive topo data
-plot_times = [0.2, 0.4, 0.6, 0.8]
+plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
 times_pos = [np.abs(beta_gavg[0].times-0.2 - t).argmin() for t in plot_times]
 
 chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz' ] 
