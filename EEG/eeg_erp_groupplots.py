@@ -309,7 +309,7 @@ allbetas = np.load(opj(outpath, 'ols_2ndlevel_betas.npy'),
                    allow_pickle=True)
 
 # Must be in the same order as in the stats code
-regvars = ['painlevel','moneylevel', 'v_pain_contrib','v_money_contrib','v_interaction_contrib']
+regvars = ['v_pain_contrib','v_money_contrib','v_interaction_contrib']
 regvarsnames = ['v_pain_contrib','v_money_contrib','v_interaction_contrib']
 
 # ## Plot
