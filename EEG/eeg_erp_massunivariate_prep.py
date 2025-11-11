@@ -49,7 +49,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 
-outpath = opj(outpath, 'erps_massuni_drift_mod_9')
+outpath = opj(outpath, 'erps_massuni_drift_mod_9_2')
 if not os.path.exists(outpath):
     os.mkdir(outpath)
 
@@ -126,8 +126,8 @@ part_1 = part
 # regvars = ['sv_pain_para_SAI','sv_pain_para_TAI', 'sv_pain_para_PCS']         #'sv_pain_para_TAI', 
 # regvarsnames = ['sv_pain_para_SAI', 'sv_pain_para_TAI' , 'sv_pain_para_PCS']    #  'sv_pain_para_TAI' 
 #
-regvars = ['painlevel','moneylevel', 'v_pain_contrib','v_money_contrib','v_interaction_contrib']
-regvarsnames = ['Painlevel','Moneylevel', 'V_pain_contrib','V_money_contrib','V_interaction_contrib']
+regvars = ['v_pain_contrib','v_money_contrib','v_interaction_contrib']
+regvarsnames = ['V_pain_contrib','V_money_contrib','V_interaction_contrib']
 
 all_epos = [[] for i in range(len(regvars))]
 allbetasnp = []
