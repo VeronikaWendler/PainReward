@@ -268,7 +268,7 @@ for idx, regvar in enumerate(regvars):
 
     
 
-# _________________________________________________________________
+#
 # Second level test on betas
 
 # connectivity
