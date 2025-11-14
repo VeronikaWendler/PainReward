@@ -207,15 +207,6 @@ for pa in part_1:
     print(f"\n--- Processing {pa} ---")
     df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
     mod2 = part_1_dat[part_1_dat['participant'] == pa]
-    matching = epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
-    print(matching)
-
-    if matching.sum() < 5:
-        print(f"Skipping {pa}: only {matching.sum()} matching trials")
-        skipped_subjects.append(pa)
-        continue
-
-
     
     if version == 1:
         epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',                        # for averaging over more electrodes: 'eeg', 'erps_2'
@@ -247,7 +238,14 @@ for pa in part_1:
     scale = Scaler(scalings='mean')
     epo_z = mne.EpochsArray(scale.fit_transform(epo_filt.get_data()),
                             epo_filt.info)
-    
+     
+    matching = epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
+    print(matching)
+
+    if matching.sum() < 5:
+        print(f"Skipping {pa}: only {matching.sum()} matching trials")
+        skipped_subjects.append(pa)
+        continue
     # small_value_threshold = 1e-3
 
     # # exclude trials with very small data
