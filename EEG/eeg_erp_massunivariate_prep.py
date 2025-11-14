@@ -199,9 +199,23 @@ epo_1_filtered_combined = pd.concat(filtered_data, ignore_index=True)
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate 
 
+included_subjects = []
+skipped_subjects = []
+
+
 for pa in part_1:
+    print(f"\n--- Processing {pa} ---")
     df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
     mod2 = part_1_dat[part_1_dat['participant'] == pa]
+    matching = epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
+    print(matching)
+
+    if matching.sum() < 5:
+        print(f"Skipping {pa}: only {matching.sum()} matching trials")
+        skipped_subjects.append(pa)
+        continue
+
+
     
     if version == 1:
         epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',                        # for averaging over more electrodes: 'eeg', 'erps_2'
@@ -270,47 +284,60 @@ for pa in part_1:
 #        res = mne.stats.linear_regression(epo_reg, epo_reg.metadata[names],
 #                                          names=names)
 
+    betasnp = []
+    subject_has_regressors = False
+
     for idx, regvar in enumerate(regvars):
 
         vals = mod2[regvar].to_numpy(dtype=float)
         keep = np.where(np.isfinite(vals))[0]
-    
+
+        if len(keep) < 2:
+            print(f"  Skipping {regvar}: only {len(keep)} finite trials")
+            continue
+
         df_reg = mod2.iloc[keep].copy()
         epo_reg = epo_z.copy()[keep]
         epo_keep = epo_filt.copy()[keep]
-    
-        if len(df_reg) < 2:
-            print(f"Skipping {pa}, {regvar}: not enough valid trials ({len(df_reg)})")
+
+        if np.nanstd(df_reg[regvar]) == 0:
+            print(f"Skipping {regvar}: zero variance")
             continue
-    
-        regvals = df_reg[regvar].to_numpy(dtype=float)
-        if np.nanstd(regvals) == 0:
-            print(f"Skipping {pa}, {regvar}: zero variance in regressor")
-            continue
-    
-        df_reg[regvar + '_z'] = stats.zscore(regvals)
-    
+
+        df_reg[regvar + "_z"] = stats.zscore(df_reg[regvar])
         design = df_reg.assign(Intercept=1)[["Intercept", regvar + "_z"]]
-        bad = ~np.isfinite(design.to_numpy())
-        if bad.any():
-            print(f"\n! Problem in subject {pa}, regressor {regvar}")
-            print("rows with NaN/Inf:\n", design[bad.any(axis=1)])
-            raise SystemExit("Stopping early")
-    
-        epo_keep.metadata = design
+
+        if not np.all(np.isfinite(design.to_numpy())):
+            print(f"  Skipping {regvar}: contains NaN")
+            continue
+
         epo_reg.metadata = design
-    
-        res = mne.stats.linear_regression(epo_reg, design, names=["Intercept", regvar + "_z"])
-    
-        # Collect betas
-        betas[idx].append(res[regvar + '_z'].beta)
-        betasnp.append(res[regvar + '_z'].beta.data)
+
+        res = mne.stats.linear_regression(
+            epo_reg, design, names=["Intercept", regvar + "_z"]
+        )
+
+        betas[idx].append(res[regvar + "_z"].beta)
+        betasnp.append(res[regvar + "_z"].beta.data)
         all_epos[idx].append(epo_keep)
+
+        subject_has_regressors = True
+
+    if not subject_has_regressors:
+        print(f"Skipping {pa}: no valid regressors")
+        skipped_subjects.append(pa)
+        continue
+
+    included_subjects.append(pa)
     allbetasnp.append(np.stack(betasnp))
+    print(f"Included {pa}")
 
 # Stack all data
 allbetas = np.stack(allbetasnp)
 
+print(f"Total subjects: {len(part_1)}")
+print(f"Included ({len(included_subjects)}): {included_subjects}")
+print(f"Skipped  ({len(skipped_subjects)}): {skipped_subjects}")
 
 # Grand average
 beta_gavg = []
