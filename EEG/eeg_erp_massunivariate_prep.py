@@ -317,8 +317,8 @@ for pa in part_1:
 
         betas[idx].append(res[regvar + "_z"].beta)
         betasnp.append(res[regvar + "_z"].beta.data)
+        epo_keep.metadata = df_reg[[regvar]].reset_index(drop=True)
         all_epos[idx].append(epo_keep)
-
         subject_has_regressors = True
 
     if not subject_has_regressors:
