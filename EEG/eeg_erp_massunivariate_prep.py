@@ -3,6 +3,7 @@
  # @ Author: Michel-Pierre Coll (michel-pierre.coll@psy.ulaval.ca), edited by Veronika Wendler
  # @ Date: 2024
  # @ Description:
+ 
  '''
 
 # Massunivariate Analysis and Second level test on betas
@@ -42,17 +43,25 @@ layout = BIDSLayout(basepath)
 import numba
 numba.config.CACHE_ENABLE = False
 
-
 # Outpath for analysis
 outpath = opj(basepath, 'statistics')       
 if not os.path.exists(outpath):
     os.mkdir(outpath)
     
+# here for decision its just erps_massuni_drift_mod_9_2 and for passive it is: erps_massuni_drift_mod_9_2_passive
+version = 2    # version 1 is for decision and version 2 is for passive phase 
 
-outpath = opj(outpath, 'erps_massuni_drift_mod_9_2')
-if not os.path.exists(outpath):
-    os.mkdir(outpath)
-
+if version == 1:
+    outpath = opj(outpath, 'erps_massuni_drift_mod_9_2')
+    if not os.path.exists(outpath):
+        os.mkdir(outpath)
+elif version == 2:
+    outpath = opj(outpath, 'erps_massuni_drift_mod_9_2_passive')
+    if not os.path.exists(outpath):
+        os.mkdir(outpath)
+else:
+    print("no version")
+    
 # participants
 part_csv = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "participants.tsv"
 part = pd.read_csv(part_csv, sep=None, engine="python")["participant_id"].unique().tolist()
@@ -141,9 +150,14 @@ for p in part:
     df = mod_data[mod_data['participant'] == p]
     
     # Load single epochs file (cotains one epoch/trial)
-    epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
+    if version == 1:
+        epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
                               p + '_decision_cues_singletrials-epo.fif'))
-    epo_1 = epo.copy()
+        epo_1 = epo.copy()
+    elif version == 2:
+        epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_passive',                   
+                              p + '_passive_cues_singletrials-epo.fif'))
+        epo_1 = epo.copy()
 
     participants = epo_1.metadata['participant_id'].unique()
     trialblocks = []
@@ -189,9 +203,14 @@ for pa in part_1:
     df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
     mod2 = part_1_dat[part_1_dat['participant'] == pa]
     
-    epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',                        # for averaging over more electrodes: 'eeg', 'erps_2'
+    if version == 1:
+        epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',                        # for averaging over more electrodes: 'eeg', 'erps_2'
                               pa + '_decision_cues_singletrials-epo.fif'))
-    epo_cop = epo.copy()
+        epo_cop = epo.copy()
+    elif version == 2:
+        epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps_passive',                        # for averaging over more electrodes: 'eeg', 'erps_2'
+                              pa + '_passive_cues_singletrials-epo.fif'))
+        epo_cop = epo.copy()
     
     matching= epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
     
@@ -201,7 +220,7 @@ for pa in part_1:
     # Update metadata in filtered Epochs object
     #epo_filt.metadata = epo_filt.metadata[matching]
     
-    # downsample if necessary
+    # downsample
     if epo_filt.info['sfreq'] != param['testresampfreq']:
         epo_filt = epo_filt.resample(param['testresampfreq'])
 
@@ -266,11 +285,7 @@ beta_gavg = []
 for idx, regvar in enumerate(regvars):
     beta_gavg.append(mne.grand_average(betas[idx]))
 
-    
-
-#
 # Second level test on betas
-
 # connectivity
 connect, names = mne.channels.find_ch_adjacency(epo_filt.info, ch_type='eeg')
 
