@@ -253,23 +253,55 @@ for pa in part_1:
     #     epo_reg = filter_small_trials(epo_reg, small_value_threshold)
 
     betasnp = []
+#    for idx, regvar in enumerate(regvars):
+#        keep = np.where(~np.isnan(mod2[regvar]))[0]
+#        df_reg = mod2.iloc[keep]
+#        epo_reg = epo_z.copy()[keep]
+#        epo_keep = epo_filt.copy()[keep]
+#        
+#        df_reg[regvar + '_z'] = stats.zscore(df_reg[regvar])
+#
+#        # Add an intercept to the matrix
+#        epo_keep.metadata = df_reg.assign(Intercept=1)
+#        epo_reg.metadata = df_reg.assign(Intercept=1)
+#
+#        # Perform regression
+#        names = ["Intercept"] + [regvar + '_z']
+#        res = mne.stats.linear_regression(epo_reg, epo_reg.metadata[names],
+#                                          names=names)
+
     for idx, regvar in enumerate(regvars):
-        keep = np.where(~np.isnan(mod2[regvar]))[0]
-        df_reg = mod2.iloc[keep]
+
+        vals = mod2[regvar].to_numpy(dtype=float)
+        keep = np.where(np.isfinite(vals))[0]
+    
+        df_reg = mod2.iloc[keep].copy()
         epo_reg = epo_z.copy()[keep]
         epo_keep = epo_filt.copy()[keep]
-        
-        df_reg[regvar + '_z'] = stats.zscore(df_reg[regvar])
-
-        # Add an intercept to the matrix
-        epo_keep.metadata = df_reg.assign(Intercept=1)
-        epo_reg.metadata = df_reg.assign(Intercept=1)
-
-        # Perform regression
-        names = ["Intercept"] + [regvar + '_z']
-        res = mne.stats.linear_regression(epo_reg, epo_reg.metadata[names],
-                                          names=names)
-
+    
+        if len(df_reg) < 2:
+            print(f"Skipping {pa}, {regvar}: not enough valid trials ({len(df_reg)})")
+            continue
+    
+        regvals = df_reg[regvar].to_numpy(dtype=float)
+        if np.nanstd(regvals) == 0:
+            print(f"Skipping {pa}, {regvar}: zero variance in regressor")
+            continue
+    
+        df_reg[regvar + '_z'] = stats.zscore(regvals)
+    
+        design = df_reg.assign(Intercept=1)[["Intercept", regvar + "_z"]]
+        bad = ~np.isfinite(design.to_numpy())
+        if bad.any():
+            print(f"\n! Problem in subject {pa}, regressor {regvar}")
+            print("rows with NaN/Inf:\n", design[bad.any(axis=1)])
+            raise SystemExit("Stopping early")
+    
+        epo_keep.metadata = design
+        epo_reg.metadata = design
+    
+        res = mne.stats.linear_regression(epo_reg, design, names=["Intercept", regvar + "_z"])
+    
         # Collect betas
         betas[idx].append(res[regvar + '_z'].beta)
         betasnp.append(res[regvar + '_z'].beta.data)
