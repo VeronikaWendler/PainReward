@@ -33,6 +33,7 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from statsmodels.distributions.empirical_distribution import ECDF
 from pathlib import Path
+
 #-----------------------------------------------------------------------------------------------------
 
 # Set bids directory
@@ -47,22 +48,27 @@ part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 
 layout = BIDSLayout(outpathall)
 
-# Outpath for analysis
-outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9_2')   
-# Outpath for figures
-outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_2')   
-if not os.path.exists(outfigpath):
-    os.mkdir(outfigpath)
+version = 2  # 1 for decision phase, 2 for passive phase
+
+if version == 1:
+    outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9_2')   
+    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_2')   
+    if not os.path.exists(outfigpath):
+        os.mkdir(outfigpath)
+elif version == 2:
+    outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9_2_passive')   
+    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_2_passive')   
+    if not os.path.exists(outfigpath):
+        os.mkdir(outfigpath)
+else:
+    print("No Version")
+    
 param = {
-    # Alpha Threshold
-    'alpha': 0.05/3,           # because we have 3 regressors, but MP, perhaps this is actually too conservative -
-    #                          how about FDR, holm or other? I ran this without correction before and got interesting sig. activation for money and the pain*money interaction
-    # Font sizez in plot
+    'alpha': 0.05/3,     
     'titlefontsize': 12,
     'labelfontsize': 12,
     'ticksfontsize': 11,
     'legendfontsize': 10,
-    # Downsample to this frequency prior to analysis
     'testresampfreq': 1024,
 }
 
