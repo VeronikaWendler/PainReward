@@ -805,8 +805,8 @@ for ridx, regvar in enumerate(regvars):
 
         # Average within participants
         sub_evokeds = []
-        for p in all_epos.metadata['participant_id'].unique():
-            sub_dat = all_epos[all_epos.metadata['participant_id'] == p]
+        for p in all_epos.metadata['participant'].unique():
+            sub_dat = all_epos[all_epos.metadata['participant'] == p]
             sub_evoked = {}
             for val in range(nbins):
                 if np.sum(sub_dat.metadata['bin'] == val) != 0:
