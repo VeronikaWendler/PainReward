@@ -49,7 +49,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9_2 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 2    # version 1 is for decision and version 2 is for passive phase 
+version = 3    # version 1 is for decision and version 2 is for passive phase 
 
 if version == 1:
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_2')
@@ -57,6 +57,10 @@ if version == 1:
         os.mkdir(outpath)
 elif version == 2:
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_2_passive')
+    if not os.path.exists(outpath):
+        os.mkdir(outpath)
+elif version == 3:
+    outpath = opj(outpath, 'erps_massuni_drift_mod_9_2_RT')
     if not os.path.exists(outpath):
         os.mkdir(outpath)
 else:
@@ -157,6 +161,10 @@ for p in part:
     elif version == 2:
         epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_passive',                   
                               p + '_passive_cues_singletrials-epo.fif'))
+        epo_1 = epo.copy()
+    elif version == 3:
+        epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
+                              p + '_decision_cues_singletrials-epo.fif'))
         epo_1 = epo.copy()
 
     participants = epo_1.metadata['participant_id'].unique()
@@ -358,6 +366,11 @@ for pa in part_1:
         epo = mne.read_epochs(
             opj(basepath, pa, 'eeg', 'erps_passive',
                 pa + '_passive_cues_singletrials-epo.fif')
+        )
+    elif version == 3:
+        epo = mne.read_epochs(
+            opj(basepath, pa, 'eeg', 'erps',
+                pa + '_decision_cues_singletrials-epo.fif')
         )
     epo_cop = epo.copy()
 
