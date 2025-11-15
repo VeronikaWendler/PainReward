@@ -203,29 +203,169 @@ included_subjects = []
 skipped_subjects = []
 
 
+# for pa in part_1:
+#     print(f"\n--- Processing {pa} ---")
+#     df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
+#     mod2 = part_1_dat[part_1_dat['participant'] == pa]
+    
+#     if version == 1:
+#         epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',                        # for averaging over more electrodes: 'eeg', 'erps_2'
+#                               pa + '_decision_cues_singletrials-epo.fif'))
+#         epo_cop = epo.copy()
+#     elif version == 2:
+#         epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps_passive',                        # for averaging over more electrodes: 'eeg', 'erps_2'
+#                               pa + '_passive_cues_singletrials-epo.fif'))
+#         epo_cop = epo.copy()
+    
+#     matching= epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
+    
+#     # Filter the Epochs object and metadata to keep matching trials
+#     epo_filt = epo_cop[matching]
+    
+#     # Update metadata in filtered Epochs object
+#     #epo_filt.metadata = epo_filt.metadata[matching]
+    
+#     # downsample
+#     if epo_filt.info['sfreq'] != param['testresampfreq']:
+#         epo_filt = epo_filt.resample(param['testresampfreq'])
+
+#     # Drop bad trials
+#     goodtrials = np.where(epo_filt.metadata['badtrial'] == 0)[0]
+#     df2 = df2.iloc[goodtrials]
+#     mod2 = mod2.iloc[goodtrials]
+#     epo_filt = epo_filt[goodtrials]
+    
+#     scale = Scaler(scalings='mean')
+#     epo_z = mne.EpochsArray(scale.fit_transform(epo_filt.get_data()),
+#                             epo_filt.info)
+     
+#     matching = epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
+#     print(matching)
+
+#     if matching.sum() < 5:
+#         print(f"Skipping {pa}: only {matching.sum()} matching trials")
+#         skipped_subjects.append(pa)
+#         continue
+#     # small_value_threshold = 1e-3
+
+#     # # exclude trials with very small data
+#     # def filter_small_trials(epochs, threshold): 
+#     #     keep_mask = np.max(np.abs(epochs.get_data()), axis=(1, 2)) > threshold
+#     #     # mask to keep valid epochs
+#     #     return epochs[keep_mask]
+    
+#     # betasnp = []
+    
+#     # for idx, regvar in enumerate(regvars):
+#     #     keep = np.where(~np.isnan(mod2[regvar]))[0]
+#     #     df_reg = mod2.iloc[keep]
+#     #     epo_reg = epo_z.copy()[keep]
+#     #     epo_keep = epo_filt.copy()[keep]
+
+#     #     epo_reg = filter_small_trials(epo_reg, small_value_threshold)
+
+#     betasnp = []
+# #    for idx, regvar in enumerate(regvars):
+# #        keep = np.where(~np.isnan(mod2[regvar]))[0]
+# #        df_reg = mod2.iloc[keep]
+# #        epo_reg = epo_z.copy()[keep]
+# #        epo_keep = epo_filt.copy()[keep]
+# #        
+# #        df_reg[regvar + '_z'] = stats.zscore(df_reg[regvar])
+# #
+# #        # Add an intercept to the matrix
+# #        epo_keep.metadata = df_reg.assign(Intercept=1)
+# #        epo_reg.metadata = df_reg.assign(Intercept=1)
+# #
+# #        # Perform regression
+# #        names = ["Intercept"] + [regvar + '_z']
+# #        res = mne.stats.linear_regression(epo_reg, epo_reg.metadata[names],
+# #                                          names=names)
+
+#     betasnp = []
+#     subject_has_regressors = False
+    
+#     for idx, regvar in enumerate(regvars):
+    
+#         vals = mod2[regvar].to_numpy(dtype=float)
+#         keep = np.where(np.isfinite(vals))[0]
+
+#         if len(keep) < 2:
+#             print(f"  Skipping {regvar}: only {len(keep)} finite trials")
+#             continue
+        
+#         df_reg = mod2.iloc[keep].copy()
+#         epo_reg = epo_z.copy()[keep]
+#         epo_keep = epo_filt.copy()[keep]
+
+#         if np.nanstd(df_reg[regvar]) == 0:
+#             print(f"  Skipping {regvar}: zero variance")
+#             continue
+#         df_reg[regvar + "_z"] = stats.zscore(df_reg[regvar])
+#         design = df_reg.assign(Intercept=1)[["Intercept", regvar + "_z"]]
+
+#         if not np.all(np.isfinite(design.to_numpy())):
+#             print(f"  Skipping {regvar}: contains NaN")
+#             continue
+
+#         df_new = epo_keep.metadata.copy()
+#         df_new[regvar] = df_reg[regvar].values
+#         epo_keep.metadata = df_new.reset_index(drop=True)
+
+#         all_epos[idx].append(epo_keep)
+
+#         res = mne.stats.linear_regression(
+#             epo_reg, design, names=["Intercept", regvar + "_z"]
+#         )
+
+#         betas[idx].append(res[regvar + "_z"].beta)
+#         betasnp.append(res[regvar + "_z"].beta.data)
+
+#         subject_has_regressors = True
+#         print(f"Metadata columns for {pa}, regvar '{regvar}':")
+#         print(epo_keep.metadata.columns.tolist())
+
+
+#     if not subject_has_regressors:
+#         print(f"Skipping {pa}: no valid regressors")
+#         skipped_subjects.append(pa)
+#         continue
+
+#     included_subjects.append(pa)
+#     allbetasnp.append(np.stack(betasnp))
+#     print(f"Included {pa}")
+
+
+# --------------------------------------------------------------------
+# Massunivariate with RT as covariate
+# --------------------------------------------------------------------
+
+included_subjects = []
+skipped_subjects = []
+
 for pa in part_1:
     print(f"\n--- Processing {pa} ---")
     df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
     mod2 = part_1_dat[part_1_dat['participant'] == pa]
-    
+
+    # Load epochs
     if version == 1:
-        epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps',                        # for averaging over more electrodes: 'eeg', 'erps_2'
-                              pa + '_decision_cues_singletrials-epo.fif'))
-        epo_cop = epo.copy()
+        epo = mne.read_epochs(
+            opj(basepath, pa, 'eeg', 'erps',
+                pa + '_decision_cues_singletrials-epo.fif')
+        )
     elif version == 2:
-        epo = mne.read_epochs(opj(basepath,  pa, 'eeg', 'erps_passive',                        # for averaging over more electrodes: 'eeg', 'erps_2'
-                              pa + '_passive_cues_singletrials-epo.fif'))
-        epo_cop = epo.copy()
-    
-    matching= epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
-    
-    # Filter the Epochs object and metadata to keep matching trials
+        epo = mne.read_epochs(
+            opj(basepath, pa, 'eeg', 'erps_passive',
+                pa + '_passive_cues_singletrials-epo.fif')
+        )
+    epo_cop = epo.copy()
+
+    # Match trials
+    matching = epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
     epo_filt = epo_cop[matching]
-    
-    # Update metadata in filtered Epochs object
-    #epo_filt.metadata = epo_filt.metadata[matching]
-    
-    # downsample
+
+    # Downsample for stats
     if epo_filt.info['sfreq'] != param['testresampfreq']:
         epo_filt = epo_filt.resample(param['testresampfreq'])
 
@@ -234,106 +374,104 @@ for pa in part_1:
     df2 = df2.iloc[goodtrials]
     mod2 = mod2.iloc[goodtrials]
     epo_filt = epo_filt[goodtrials]
-    
+
+    # Z-score EEG across trials
     scale = Scaler(scalings='mean')
     epo_z = mne.EpochsArray(scale.fit_transform(epo_filt.get_data()),
                             epo_filt.info)
-     
-    matching = epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
-    print(matching)
 
-    if matching.sum() < 5:
-        print(f"Skipping {pa}: only {matching.sum()} matching trials")
+    # If there are too few trials after matching, skip subject
+    if len(df2) < 5:
+        print(f"Skipping {pa}: only {len(df2)} matching trials after cleaning")
         skipped_subjects.append(pa)
         continue
-    # small_value_threshold = 1e-3
 
-    # # exclude trials with very small data
-    # def filter_small_trials(epochs, threshold): 
-    #     keep_mask = np.max(np.abs(epochs.get_data()), axis=(1, 2)) > threshold
-    #     # mask to keep valid epochs
-    #     return epochs[keep_mask]
-    
-    # betasnp = []
-    
-    # for idx, regvar in enumerate(regvars):
-    #     keep = np.where(~np.isnan(mod2[regvar]))[0]
-    #     df_reg = mod2.iloc[keep]
-    #     epo_reg = epo_z.copy()[keep]
-    #     epo_keep = epo_filt.copy()[keep]
 
-    #     epo_reg = filter_small_trials(epo_reg, small_value_threshold)
-
-    betasnp = []
-#    for idx, regvar in enumerate(regvars):
-#        keep = np.where(~np.isnan(mod2[regvar]))[0]
-#        df_reg = mod2.iloc[keep]
-#        epo_reg = epo_z.copy()[keep]
-#        epo_keep = epo_filt.copy()[keep]
-#        
-#        df_reg[regvar + '_z'] = stats.zscore(df_reg[regvar])
-#
-#        # Add an intercept to the matrix
-#        epo_keep.metadata = df_reg.assign(Intercept=1)
-#        epo_reg.metadata = df_reg.assign(Intercept=1)
-#
-#        # Perform regression
-#        names = ["Intercept"] + [regvar + '_z']
-#        res = mne.stats.linear_regression(epo_reg, epo_reg.metadata[names],
-#                                          names=names)
+    if "choice_rt" in mod2.columns:
+        rt_col = "choice_rt"
+    elif "rt" in mod2.columns:
+        rt_col = "rt"
+    else:
+        raise ValueError(f"No RT column found in mod_data! Columns: {mod2.columns}")
 
     betasnp = []
     subject_has_regressors = False
-    
-    for idx, regvar in enumerate(regvars):
-    
-        vals = mod2[regvar].to_numpy(dtype=float)
-        keep = np.where(np.isfinite(vals))[0]
 
-        if len(keep) < 2:
-            print(f"  Skipping {regvar}: only {len(keep)} finite trials")
+    for idx, regvar in enumerate(regvars):
+
+        # keep trials where BOTH regressor and RT are finite
+        vals_reg = mod2[regvar].to_numpy(dtype=float)
+        vals_rt  = mod2[rt_col].to_numpy(dtype=float)
+        keep = np.where(np.isfinite(vals_reg) & np.isfinite(vals_rt))[0]
+
+        if len(keep) < 5:
+            print(f"  Skipping {regvar}: only {len(keep)} valid trials (regvar+RT)")
             continue
-        
-        df_reg = mod2.iloc[keep].copy()
+
+        df_reg  = mod2.iloc[keep].copy()
         epo_reg = epo_z.copy()[keep]
         epo_keep = epo_filt.copy()[keep]
 
+        # check variance
         if np.nanstd(df_reg[regvar]) == 0:
             print(f"  Skipping {regvar}: zero variance")
             continue
-        df_reg[regvar + "_z"] = stats.zscore(df_reg[regvar])
-        design = df_reg.assign(Intercept=1)[["Intercept", regvar + "_z"]]
-
-        if not np.all(np.isfinite(design.to_numpy())):
-            print(f"  Skipping {regvar}: contains NaN")
+        if np.nanstd(df_reg[rt_col]) == 0:
+            print(f"  Skipping {regvar}: RT has zero variance (subject {pa})")
             continue
 
-        df_new = epo_keep.metadata.copy()
-        df_new[regvar] = df_reg[regvar].values
-        epo_keep.metadata = df_new.reset_index(drop=True)
+        # Z-score predictors within subject
+        df_reg[regvar + "_z"] = stats.zscore(df_reg[regvar].to_numpy(dtype=float))
+        df_reg["RT_z"]        = stats.zscore(df_reg[rt_col].to_numpy(dtype=float))
+        df_reg["Intercept"]   = 1.0
 
+        design = df_reg[["Intercept", regvar + "_z", "RT_z"]]
+
+        # safety check
+        if not np.all(np.isfinite(design.to_numpy())):
+            print(f"  Skipping {regvar}: design matrix has NaN/Inf")
+            continue
+
+        # update metadata of kept epochs (optional, just for reference)
+        df_meta = epo_keep.metadata.reset_index(drop=True).copy()
+        df_meta[regvar] = df_reg[regvar].values
+        df_meta[rt_col] = df_reg[rt_col].values
+        epo_keep.metadata = df_meta
+
+        # Store epochs for second-level visualization
         all_epos[idx].append(epo_keep)
 
+        # ------------------------
+        # Run regression: EEG ~ Intercept + regvar + RT
+        # ------------------------
         res = mne.stats.linear_regression(
-            epo_reg, design, names=["Intercept", regvar + "_z"]
+            epo_reg, design,
+            names=["Intercept", regvar + "_z", "RT_z"]
         )
 
-        betas[idx].append(res[regvar + "_z"].beta)
-        betasnp.append(res[regvar + "_z"].beta.data)
+        # beta for regressor of interest *controlling for RT*
+        beta_reg = res[regvar + "_z"].beta
+        betas[idx].append(beta_reg)
+        betasnp.append(beta_reg.data)
+
+        # (Optional) you could also inspect RT effects:
+        # beta_rt = res["RT_z"].beta
 
         subject_has_regressors = True
         print(f"Metadata columns for {pa}, regvar '{regvar}':")
         print(epo_keep.metadata.columns.tolist())
 
-
     if not subject_has_regressors:
-        print(f"Skipping {pa}: no valid regressors")
+        print(f"Skipping {pa}: no valid regressors with RT for this subject")
         skipped_subjects.append(pa)
         continue
 
     included_subjects.append(pa)
     allbetasnp.append(np.stack(betasnp))
     print(f"Included {pa}")
+
+# After this, the rest of your script (stacking allbetas, cluster test, saving)
+# can remain exactly as you already have it.
 
 # Stack all data
 allbetas = np.stack(allbetasnp)
