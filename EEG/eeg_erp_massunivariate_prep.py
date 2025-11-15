@@ -284,24 +284,23 @@ for pa in part_1:
 
     betasnp = []
     subject_has_regressors = False
-
+    
     for idx, regvar in enumerate(regvars):
-
+    
         vals = mod2[regvar].to_numpy(dtype=float)
         keep = np.where(np.isfinite(vals))[0]
 
         if len(keep) < 2:
             print(f"  Skipping {regvar}: only {len(keep)} finite trials")
             continue
-
+        
         df_reg = mod2.iloc[keep].copy()
         epo_reg = epo_z.copy()[keep]
         epo_keep = epo_filt.copy()[keep]
 
         if np.nanstd(df_reg[regvar]) == 0:
-            print(f"Skipping {regvar}: zero variance")
+            print(f"  Skipping {regvar}: zero variance")
             continue
-
         df_reg[regvar + "_z"] = stats.zscore(df_reg[regvar])
         design = df_reg.assign(Intercept=1)[["Intercept", regvar + "_z"]]
 
@@ -309,7 +308,11 @@ for pa in part_1:
             print(f"  Skipping {regvar}: contains NaN")
             continue
 
-        epo_reg.metadata = design
+        df_new = epo_keep.metadata.copy()
+        df_new[regvar] = df_reg[regvar].values
+        epo_keep.metadata = df_new.reset_index(drop=True)
+
+        all_epos[idx].append(epo_keep)
 
         res = mne.stats.linear_regression(
             epo_reg, design, names=["Intercept", regvar + "_z"]
@@ -317,9 +320,11 @@ for pa in part_1:
 
         betas[idx].append(res[regvar + "_z"].beta)
         betasnp.append(res[regvar + "_z"].beta.data)
-        epo_keep.metadata = df_reg[[regvar]].reset_index(drop=True)
-        all_epos[idx].append(epo_keep)
+
         subject_has_regressors = True
+        print(f"Metadata columns for {pa}, regvar '{regvar}':")
+        print(epo_keep.metadata.columns.tolist())
+
 
     if not subject_has_regressors:
         print(f"Skipping {pa}: no valid regressors")
