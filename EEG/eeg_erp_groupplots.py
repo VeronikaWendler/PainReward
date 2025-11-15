@@ -688,8 +688,8 @@ for ridx, regvar in enumerate(regvars):
 
     # Subject-level averaging for RT bins
     sub_rt_evokeds = []
-    for subj in all_epos.metadata["participant_id"].unique():
-        subj_dat = all_epos[all_epos.metadata["participant_id"] == subj]
+    for subj in all_epos.metadata["participant"].unique():
+        subj_dat = all_epos[all_epos.metadata["participant"] == subj]
         subj_evoked = {}
         for b in range(rt_nbins):
             if np.sum(subj_dat.metadata["RT_bin"] == b) > 0:
