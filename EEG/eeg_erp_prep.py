@@ -145,7 +145,7 @@ for p in part:
     # valid_trial_types = ["off+", "DIN8", "res+", "fix+", "fee+", "fee-", "fix+", "cdow", "shk-"]
     # events_c = events_c[events_c['trial_type'].isin(valid_trial_types)]
   
-    # # ______________________________________________________________
+    # #------------------------------------------------------------------------------------------------------
     # # Epoch around  off+
     events_id = {
         "off+": 2,
@@ -229,11 +229,10 @@ for p in part:
         print("report.save(opj(outdir,  p + '_decision_erps_report.html')")
         
     elif version == 2:
-        
         figs_butter = []
         evokeds = dict()
         for cond in events_id.keys():
-            evokeds[cond] = erp_cues[cond].average()                   # gives evoked for off+
+            evokeds[cond] = erp_cues[cond].average()                   
             figs_butter.append(pej(evokeds[cond],
                                    title=cond,
                                    show=False,
@@ -348,7 +347,7 @@ def average_time_win_strials(strials, chans_to_average, amp_lat):
     amp_lat : list of lists
         Latencies of the segment to average
     Returns
-    -------
+    ---------
     mne Epochs
         Epochs with metadata updated with amplitude columns
     """
@@ -373,10 +372,10 @@ def average_time_win_strials(strials, chans_to_average, amp_lat):
 # Parameters to define
 chans_to_average = [['Fz'], ['FCz'], ['POz'], ['Cz'], ['CPz'], ['Pz'], ['Oz']]    #for averaging over more channels: [['F3'], ['F4'], ['Fz'], ['FC5'], ['FC6'], ['FC1'], ['FC2'], ['FCz'], ['C3'], ['C4'], ['CP1'], ['CP2'], ['CP5'], ['CP6'], ['P3'], ['Pz'], ['P4'], ['P7'], ['P8'], ['PO3'], ['PO7'], ['PO4'], ['O1'], ['Oz'], ['O2']]                                                                          
 amp_lat = [[0.4, 0.8]] 
-#LPP is centro-parietal
-# N2 is fronto-central
-# P3 is centro-parietal
-# Pain-related N1 is occipito-parietal
+#LPP is centro-parietal  (currently our focus for pain anticipation or (also) value-based choice)
+# N2 is fronto-central   (not looking at this currently)
+# P3 is centro-parietal 
+# Pain-related N1 is occipito-parietal (not looking at this atm)
 if version == 1:
     all_meta = []
     for p in part:
@@ -407,10 +406,10 @@ elif version == 2:
 
 else:
     print("no version")
-## #_____________________________________________________________________________________________________________________________________________________________
+    
+## #------------------------------------------------------------------------------------------------------------------
 ## # TFR 
-## #_____________________________________________________________________________________________________________________________________________________________
-#
+#---------------------------------------------------------------------------------------------------------------------
 
 from mne.report import Report
 import pprint
@@ -433,8 +432,6 @@ from pathlib import Path
 from mne.time_frequency import tfr_morlet
 
 # Set bids directory
-
-
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
 basepath = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"
 
@@ -569,8 +566,7 @@ if version == 1:
         percleft_cue.append(
             (len(strials) - np.sum(meta.badtrial))/len(strials)*100)
         percremoved_cue_comperp.append(100-((125 - allbad)/125*100))
-       
-       
+
         #----------------------------------------------------------------------------------
         # save tfr 
         strials.save(opj(outdir_tfr,  p + '_decision_cues_'
@@ -585,6 +581,7 @@ if version == 1:
 
 elif version == 2:
     for p in tqdm(part):
+        
         #--------------------------------------------------------------------------------
         # directories
         indir = opj(outpath,  p, 'eeg')

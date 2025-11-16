@@ -1,6 +1,6 @@
 '''
  # @ : -*- coding: utf-8 -*-
- # @ Author: Michel-Pierre Coll (michel-pierre.coll@psy.ulaval.ca), edited by Veronika Wendler
+ # @ Author: Michel-Pierre Coll (michel-pierre.coll@psy.ulaval.ca), edited by Veronika Wendler (2025)
  # @ Date: 2024
  # @ Description: lotting the eeg regression models from the eeg_erp_massunivariate_prep.py file
  '''
@@ -111,7 +111,7 @@ if version in [1, 2, 3]:
 
     for ridx, regvar in enumerate(regvars):
 
-        # colormap choices per regressor (as in your script)
+        # colormap choices per regressor
         if ridx == 0:
             vminmax = 6
             cmap = 'viridis'
@@ -132,7 +132,7 @@ if version in [1, 2, 3]:
                     for c in beta_gavg[ridx].ch_names]
 
         # -----------------------------------------------------------------
-        # Topo of beta (with cluster mask)
+        # Topo of beta
         # -----------------------------------------------------------------
         for tidx, timepos in enumerate(times_pos):
             fig, topo_axis = plt.subplots(figsize=(1, 1))
@@ -176,7 +176,7 @@ if version in [1, 2, 3]:
                         dpi=600, bbox_inches='tight')
 
         # -----------------------------------------------------------------
-        # Binned-by-regressor line plots and topomaps (your original logic)
+        # Binned-by-regressor line plots and topomaps 
         # -----------------------------------------------------------------
         for c in chan_to_plot:
             fig, line_axis = plt.subplots(1, 1, figsize=(4, 2.5))
@@ -338,7 +338,7 @@ if version in [1, 2, 3]:
                 )
 
         # -----------------------------------------------------------------
-        # Mean beta ± SEM over subjects, with significance shading
+        # Mean beta and SEM over participants
         # -----------------------------------------------------------------
         for c in chan_to_plot:
             fig, line_axis = plt.subplots(1, 1, figsize=(4, 2.5))
@@ -394,7 +394,6 @@ if version in [1, 2, 3]:
             line_axis.set_xticklabels(
                 labels=[str(i) for i in np.arange(-200, 1200, 200)]
             )
-
             fig.tight_layout()
             fig.savefig(
                 opj(outfigpath,
@@ -403,7 +402,7 @@ if version in [1, 2, 3]:
                 bbox_inches='tight'
             )
 
-# --------------------------- VERSION 4 --------------------------------------------------------------------------------
+# Version 4 --------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------
 
 elif version == 4:
@@ -415,8 +414,7 @@ elif version == 4:
     # per-bin plotting loop
     for bin_name in bin_labels:
         for ridx, regvar in enumerate(regvars):
-
-            # choose colormap per regressor (same as above)
+            # colour map for regressor
             if ridx == 0:
                 cmap = 'viridis'
             elif ridx == 1:
@@ -444,7 +442,7 @@ elif version == 4:
             chankeep = [True if c not in ['M1', 'M2'] else False for c in ch_names]
 
             # -----------------------------------------------------------------
-            # Topomaps of t-values at selected times (cluster-corrected)
+            # Topomaps of t-values (cluster-corrected)
             # -----------------------------------------------------------------
             times_pos = [np.abs(times - t).argmin() for t in plot_times]
 
@@ -507,7 +505,7 @@ elif version == 4:
                 )
 
             # -----------------------------------------------------------------
-            # t-value timecourses at channels of interest (per bin)
+            # t-value timecourses at centro-parietal channels (per bin)
             # -----------------------------------------------------------------
             for c in chan_to_plot:
                 if c not in ch_names:
@@ -555,7 +553,7 @@ elif version == 4:
                     bbox_inches='tight'
                 )
 
-    print("\nVersion 4 plotting completed.\n")
+    print("\nVersion 4 plotting done ;))))\n")
 
 
 # old ------------------------------------------------------------------------------------------------------------------------

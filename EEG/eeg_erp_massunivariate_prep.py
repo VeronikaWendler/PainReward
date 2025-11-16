@@ -1,6 +1,6 @@
 '''
  # @ : -*- coding: utf-8 -*-
- # @ Author: Michel-Pierre Coll (michel-pierre.coll@psy.ulaval.ca), edited by Veronika Wendler
+ # @ Author: Michel-Pierre Coll (michel-pierre.coll@psy.ulaval.ca), edited by Veronika Wendler (2025)
  # @ Date: 2024
  # @ Description:
  
@@ -124,7 +124,6 @@ part_1 = part
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate Regression from MP Code (for single regressors)
-
 #
 regvars = ['v_pain_contrib','v_money_contrib','v_interaction_contrib']
 regvarsnames = ['V_pain_contrib','V_money_contrib','V_interaction_contrib']
@@ -200,9 +199,8 @@ epo_1_filtered_combined = pd.concat(filtered_data, ignore_index=True)
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate 
+# For versions  1 (decision), 2 (passive phase), 3 (RT as covariate)
 
-
-# -------------------------- VERSIONS 1 / 2 / 3 ---------------------------
 if version in [1, 2, 3]:
 
     included_subjects = []
@@ -231,11 +229,11 @@ if version in [1, 2, 3]:
             )
         epo_cop = epo.copy()
 
-        # Match trials
+        # Check that trials match
         matching = epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
         epo_filt = epo_cop[matching]
 
-        # Downsample for stats
+        # Downsample
         if epo_filt.info['sfreq'] != param['testresampfreq']:
             epo_filt = epo_filt.resample(param['testresampfreq'])
 
@@ -250,26 +248,24 @@ if version in [1, 2, 3]:
         epo_z = mne.EpochsArray(scale.fit_transform(epo_filt.get_data()),
                                 epo_filt.info)
 
-        # If there are too few trials after matching, skip subject
+        # If there are too few trials after matching, skip subject (but this here can be adjusted obviously; as long as the desgin matrix holds it should be fine)
         if len(df2) < 5:
-            print(f"Skipping {pa}: only {len(df2)} matching trials after cleaning")
+            print(f"Skipping {pa} as only {len(df2)} working trials after cleaning")
             skipped_subjects.append(pa)
             continue
 
-        # RT column
-        if "choice_rt" in mod2.columns:
-            rt_col = "choice_rt"
-        elif "rt" in mod2.columns:
+        # RT column - checking what's in there again
+        if "rt" in mod2.columns:
             rt_col = "rt"
         else:
-            raise ValueError(f"No RT column found in mod_data! Columns: {mod2.columns}")
+            raise ValueError(f"No RT column in mod_data. Columns: {mod2.columns}")
 
         betasnp = []
         subject_has_regressors = False
 
         for idx, regvar in enumerate(regvars):
 
-            # keep trials where BOTH regressor and RT are finite
+            #get rid of NANs and inf
             vals_reg = mod2[regvar].to_numpy(dtype=float)
             vals_rt = mod2[rt_col].to_numpy(dtype=float)
             keep = np.where(np.isfinite(vals_reg) & np.isfinite(vals_rt))[0]
@@ -317,7 +313,7 @@ if version in [1, 2, 3]:
                 names=["Intercept", regvar + "_z", "RT_z"]
             )
 
-            # beta for regressor of interest *controlling for RT*
+            # beta for regressor 
             beta_reg = res[regvar + "_z"].beta
             betas[idx].append(beta_reg)
             betasnp.append(beta_reg.data)
@@ -335,7 +331,7 @@ if version in [1, 2, 3]:
         allbetasnp.append(np.stack(betasnp))
         print(f"Included {pa}")
 
-    # Stack all data: shape (n_subj, n_reg, n_chan, n_time)
+    # Stack all , shape (n_subj, n_reg, n_chan, n_time)
     allbetas = np.stack(allbetasnp)
 
     print(f"Total subjects: {len(part_1)}")
@@ -411,7 +407,7 @@ elif version == 4:
     included_subjects = []
     skipped_subjects = []
 
-    # bins: slow / medium / fast
+    # bins: slow  medium  fast
     bin_labels = ["fast", "medium", "slow"]  # note ordering here
 
     # storing betas + epochs per bin
@@ -530,13 +526,13 @@ elif version == 4:
     print("Skipped subjects:", skipped_subjects)
 
     # ---------------------------------------------------------------------
-    # PER-BIN second-level cluster tests (Option B1)
+    # second-level cluster tests
     # ---------------------------------------------------------------------
 
     for bin_name in bin_labels:
-        print(f"\n=== Cluster tests for RT bin: {bin_name} ===")
+        print(f"\nCluster tests for RT bin: {bin_name}")
 
-        # for adjacency we need an example info object (if available)
+        # for adjacency we need an example info object
         example_info = None
         for r_idx in range(len(regvars)):
             if len(betas_bins[bin_name][r_idx]) > 0:
@@ -544,9 +540,9 @@ elif version == 4:
                 break
 
         if example_info is None:
-            print(f"  No data at all in bin {bin_name}, skipping cluster tests.")
+            print(f"No data at all in bin {bin_name}, skipping cluster tests")
             continue
-
+        
         connect, names = mne.channels.find_ch_adjacency(example_info, ch_type='eeg')
 
         # For each regressor inside this bin
@@ -554,10 +550,10 @@ elif version == 4:
             subj_betas = betas_bins[bin_name][r_idx]
 
             if len(subj_betas) < 2:
-                print(f"  Bin {bin_name}, regvar {regvar}: <2 subjects, skipping cluster test.")
+                print(f" Bin {bin_name}, regvar {regvar} <2 subjects. No cluster test")
                 continue
 
-            print(f"  Bin {bin_name}, regvar {regvar}: n_subj = {len(subj_betas)}")
+            print(f"Bin {bin_name}, regvar {regvar} n_subj = {len(subj_betas)}")
 
             # Stack data: (n_subj, n_chan, n_time)
             data = np.stack([b.data for b in subj_betas])
@@ -584,12 +580,11 @@ elif version == 4:
             pvals = np.ones_like(tval)
             for c, p_val in zip(clusters, cluster_p_values):
                 pvals[c] = p_val
-
-            # Save per-bin results (Option 2: flat naming)
+            # saving
             np.save(opj(outpath, f'{bin_name}_tvals_{regvar}.npy'), tval)
             np.save(opj(outpath, f'{bin_name}_pvals_{regvar}.npy'), pvals)
 
-            # also save concatenated epochs for this bin+regvar
+            # save epochs for this bin + regvar
             epo_list = all_epos_bins[bin_name][r_idx]
             if len(epo_list) > 0:
                 epo_save = mne.concatenate_epochs(epo_list)
@@ -598,7 +593,7 @@ elif version == 4:
                     overwrite=True
                 )
 
-    print("\nVersion 4 RT-stratified cluster tests completed.")
+    print("\n Version 4 RT-stratified cluster tests done ;)")
 
 
 
