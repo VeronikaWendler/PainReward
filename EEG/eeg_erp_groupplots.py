@@ -86,10 +86,8 @@ plt.rc("axes.spines", top=False, right=False)
 plt.rcParams['font.family'] = 'DejaVu Sans'
 
 # -----------------------------------------------------------------------------------------------------------------
-# Common definitions
 # -----------------------------------------------------------------------------------------------------------------
-
-# Must be in the same order as in the stats code
+#same order as stats code
 regvars = ['v_pain_contrib', 'v_money_contrib', 'v_interaction_contrib']
 regvarsnames = ['v_pain_contrib', 'v_money_contrib', 'v_interaction_contrib']
 
