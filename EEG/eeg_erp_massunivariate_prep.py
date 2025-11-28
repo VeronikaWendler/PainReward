@@ -49,7 +49,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9_2 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 4    # version 1 is for decision and version 2 is for passive phase 
+version = 3    # version 1 is for decision and version 2 is for passive phase 
 
 if version == 1:
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_2')
@@ -286,37 +286,69 @@ if version in [1, 2, 3]:
                 print(f"Skipping {regvar} as RT has zero variance (subject {pa})")
                 continue
 
-            # Z-score predictors
-            df_reg[regvar + "_z"] = stats.zscore(df_reg[regvar].to_numpy(dtype=float))
-            df_reg["RT_z"] = stats.zscore(df_reg[rt_col].to_numpy(dtype=float))
+            # # Z-score predictors
+            # df_reg[regvar + "_z"] = stats.zscore(df_reg[regvar].to_numpy(dtype=float))
+            # df_reg["RT_z"] = stats.zscore(df_reg[rt_col].to_numpy(dtype=float))
+            # df_reg["Intercept"] = 1.0
+
+            # design = df_reg[["Intercept", regvar + "_z", "RT_z"]]
+
+            # # safety check
+            # if not np.all(np.isfinite(design.to_numpy())):
+            #     print(f"Skipping {regvar}: design matrix has NaN/Inf")
+            #     continue
+
+            # # update metadata of kept epochs
+            # df_meta = epo_keep.metadata.reset_index(drop=True).copy()
+            # df_meta[regvar] = df_reg[regvar].values
+            # df_meta[rt_col] = df_reg[rt_col].values
+            # epo_keep.metadata = df_meta
+
+            # # Store epochs for second-level visualization
+            # all_epos[idx].append(epo_keep)
+
+            # # regression: EEG ~ Intercept + regvar + RT
+            # res = mne.stats.linear_regression(
+            #     epo_reg, design,
+            #     names=["Intercept", regvar + "_z", "RT_z"]
+            # )
+
+            # # beta for regressor 
+            # beta_reg = res[regvar + "_z"].beta
+            # betas[idx].append(beta_reg)
+            # betasnp.append(beta_reg.data)
+            
+            # ---- NO Z-SCORING OF PREDICTORS ----
             df_reg["Intercept"] = 1.0
-
-            design = df_reg[["Intercept", regvar + "_z", "RT_z"]]
-
+            
+            # Use the raw regressor and raw RT
+            design = df_reg[["Intercept", regvar, rt_col]]
+            
             # safety check
             if not np.all(np.isfinite(design.to_numpy())):
                 print(f"Skipping {regvar}: design matrix has NaN/Inf")
                 continue
-
+            
             # update metadata of kept epochs
             df_meta = epo_keep.metadata.reset_index(drop=True).copy()
             df_meta[regvar] = df_reg[regvar].values
             df_meta[rt_col] = df_reg[rt_col].values
             epo_keep.metadata = df_meta
-
+            
             # Store epochs for second-level visualization
             all_epos[idx].append(epo_keep)
-
+            
             # regression: EEG ~ Intercept + regvar + RT
             res = mne.stats.linear_regression(
                 epo_reg, design,
-                names=["Intercept", regvar + "_z", "RT_z"]
+                names=["Intercept", regvar, rt_col]
             )
-
-            # beta for regressor 
-            beta_reg = res[regvar + "_z"].beta
+            
+            # beta for (unscaled) regressor
+            beta_reg = res[regvar].beta
             betas[idx].append(beta_reg)
             betasnp.append(beta_reg.data)
+
 
             subject_has_regressors = True
             print(f"Metadata columns for {pa}, regvar '{regvar}':")
@@ -379,23 +411,23 @@ if version in [1, 2, 3]:
         tvals.append(tval)
         pvalues.append(pvals)
 
-        np.save(opj(outpath, 'ols_2ndlevel_tval_' + regvar + '.npy'), tvals[-1])
-        np.save(opj(outpath, 'ols_2ndlevel_pval_' + regvar + '.npy'), pvalues[-1])
+        np.save(opj(outpath, 'ols_2ndlevel_tval_noz' + regvar + '.npy'), tvals[-1])
+        np.save(opj(outpath, 'ols_2ndlevel_pval_noz' + regvar + '.npy'), pvalues[-1])
 
     # Stack and save group-level results
     tvals = np.stack(tvals)
     pvals = np.stack(pvalues)
 
-    np.save(opj(outpath, 'ols_2ndlevel_tvals.npy'), tvals)
-    np.save(opj(outpath, 'ols_2ndlevel_pvals.npy'), pvals)
-    np.save(opj(outpath, 'ols_2ndlevel_betas.npy'), allbetas)
+    np.save(opj(outpath, 'ols_2ndlevel_tvals_noz.npy'), tvals)
+    np.save(opj(outpath, 'ols_2ndlevel_pvals_noz.npy'), pvals)
+    np.save(opj(outpath, 'ols_2ndlevel_betas_noz.npy'), allbetas)
 
     for idx, regvar in enumerate(regvars):
         epo_save = mne.concatenate_epochs(all_epos[idx])
-        epo_save.save(opj(outpath, 'ols_2ndlevel_allepochs-epo_' + regvar + '.fif'),
+        epo_save.save(opj(outpath, 'ols_2ndlevel_allepochs-epo_noz' + regvar + '.fif'),
                       overwrite=True)
 
-    np.save(opj(outpath, 'ols_2ndlevel_betasavg.npy'), beta_gavg)
+    np.save(opj(outpath, 'ols_2ndlevel_betasavg_noz.npy'), beta_gavg)
 
 
 # --------------------------------------------------------------------------
