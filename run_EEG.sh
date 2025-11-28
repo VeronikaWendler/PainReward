@@ -28,6 +28,6 @@ export PATH=$HOME/.local/bin:$PATH
 singularity exec \
     --bind ${PROJECT}:/workspace \
     ${IMAGE} \
-    python /workspace/EEG/eeg_erp_groupplots.py
+    python /workspace/EEG/eeg_erp_massunivariate_prep_2reg.py
 
 
