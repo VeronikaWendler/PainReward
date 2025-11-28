@@ -48,7 +48,7 @@ part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 
 layout = BIDSLayout(outpathall)
 
-version = 4  # 1 for decision phase, 2 for passive phase
+version = 3  # 1 for decision phase, 2 for passive phase
 
 if version == 1:
     outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9_2')   
@@ -99,12 +99,12 @@ chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
 
 if version in [1, 2, 3]:
 
-    tvals = np.load(opj(outpath, 'ols_2ndlevel_tvals.npy'))
-    pvals = np.load(opj(outpath, 'ols_2ndlevel_pvals.npy'))
+    tvals = np.load(opj(outpath, 'ols_2ndlevel_tvals_noz.npy'))
+    pvals = np.load(opj(outpath, 'ols_2ndlevel_pvals_noz.npy'))
 
-    beta_gavg = np.load(opj(outpath, 'ols_2ndlevel_betasavg.npy'),
+    beta_gavg = np.load(opj(outpath, 'ols_2ndlevel_betasavg_noz.npy'),
                         allow_pickle=True)
-    allbetas = np.load(opj(outpath, 'ols_2ndlevel_betas.npy'),
+    allbetas = np.load(opj(outpath, 'ols_2ndlevel_betas_noz.npy'),
                        allow_pickle=True)
 
     times_pos = [np.abs(beta_gavg[0].times - 0.2 - t).argmin() for t in plot_times]
@@ -123,7 +123,7 @@ if version in [1, 2, 3]:
             cmap = 'plasma'
 
         all_epos = mne.read_epochs(
-            opj(outpath, 'ols_2ndlevel_allepochs-epo_' + regvar + '.fif'))
+            opj(outpath, 'ols_2ndlevel_allepochs-epo_noz' + regvar + '.fif'))
 
         regvarname = regvarsnames[ridx]
 
@@ -168,10 +168,10 @@ if version in [1, 2, 3]:
                                 fontdict={'fontsize': param["labelfontsize"]-1})
                 cbar1.ax.tick_params(labelsize=param['ticksfontsize']-2)
                 fig2.savefig(opj(outfigpath,
-                                 'fig_topo_beta_cbar' + str(ridx) + '.svg'),
+                                 'noz_fig_topo_beta_cbar' + str(ridx) + '.svg'),
                              dpi=600, bbox_inches='tight')
             fig.savefig(opj(outfigpath,
-                            'fig_ols_erps_betas_topo_'
+                            'noz_fig_ols_erps_betas_topo_'
                             + regvar + '_' + str(tidx) + '.svg'),
                         dpi=600, bbox_inches='tight')
 
@@ -247,7 +247,7 @@ if version in [1, 2, 3]:
             cbarout[0].axes[0].remove()
             cbarout[0].savefig(
                 opj(outfigpath,
-                    'fig_ols_erps_betas_line_cbar' + regvar + '_' + c + '.svg'),
+                    'noz_fig_ols_erps_betas_line_cbar' + regvar + '_' + c + '.svg'),
                 dpi=800,
                 bbox_inches='tight'
             )
@@ -281,7 +281,7 @@ if version in [1, 2, 3]:
             fig.tight_layout()
             fig.savefig(
                 opj(outfigpath,
-                    'fig_ols_erps_amp_bins_' + regvar + '_' + c + '.svg'),
+                    'noz_fig_ols_erps_amp_bins_' + regvar + '_' + c + '.svg'),
                 dpi=600,
                 bbox_inches='tight'
             )
@@ -314,7 +314,7 @@ if version in [1, 2, 3]:
 
             fig.savefig(
                 opj(outfigpath,
-                    f'fig_binsamp_topo_{regvar}_bin{binnum}.svg'),
+                    f'noz_fig_binsamp_topo_{regvar}_bin{binnum}.svg'),
                 dpi=600,
                 bbox_inches='tight'
             )
@@ -332,7 +332,7 @@ if version in [1, 2, 3]:
                 cbar1.ax.tick_params(labelsize=param['ticksfontsize']-2)
                 fig2.savefig(
                     opj(outfigpath,
-                        f'fig_topo_bins_cbar{ridx}.svg'),
+                        f'noz_fig_topo_bins_cbar{ridx}.svg'),
                     dpi=600,
                     bbox_inches='tight'
                 )
@@ -397,7 +397,7 @@ if version in [1, 2, 3]:
             fig.tight_layout()
             fig.savefig(
                 opj(outfigpath,
-                    'fig_ols_erps_betas_' + regvar + '_' + c + '.svg'),
+                    'noz_fig_ols_erps_betas_' + regvar + '_' + c + '.svg'),
                 dpi=600,
                 bbox_inches='tight'
             )
