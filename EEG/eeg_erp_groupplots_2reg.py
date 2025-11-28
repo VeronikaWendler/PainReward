@@ -141,8 +141,9 @@ if version in [1, 2, 3]:
         )
 
         beta_gavg_nomast = beta_gavg[ridx].copy()
-        chankeep = [True if c not in ['M1', 'M2'] else False
-                    for c in beta_gavg[ridx].ch_names]
+        # boolean mask for "keep" channels (exclude mastoids)
+        chankeep = np.array([c not in ['M1', 'M2']
+                             for c in beta_gavg[ridx].ch_names])
 
         # -----------------------------------------------------------------
         # Topo of beta – per time window
@@ -150,29 +151,38 @@ if version in [1, 2, 3]:
         for tidx, timepos in enumerate(times_pos):
             fig, topo_axis = plt.subplots(figsize=(1, 1))
 
-            im, _ = plot_topomap(beta_gavg_nomast.data[:, timepos],
-                                 pos=beta_gavg_nomast.info,
-                                 mask=pvals[ridx][timepos,
-                                                  chankeep] < param['alpha'],
-                                 mask_params=dict(marker='o',
-                                                  markerfacecolor='w',
-                                                  markeredgecolor='k',
-                                                  linewidth=0,
-                                                  markersize=2),
-                                 cmap=cmap,
-                                 show=False,
-                                 ch_type='eeg',
-                                 outlines='head',
-                                 extrapolate='head',
-                                 vlim=(-0.15, 0.15),
-                                 axes=topo_axis,
-                                 sensors=False,
-                                 contours=0,)
+            # p-values at this time for all channels
+            p_row = pvals[ridx][timepos, :]  # shape (n_channels,)
+
+            # full-length mask: only non-mastoid sig channels are True
+            mask = np.zeros_like(p_row, dtype=bool)
+            sig_non_mastoid = (p_row < param['alpha']) & chankeep
+            mask[sig_non_mastoid] = True
+
+            im, _ = plot_topomap(
+                beta_gavg_nomast.data[:, timepos],
+                pos=beta_gavg_nomast.info,
+                mask=mask,
+                mask_params=dict(marker='o',
+                                 markerfacecolor='w',
+                                 markeredgecolor='k',
+                                 linewidth=0,
+                                 markersize=2),
+                cmap=cmap,
+                show=False,
+                ch_type='eeg',
+                outlines='head',
+                extrapolate='head',
+                vlim=(-0.15, 0.15),
+                axes=topo_axis,
+                sensors=False,
+                contours=0,
+            )
             topo_axis.set_title(str(int(plot_times[tidx] * 1000)) + ' ms',
                                 fontdict={'size': param['labelfontsize']-1},
                                 pad=0.1)
 
-            if tidx+1 == len(plot_times):
+            if tidx + 1 == len(plot_times):
                 fig2, ax = plt.subplots(figsize=(0.2, 1))
                 cbar1 = fig2.colorbar(im, cax=ax,
                                       orientation='vertical', aspect=1)
@@ -442,7 +452,9 @@ if version in [1, 2, 3]:
 
             # p-values at this time
             p_row = pdiff[time_idx, :]
-            mask = (p_row < 0.05) & chankeep  # or 0.05/3 if you want Bonferroni over labels
+            
+            alpha_diff = 0.05 / 3            
+            mask = (p_row < alpha_diff) & chankeep  # or 0.05/3 if you want Bonferroni over labels
 
             fig, ax = plt.subplots(figsize=(2, 2))
             im, _ = plot_topomap(
