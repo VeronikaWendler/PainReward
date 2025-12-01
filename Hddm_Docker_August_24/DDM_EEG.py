@@ -85,7 +85,7 @@ nr_samples      = 12000      # samples per chain - do 6000 (+1000 for burn-in) b
 parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
-    "dec":      ["LPP_0","LPP_1","LPP_2","LPP_3","LPP_4","LPP_5","LPP_6","LPP_7","LPP_8", "LPP_9"]     
+    "dec":      ["LPP_0","LPP_1","LPP_2","LPP_3","LPP_4","LPP_5","LPP_6","LPP_7","LPP_8", "LPP_9", "LPP_10"]     
 }
 
 PHASE_TO_SOURCE = {
@@ -99,7 +99,7 @@ RUN_ALL_MODELS  = True                                           # False = just 
 
 # selectivity
 start_phase = "dec"
-start_version = 9
+start_version = 10
 started = False
 
 # dir
@@ -228,6 +228,9 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         elif version == 9:
             v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
             reg_descr = [v_reg]
+        elif version == 10:
+            a_reg = {'model': 'a ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+            reg_descr = [a_reg]
         else:
             raise ValueError(f"Is this version correct ? ")   
         
@@ -348,53 +351,106 @@ if __name__ == "__main__":
             source_phase = PHASE_TO_SOURCE.get(phase, phase)   #assignes ES_ZBIAS
 
             if phase == "dec":
-                data = data_full[data_full["TaskName"].isin(["decision"])].copy()
+                data_phase = data_full[data_full["TaskName"].isin(["decision"])].copy()
             elif phase == "pas":
-                data = data_full[data_full["TaskName"].isin(["passive"])].copy()
+                data_phase = data_full[data_full["TaskName"].isin(["passive"])].copy()
             else:
-                data = data_full[data_full["TaskName"] == source_phase].copy() 
+                data_phase = data_full[data_full["TaskName"] == source_phase].copy()
             
-            if data.empty:
+            if data_phase.empty:
                 raise ValueError(f"No rows left after filtering for phase '{phase}' "
                                  f"(source = '{source_phase}')")
-
-
-            data['Abs_Money_Pain'] = data['Abs_Money_Pain'].astype("category")
-            data['OV_Money_Pain'] = data['OV_Money_Pain'].astype("category")
-            data['Abs_value'] = data['Abs_value'].astype("category")
-            data['OV_value'] = data['OV_value'].astype("category")
-            data['acceptance_pair'] = data['acceptance_pair'].astype("category")
-
-            data                = data[data["rt"] > 0.250]
-            data["response"]    = pd.to_numeric(data["response"], errors="coerce")
-
-            data["subj_idx"]    = data["subj_idx"]
+            
+            # --- 1) BEFORE ANY TRIAL-LEVEL FILTERS ---
+            print("\n[DEBUG] Subjects in data_full (phase-filtered only):")
+            print(sorted(data_phase["subj_idx"].unique()))
+            
+            # Convert categories (same as before)
+            data_phase['Abs_Money_Pain'] = data_phase['Abs_Money_Pain'].astype("category")
+            data_phase['OV_Money_Pain']  = data_phase['OV_Money_Pain'].astype("category")
+            data_phase['Abs_value']      = data_phase['Abs_value'].astype("category")
+            data_phase['OV_value']       = data_phase['OV_value'].astype("category")
+            data_phase['acceptance_pair'] = data_phase['acceptance_pair'].astype("category")
+            
+            # --- 2) RT FILTER ---
+            data_rt = data_phase[data_phase["rt"] > 0.250].copy()
+            data_rt["response"] = pd.to_numeric(data_rt["response"], errors="coerce")
+            
+            print("\n[DEBUG] After RT filter (rt > 0.25):")
+            print(f"  Trials before RT filter : {len(data_phase)}")
+            print(f"  Trials after  RT filter : {len(data_rt)}")
+            print(f"  Subjects before filter  : {sorted(data_phase['subj_idx'].unique())}")
+            print(f"  Subjects after  filter  : {sorted(data_rt['subj_idx'].unique())}")
+            
+            dropped_at_rt = sorted(set(data_phase["subj_idx"].unique())
+                                  - set(data_rt["subj_idx"].unique()))
+            if dropped_at_rt:
+                print(f"  Subjects LOST at RT step: {dropped_at_rt}")
+            else:
+                print("  No subjects lost at RT step.")
+            
+            # --- 3) DROPNAs ON KEY COLUMNS ---
+            drop_cols = ['rt', "painlevel", "moneylevel", "accepted", 'acceptance_pair']
+            
+            data_clean = data_rt.copy()
+            before_dropna_subjs = sorted(data_clean["subj_idx"].unique())
+            data_clean.dropna(subset=drop_cols, inplace=True)
+            after_dropna_subjs = sorted(data_clean["subj_idx"].unique())
+            
+            print("\n[DEBUG] After dropna on key columns:")
+            print(f"  Trials before dropna : {len(data_rt)}")
+            print(f"  Trials after  dropna : {len(data_clean)}")
+            print(f"  Subjects before      : {before_dropna_subjs}")
+            print(f"  Subjects after       : {after_dropna_subjs}")
+            
+            dropped_at_dropna = sorted(set(before_dropna_subjs) - set(after_dropna_subjs))
+            if dropped_at_dropna:
+                print(f"  Subjects LOST at dropna step: {dropped_at_dropna}")
+            else:
+                print("  No subjects lost at dropna step.")
+            
+            # --- 4) PER-SUBJECT DIAGNOSTIC TABLE ---
+            diag_rows = []
+            all_subjs = sorted(data_phase["subj_idx"].unique())
+            
+            for s in all_subjs:
+                d0 = data_phase[data_phase["subj_idx"] == s]
+                d1 = data_rt[data_rt["subj_idx"] == s]
+                d2 = data_clean[data_clean["subj_idx"] == s]
+            
+                if len(d2) > 0:
+                    reason = "included"
+                elif len(d1) > 0:
+                    reason = "dropped_at_dropna"
+                elif len(d0) > 0:
+                    reason = "dropped_at_rt"
+                else:
+                    reason = "dropped_at_phase_filter"
+            
+                diag_rows.append(dict(
+                    subj_idx=s,
+                    n_phase=len(d0),
+                    n_after_rt=len(d1),
+                    n_after_dropna=len(d2),
+                    status=reason
+                ))
+            
+            diag_df = pd.DataFrame(diag_rows)
+            print("\n[DEBUG] Per-subject trial counts:")
+            print(diag_df.sort_values("subj_idx"))
+            
+            # Optional: save to CSV for detailed inspection
+            debug_out = FIG_DIR_ROOT / "debug_subject_flow"
+            ensure_dir(debug_out)
+            diag_df.to_csv((debug_out / f"subject_flow_phase-{phase}_version-{version}.csv").as_posix(),
+                           index=False)
+            
+            # Finally: use data_clean as the modelling data
+            data = data_clean
             subjects = np.unique(data.subj_idx)
             nr_subjects = subjects.shape[0]
-            print(nr_subjects)
-            
-                       
-            #data = data[~data["subj_idx"].isin({})]
-            data.dropna(subset=['rt', 
-                                "painlevel",
-                                "moneylevel",
-                                "accepted",
-                                'acceptance_pair',
-                                'sv_money',
-                                'sv_pain',
-                                'sv_both',
-                                'p_pain_all',
-                                'Abs_Money_Pain',
-                                'OV_Money_Pain',
-                                'sv_pain_para',
-                                'sv_both_para',
-                                'k_pain_para',
-                                'beta_para',
-                                'bias_para',
-                                'STA_SAI_Score',
-                                'STA_TAI_Score',
-                                'PCS_Score'], inplace = True)    #'STA_SAI_Score','STA_TAI_Score','PCS_Score'
-
+            print(f"\nFinal N subjects used in HDDM: {nr_subjects}")
+            print(f"Final subjects: {sorted(subjects)}")
             # quick report at the start
             quick_report(data, phase, version, model_name, phase_key)
 

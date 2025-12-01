@@ -25,5 +25,5 @@ export MPLBACKEND=Agg
 singularity exec \
     --bind ${PROJECT}:/workspace \
     ${IMAGE} \
-    python /workspace/Hddm_Docker_August_24/DDM_EEG_load.py
+    python /workspace/Hddm_Docker_August_24/DDM_EEG.py
 

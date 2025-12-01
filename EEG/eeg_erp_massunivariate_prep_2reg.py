@@ -93,18 +93,11 @@ param = {
     # clustering threshold
     'cluster_threshold': 0.01}
 
-#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_pain_para_contrib.csv')
-#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_money_contrib.csv')
-#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Abs_contrib.csv')
-#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_OV_contrib.csv')
-#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_full_sv_pain_para_contrib.csv')
-#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_complex_pain_money_contrib.csv')
-#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_v_sv_pain_para_contrib.csv')
-#mod_data = pd.read_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/data_with_sv_pain_para_Quest.csv)
-
+# this is the data frame I computed in the DDM_EEG_load.py file for the best fitting DDM by adding trial-by-trial drift-scaled pain as a column & other important parameters from the DDM
 mod_data_path = PROJECT_DIR / "Hddm_Docker_August_24" / "figures_dir" / "painreward_behavioural_data_LPP_9" / "diagnostics" / "v_pain_money_interaction.csv"
 mod_data = pd.read_csv(mod_data_path, sep=None, engine="python")
 
+# soe filtering
 # Subjects in EEG
 eeg_participants = set(part)
 # Subjects in HDDM CSV
@@ -440,7 +433,9 @@ if version in [1, 2, 3]:
     
     #---------------------------------------------------------------------------------------------------
     # ---------------------------------------------------------------------
-    # Option 2: Cluster test on beta differences (drift vs raw)
+    # Cluster test on beta differences (drift vs raw)
+    # The idea is to test what topographical sig. effects canbe explained by drift alone
+    # Therefore, an idea is to get the difference between teh scaled drift rate*painlevel and the pure painlevel
     # ---------------------------------------------------------------------
     # indices: [0,1,2] = raw, [3,4,5] = drift
     diff_pairs = [
@@ -480,12 +475,12 @@ if version in [1, 2, 3]:
 
 
     # ---------------------------------------------------------------------
-    # Option 1: ROI-level R² comparison (raw vs drift)
+    # Option 1: ROI-level R scquared comparison (raw vs drift)
     # ---------------------------------------------------------------------
     print("\nComputing ROI-level R² comparisons (raw vs drift)...")
     
-    roi_chs = ['Fz','FCz','POz','Cz','CPz','Pz', 'Oz']   # LPP-ish ROI; adjust if needed
-    tmin, tmax = 0.4, 0.8           # seconds
+    roi_chs = ['Fz','FCz','POz','Cz','CPz','Pz', 'Oz']   # LPP 
+    tmin, tmax = 0.4, 0.8           
     
     R2_rows = []
     
@@ -495,7 +490,7 @@ if version in [1, 2, 3]:
         df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
         mod2 = part_1_dat[part_1_dat['participant'] == pa]
     
-        # Load epochs (decision phase here)
+        #decision phase epochs
         epo = mne.read_epochs(
             opj(basepath, pa, 'eeg', 'erps',
                 pa + '_decision_cues_singletrials-epo.fif')
@@ -531,14 +526,14 @@ if version in [1, 2, 3]:
         else:
             raise ValueError(f"No RT column in mod_data for {pa}. Columns: {mod2_sub.columns}")
     
-        # --- Build y: mean EEG in ROI and time window ---
+        # mean EEG in ROI and time window
         picks = mne.pick_channels(epo_z.info['ch_names'], roi_chs)
         tmask = (epo_z.times >= tmin) & (epo_z.times <= tmax)
     
         data_roi = epo_z.get_data()[:, picks][:, :, tmask]  # trials x ch x time
         y = data_roi.mean(axis=(1, 2))                      # (n_trials,)
     
-        # --- Compare raw vs drift for each attribute ---
+        # Compare raw vs drift for each attribute 
         label_list = ['pain', 'money', 'interaction']
         for raw_name, v_name, attr_label in zip(raw_regcols, v_regcols, label_list):
     
