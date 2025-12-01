@@ -99,7 +99,7 @@ RUN_ALL_MODELS  = True                                           # False = just 
 
 # selectivity
 start_phase = "dec"
-start_version = 10
+start_version = 9
 started = False
 
 # dir
@@ -119,6 +119,7 @@ def quick_report(data, phase, version, model_name, phase_key):
 
     fig, ax = plt.subplots(figsize=(6,4))
     for _, d in data.groupby('subj_idx'):
+        d['rt'] = d['choice_resp.rt']
         d['rt'].hist(bins=20, histtype='step', ax=ax, alpha=.4)
     ax.set(
         title=f"RT distribution – {phase} v{version}",
@@ -345,10 +346,10 @@ if __name__ == "__main__":
                     continue 
             
             full_model_name = model_base_name + model_name
-            print(f"\n===  PHASE {phase} : {model_name}  ===")
+            print(f"\n---PHASE {phase} : {model_name}---")
             
             # filter data for this phase
-            source_phase = PHASE_TO_SOURCE.get(phase, phase)   #assignes ES_ZBIAS
+            source_phase = PHASE_TO_SOURCE.get(phase, phase)   
 
             if phase == "dec":
                 data_phase = data_full[data_full["TaskName"].isin(["decision"])].copy()
@@ -360,9 +361,8 @@ if __name__ == "__main__":
             if data_phase.empty:
                 raise ValueError(f"No rows left after filtering for phase '{phase}' "
                                  f"(source = '{source_phase}')")
-            
-            # --- 1) BEFORE ANY TRIAL-LEVEL FILTERS ---
-            print("\n[DEBUG] Subjects in data_full (phase-filtered only):")
+     
+            print("\n Subjects in data_full (phase-filtered only):")
             print(sorted(data_phase["subj_idx"].unique()))
             
             # Convert categories (same as before)
@@ -371,12 +371,13 @@ if __name__ == "__main__":
             data_phase['Abs_value']      = data_phase['Abs_value'].astype("category")
             data_phase['OV_value']       = data_phase['OV_value'].astype("category")
             data_phase['acceptance_pair'] = data_phase['acceptance_pair'].astype("category")
+            data_phase['rt']              = data_phase['choice_resp.rt']
             
-            # --- 2) RT FILTER ---
+            # RT filter
             data_rt = data_phase[data_phase["rt"] > 0.250].copy()
             data_rt["response"] = pd.to_numeric(data_rt["response"], errors="coerce")
             
-            print("\n[DEBUG] After RT filter (rt > 0.25):")
+            print("\n Trials left after RT filter (rt > 0.25):")
             print(f"  Trials before RT filter : {len(data_phase)}")
             print(f"  Trials after  RT filter : {len(data_rt)}")
             print(f"  Subjects before filter  : {sorted(data_phase['subj_idx'].unique())}")
@@ -385,19 +386,23 @@ if __name__ == "__main__":
             dropped_at_rt = sorted(set(data_phase["subj_idx"].unique())
                                   - set(data_rt["subj_idx"].unique()))
             if dropped_at_rt:
-                print(f"  Subjects LOST at RT step: {dropped_at_rt}")
+                print(f"Subjects dropped at RT step: {dropped_at_rt}")
             else:
-                print("  No subjects lost at RT step.")
+                print("No subjects dropped at RT step.")
             
-            # --- 3) DROPNAs ON KEY COLUMNS ---
+            # drop nans
             drop_cols = ['rt', "painlevel", "moneylevel", "accepted", 'acceptance_pair']
+            
+            # before, we had this in dropna (not so ideal)
+            #"painlevel", "moneylevel", "accepted", 'acceptance_pair', 'sv_money', 'sv_pain', 'sv_both', 'p_pain_all', 'Abs_Money_Pain', 
+            # 'OV_Money_Pain', 'sv_pain_para', 'sv_both_para', 'k_pain_para', 'beta_para', 'bias_para', 'STA_SAI_Score', 'STA_TAI_Score', 'PCS_Score'
             
             data_clean = data_rt.copy()
             before_dropna_subjs = sorted(data_clean["subj_idx"].unique())
             data_clean.dropna(subset=drop_cols, inplace=True)
             after_dropna_subjs = sorted(data_clean["subj_idx"].unique())
             
-            print("\n[DEBUG] After dropna on key columns:")
+            print("\n After dropna on columns:")
             print(f"  Trials before dropna : {len(data_rt)}")
             print(f"  Trials after  dropna : {len(data_clean)}")
             print(f"  Subjects before      : {before_dropna_subjs}")
@@ -405,11 +410,11 @@ if __name__ == "__main__":
             
             dropped_at_dropna = sorted(set(before_dropna_subjs) - set(after_dropna_subjs))
             if dropped_at_dropna:
-                print(f"  Subjects LOST at dropna step: {dropped_at_dropna}")
+                print(f"Subjects lost at dropna step: {dropped_at_dropna}")
             else:
-                print("  No subjects lost at dropna step.")
+                print("No subjects lost at dropna step.")
             
-            # --- 4) PER-SUBJECT DIAGNOSTIC TABLE ---
+            # reproting table
             diag_rows = []
             all_subjs = sorted(data_phase["subj_idx"].unique())
             
@@ -436,16 +441,15 @@ if __name__ == "__main__":
                 ))
             
             diag_df = pd.DataFrame(diag_rows)
-            print("\n[DEBUG] Per-subject trial counts:")
+            print("\n Trial counts per subject:")
             print(diag_df.sort_values("subj_idx"))
             
-            # Optional: save to CSV for detailed inspection
             debug_out = FIG_DIR_ROOT / "debug_subject_flow"
             ensure_dir(debug_out)
             diag_df.to_csv((debug_out / f"subject_flow_phase-{phase}_version-{version}.csv").as_posix(),
                            index=False)
             
-            # Finally: use data_clean as the modelling data
+            # data_clean as modelling data
             data = data_clean
             subjects = np.unique(data.subj_idx)
             nr_subjects = subjects.shape[0]
