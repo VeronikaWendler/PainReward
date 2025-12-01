@@ -75,8 +75,6 @@ from scipy.special import expit   # for inverse‑logit
 
 
 #------------------------------------------------------------------------------------------------------------------
-# very important! If you try to plot parameters such as 'v_C(Abs_value)_subj' without specifying the exact levels like [low_abs],
-# [mid_abs], and [high_abs], the code will raise an error. 
 #------------------------------------------------------------------------------------------------------------------
 # params:
 
