@@ -85,7 +85,7 @@ nr_samples      = 12000      # samples per chain - do 6000 (+1000 for burn-in) b
 parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
-    "dec":      ["LPP_0","LPP_1","LPP_2","LPP_3","LPP_4","LPP_5","LPP_6","LPP_7","LPP_8", "LPP_9", "LPP_10"]     
+    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10"]     
 }
 
 PHASE_TO_SOURCE = {
@@ -93,7 +93,7 @@ PHASE_TO_SOURCE = {
 }
 
 # BATCH-RUN CONTROL
-PHASE_RUN_ORDER = ["dec"]                                      # order
+PHASE_RUN_ORDER = ["dec"]                                        # order
 SKIP_PHASES     = {}                                             # ignored this phase
 RUN_ALL_MODELS  = True                                           # False = just load existing fits (but loading is done in the aDDM_Garcia_LE_ES_EE.py file)
 
@@ -391,7 +391,7 @@ if __name__ == "__main__":
                 print("No subjects dropped at RT step.")
             
             # drop nans
-            drop_cols = ['rt', "painlevel", "moneylevel", "accepted", 'acceptance_pair']
+            drop_cols = ['rt', "painlevel", "moneylevel", "accepted", 'acceptance_pair', 'sv_pain_para']
             
             # before, we had this in dropna (not so ideal)
             #"painlevel", "moneylevel", "accepted", 'acceptance_pair', 'sv_money', 'sv_pain', 'sv_both', 'p_pain_all', 'Abs_Money_Pain', 
