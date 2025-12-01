@@ -80,7 +80,7 @@ from scipy.special import expit   # for inverse‑logit
 
 nr_models       = 4         # number of MCMC chains
 nr_samples      = 12000      # samples per chain - do 6000 (+1000 for burn-in) but for now for a quick one we do 600
-parallel        = True      # parallel
+parallel        = True      # parallel #
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
     "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10"]     
