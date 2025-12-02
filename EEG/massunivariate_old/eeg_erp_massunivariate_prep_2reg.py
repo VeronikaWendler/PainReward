@@ -94,18 +94,20 @@ param = {
     'cluster_threshold': 0.01}
 
 # this is the data frame I computed in the DDM_EEG_load.py file for the best fitting DDM by adding trial-by-trial drift-scaled pain as a column & other important parameters from the DDM
+# if you are testing the influence of decision threshold on neural measures mod_10 can be used
 mod_data_path = PROJECT_DIR / "Hddm_Docker_August_24" / "figures_dir" / "painreward_behavioural_data_LPP_9" / "diagnostics" / "v_pain_money_interaction.csv"
 mod_data = pd.read_csv(mod_data_path, sep=None, engine="python")
 
-# soe filtering
+# some filtering to check we are keeping all the subjects
+
 # Subjects in EEG
-eeg_participants = set(part)
-# Subjects in HDDM CSV
+eeg_participants = set(part) # should be 1 - 50
+# Subjects in HDDM CSV (should be 38 in total)
 beh_participants = set(mod_data["participant"].unique())
 # Subjects present in both datasets
 common_participants = sorted(list(eeg_participants & beh_participants))
 
-print("\n Subjects:", common_participants)
+print("\n Subjects:", common_participants) # should be 38
 
 
 part = common_participants
