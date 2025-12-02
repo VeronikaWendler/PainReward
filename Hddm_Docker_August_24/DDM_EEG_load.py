@@ -136,6 +136,7 @@ data['OV_Money_Pain'] = data['OV_Money_Pain'].astype("category")
 data['Abs_value'] = data['Abs_value'].astype("category")
 data['OV_value'] = data['OV_value'].astype("category")
 data['acceptance_pair'] = data['acceptance_pair'].astype("category")
+data['rt']              = data['choice_resp.rt']
 data                = data[data["rt"] > 0.250]
 data["response"]    = pd.to_numeric(data["response"], errors="coerce")
 
