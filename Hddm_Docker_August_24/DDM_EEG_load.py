@@ -99,7 +99,7 @@ nr_samples      = 6000      # samples per chain - do 6000 (+1000 for burn-in) bu
 parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
-    "dec":      ["LPP_0","LPP_1","LPP_2","LPP_3","LPP_4","LPP_5","LPP_6","LPP_7","LPP_8","LPP_9"]     
+    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10"]     
 }
 
 # debugging, tip, python starts at 0, unlike Matlab
@@ -149,23 +149,7 @@ exclude_part = {}   # there's a nr of reasons as to why to exclude these ones (e
 #data = data[data['phase'] == phase]
 
 data = data[~data['subj_idx'].isin(exclude_part)]    
-data.dropna(subset=['rt', "painlevel","moneylevel",
-                                "accepted",
-                                'acceptance_pair',
-                                'sv_money',
-                                'sv_pain',
-                                'sv_both',
-                                'p_pain_all',
-                                'Abs_Money_Pain',
-                                'OV_Money_Pain',
-                                'sv_pain_para',
-                                'sv_both_para',
-                                'k_pain_para',
-                                'beta_para',
-                                'bias_para',
-                                'STA_SAI_Score',
-                                'STA_TAI_Score',
-                                'PCS_Score'], inplace = True)    #'STA_SAI_Score','STA_TAI_Score','PCS_Score'
+data.dropna(subset=['rt', "painlevel", "moneylevel", "accepted", 'acceptance_pair', 'sv_pain_para'], inplace = True)    #'STA_SAI_Score','STA_TAI_Score','PCS_Score'
 
 
 # debugging information
@@ -357,8 +341,12 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
         elif version == 9:
             v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
             reg_descr = [v_reg]
+        elif version == 10:
+            a_reg = {'model': 'a ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+            reg_descr = [a_reg]
         else:
-            raise ValueError(f"Is this version correct ? ")   
+            raise ValueError(f"Is this version correct ? ")  
+  
         
 
         m = hddm.models.HDDMRegressor(data, 
@@ -683,10 +671,27 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                       'v_moneylevel',
                       'v_painlevel:moneylevel'
                       ]
+        elif version == 10:
+            params_of_interest = ['a',
+                                  'v',
+                                  't', 
+                                  'a_Intercept',
+                                  'a_painlevel',
+                                  'a_moneylevel',
+                                  'a_painlevel:moneylevel'
+                                  ]
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Threshold',
+                      'Drift Rate', 
+                      'Non-dec. time',
+                      'a_Intercept',
+                      'a_painlevel',
+                      'a_moneylevel',
+                      'a_painlevel:moneylevel'
+                      ]
         else:
             raise ValueError(f"Invalid version {version}")
         
-            painlevel + moneylevel + painlevel * moneylevel
     elif phase == "LE_RL":
         if version == 0:
             params_of_interest = [
@@ -1160,6 +1165,59 @@ def v_pain_money_interaction_contributions(models, data):
 
     return data_out
 
+# for mod 10
+def a_pain_money_interaction_contributions(models, data):
+
+    combined = kabuki.utils.concat_models(models)
+    data_out = data.copy()
+
+    # allocate space
+    cols = [
+        "a_intercept_subj", 
+        "a_painlevel_subj", 
+        "a_moneylevel_subj",
+        "a_interaction_subj",
+        "a_intercept_contrib",
+        "a_pain_contrib",
+        "a_money_contrib",
+        "a_interaction_contrib",
+        "a_full_trial"
+    ]
+    for c in cols:
+        data_out[c] = np.nan
+
+    for subj in data['subj_idx'].unique():
+        subj_mask = data_out['subj_idx'] == subj
+        subj_data = data_out.loc[subj_mask]
+
+        # Subject-specific posterior means
+        b0 = combined.nodes_db.loc[f"a_Intercept_subj.{subj}", "node"].trace().mean()
+        b1 = combined.nodes_db.loc[f"a_painlevel_subj.{subj}", "node"].trace().mean()
+        b2 = combined.nodes_db.loc[f"a_moneylevel_subj.{subj}", "node"].trace().mean()
+        b3 = combined.nodes_db.loc[f"a_painlevel:moneylevel_subj.{subj}", "node"].trace().mean()
+
+        # stable subject-level params
+        data_out.loc[subj_mask, "a_intercept_subj"] = b0
+        data_out.loc[subj_mask, "a_painlevel_subj"] = b1
+        data_out.loc[subj_mask, "a_moneylevel_subj"] = b2
+        data_out.loc[subj_mask, "a_interaction_subj"] = b3
+
+        # trial level contributions
+        data_out.loc[subj_mask, "a_intercept_contrib"] = b0
+        data_out.loc[subj_mask, "a_pain_contrib"] = b1 * subj_data["painlevel"]
+        data_out.loc[subj_mask, "a_money_contrib"] = b2 * subj_data["moneylevel"]
+        data_out.loc[subj_mask, "a_interaction_contrib"] = b3 * (subj_data["painlevel"] * subj_data["moneylevel"])
+
+        # full drift per trial
+        data_out.loc[subj_mask, "a_full_trial"] = (
+            data_out.loc[subj_mask, "a_intercept_contrib"]
+            + data_out.loc[subj_mask, "a_pain_contrib"]
+            + data_out.loc[subj_mask, "a_money_contrib"]
+            + data_out.loc[subj_mask, "a_interaction_contrib"]
+        )
+
+    return data_out
+
 
 
 # # for model NR2
@@ -1377,8 +1435,12 @@ else:
         elif version == 9:
             sv_contribute = v_pain_money_interaction_contributions(models, data)
             sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'v_pain_money_interaction.csv' ))
+        elif version == 10:
+            sv_contribute = a_pain_money_interaction_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'a_pain_money_interaction.csv' ))
         else:
             print('None')
+            
         # diag_dir = Path(fig_dir) / "diagnostics"
         # plot_inatt_forest(
         #     fig_dir=fig_dir,

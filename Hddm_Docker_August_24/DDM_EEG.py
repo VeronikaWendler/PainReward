@@ -410,7 +410,7 @@ if __name__ == "__main__":
             if dropped_at_dropna:
                 print(f"Subjects lost at dropna step: {dropped_at_dropna}")
             else:
-                print("No subjects lost at dropna step.")
+                print("No subjects lost at dropna step")
             
             # reproting table
             diag_rows = []
