@@ -4,6 +4,12 @@
  # @ Date: 2024
  # @ Description:
  
+ 1.set versions
+ 2.cleaning and z scoring
+ 3.Grand average & second-level cluster test (versions 1–3)
+ 4.Cluster test on beta differences (drift vs raw)
+ 5.ROI-level R scquared comparison (raw vs drift)
+ 
  '''
 
 # Massunivariate Analysis and Second level test on betas
@@ -49,7 +55,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 3    # version 1 is for decision and version 2 is for passive phase 
+version = 5    # version 1 is for decision and version 2 is for passive phase 
 
 
 if version == 1:
@@ -68,11 +74,15 @@ elif version == 4: #with RT covariate
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_RTbin')
     if not os.path.exists(outpath):
         os.mkdir(outpath)
+elif version == 5:  #between subs
+    outpath = opj(outpath, 'erps_massuni_drift_mod_9_subjectGLM')
+    if not os.path.exists(outpath):
+        os.mkdir(outpath)
 else:
     print("no version")
 
-# IMPORTANT
-# version 1 & 2 still use the old participant loop, that is, there is no RT covariate in 1 & 2
+
+
 
 # participants
 part_csv = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "participants.tsv"
@@ -82,10 +92,10 @@ part.sort()
 # Silence pandas warning
 pd.options.mode.chained_assignment = None  # default='warn'
 
-# Parameters
+# Parameters # similar to MP's painlearning (2024)
 param = {
     # Njobs for permutations
-    'njobs': 20,
+    'njobs': 20,                   
     # Number of permutations
     'nperms': 5000,
     # Random state to get same permutations each time
@@ -101,8 +111,10 @@ mod_data = pd.read_csv(mod_data_path, sep=None, engine="python")
 mod_data["rt"] = mod_data["choice_resp.rt"]
 mod_data["interaction"] = mod_data["moneylevel"]*mod_data["painlevel"]
 
+# same file but for threshold (a) parameters
+mod_data_a_path = PROJECT_DIR / "Hddm_Docker_August_24" / "figures_dir" / "painreward_behavioural_data_mod_10" / "diagnostics" / "a_pain_money_interaction.csv"
+mod_data_a = pd.read_csv(mod_data_a_path, sep=None, engine="python")
 
-# some filtering to check we are keeping all the subjects
 
 # Subjects in EEG
 eeg_participants = set(part) # should be 1 - 50
@@ -451,7 +463,7 @@ if version in [1, 2, 3]:
     #---------------------------------------------------------------------------------------------------
     # ---------------------------------------------------------------------
     # Cluster test on beta differences (drift vs raw)
-    # The idea is to test what topographical sig. effects canbe explained by drift alone
+    # The idea is to test what topographical sig. effects can be explained by drift alone
     # Therefore, an idea is to get the difference between teh scaled drift rate*painlevel and the pure painlevel
     # ---------------------------------------------------------------------
     # indices: [0,1,2] = raw, [3,4,5] = drift
@@ -466,7 +478,7 @@ if version in [1, 2, 3]:
         data_v   = allbetas[:, v_idx, :, :]
         beta_diff = data_v - data_raw          # v - raw
     
-        # shape for st_clust: (n_subj, n_times, n_channels)
+        # shape for st_clust (n_subj, n_times, n_channels)
         testdata = np.swapaxes(beta_diff, 2, 1)
     
         tval_diff, clusters, cluster_p_values, _ = st_clust_1s_ttest(
@@ -1527,7 +1539,335 @@ elif version == 4:
 
     print("\n Version 4 RT-stratified cluster tests done ;)")
 
+#---------------------------------------------------------------------------------------------------------------------------- 
+# Between-subjects mass-univariate GLM on subject-averaged ERPs
 
+
+
+if version == 5:
+    print("\n Between-subjects subj-level GLM ---")
+
+    # ------------------------------------------------------------------
+    # get group-level subject-averaged ERPs; contains 1 epoch per sub
+    
+    group_dir = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives" / "group_level"
+
+    name = "decision"   # can be changed to passive for comparison purposes later on
+    group_epochs_fname = group_dir / f"{name}_off+_subaveraged-epo.fif"
+
+    if not group_epochs_fname.exists():
+        raise FileNotFoundError(f"Group-level epochs file not found: {group_epochs_fname}")
+
+    group_epochs = mne.read_epochs(group_epochs_fname)
+    data = group_epochs.get_data()
+    n_subj, n_chan, n_time = data.shape
+    print(f"group_epochs shape = {data.shape} (subjects, channels, times)")
+    
+    # adjacency for cluster tests (same logic as versions 1–3)
+    connect, ch_names = mne.channels.find_ch_adjacency(group_epochs.info, ch_type='eeg')
+    
+    if not isinstance(param['cluster_threshold'], dict):
+        p_thresh = param['cluster_threshold'] / 2
+        cluster_threshold = -stats.t.ppf(p_thresh, n_subj - 1)
+    else:
+        cluster_threshold = param['cluster_threshold']
+
+
+    # subject IDs as in the ERP metadata (this defines the order)
+    subj_ids = group_epochs.metadata["participant_id"].tolist()
+
+    # ------------------------------------------------------------------
+    # subject-level regressors from HDDM outputs
+    # rt for mod 9 and 10 (hddm model) is the same 
+    
+    v_subj_cols = ['v_painlevel_subj', 'v_moneylevel_subj', 'v_interaction_subj']
+    a_subj_cols = ['a_painlevel_subj', 'a_moneylevel_subj', 'a_interaction_subj']
+
+    # subject-level v-betas + mean RT
+    subj_reg_v = (
+        mod_data[mod_data["participant"].isin(subj_ids)]
+        .groupby("participant")[v_subj_cols + ["rt"]]
+        .mean()
+        .reset_index()
+    )
+
+    # subject-level a-betas
+    subj_reg_a = (
+        mod_data_a[mod_data_a["participant"].isin(subj_ids)]
+        .groupby("participant")[a_subj_cols]
+        .mean()
+        .reset_index()
+    )
+
+    # merge v + a on participant
+    subj_reg = subj_reg_v.merge(subj_reg_a, on="participant", how="inner")
+
+    # align rows to the order of epochs
+    subj_reg = subj_reg.set_index("participant").loc[subj_ids].reset_index()
+    assert np.all(subj_reg["participant"].values == np.array(subj_ids)), "Subject ordering mismatch!"
+
+    # final list of regressors, this contains both, the v ~ painlevel + moneylevel + interaction and the a ~ painlevel + moneylevel + interaction models betas
+    regvars_v5 = v_subj_cols + a_subj_cols
+
+    # ------------------------------------------------------------------
+    #helper for cluster-based between-subject GLM (parallel to v1–3)
+    def run_group_cluster_variant(subdir_name, zscore_reg=False, zscore_rt=False):
+        print(f"\n --- Running cluster-based group GLM: {subdir_name} ---")
+        variant_dir = Path(outpath) / (subdir_name + "_cluster")
+        variant_dir.mkdir(parents=True, exist_ok=True)
+
+        rt_vals = subj_reg["rt"].to_numpy(dtype=float)
+
+        for regvar in regvars_v5:
+            print(f"Regressor: {regvar}")
+
+            x_reg = subj_reg[regvar].to_numpy(dtype=float)
+            x_rt  = rt_vals.copy()
+
+            if zscore_reg:
+                x_reg = stats.zscore(x_reg)
+            if zscore_rt:
+                x_rt = stats.zscore(x_rt)
+
+            # ----------------------------------------------------------
+            # Orthogonalise regressor with respect to RT
+            # (equivalent to including RT in the design and taking
+            #  the effect of regvar while controlling for RT)
+
+            X_cov = np.column_stack([np.ones(n_subj), x_rt])
+            beta_cov, _, _, _ = np.linalg.lstsq(X_cov, x_reg, rcond=None)
+            x_res = x_reg - X_cov @ beta_cov    # shape (n_subj,)
+
+            keep = np.isfinite(x_res) & np.all(np.isfinite(data.reshape(n_subj, -1)), axis=1)
+            if keep.sum() < 5:
+                print(f"Skipping {regvar} in {subdir_name} as only {keep.sum()} valid subjects")
+                continue
+
+            x_res_k = x_res[keep]
+            data_k  = data[keep, :, :]          # (n_subj_kept, n_chan, n_time)
+            n_kept  = data_k.shape[0]
+
+            # ----------------------------------------------------------
+            # subject-level effect maps:
+            #   effect_s(chan, time) = x_res(s) * EEG_s(chan, time)
+
+            effect_data = np.empty_like(data_k)
+            for i_sub in range(n_kept):
+                effect_data[i_sub] = x_res_k[i_sub] * data_k[i_sub]
+
+            testdata = np.swapaxes(effect_data, 2, 1)
+
+            if not isinstance(param['cluster_threshold'], dict):
+                p_thresh = param['cluster_threshold'] / 2
+                thr = -stats.t.ppf(p_thresh, n_kept - 1)
+            else:
+                thr = param['cluster_threshold']
+
+            tval, clusters, cluster_p_values, _ = st_clust_1s_ttest(
+                testdata,
+                n_jobs=param["njobs"],
+                threshold=thr,
+                adjacency=connect,
+                n_permutations=param['nperms'],
+                buffer_size=None
+            )
+            pvals = np.ones_like(tval)
+            for c, p_val in zip(clusters, cluster_p_values):
+                pvals[c] = p_val
+
+            np.save(variant_dir / f'groupglm_cluster_tval_{regvar}.npy', tval)
+            np.save(variant_dir / f'groupglm_cluster_pval_{regvar}.npy', pvals)
+
+        return variant_dir
+
+    # helper to run one design variant (NO_Z, Z, PartZ) and save maps
+
+    def run_group_glm_variant(subdir_name, zscore_reg=False, zscore_rt=False):
+        print(f"\n--- Running group GLM variant: {subdir_name} ---")
+
+        variant_dir = Path(outpath) / subdir_name
+        variant_dir.mkdir(parents=True, exist_ok=True)
+
+        betas_variant = {}
+        tvals_variant = {}
+        pvals_variant = {}
+
+        rt_vals = subj_reg["rt"].to_numpy(dtype=float)
+
+        for regvar in regvars_v5:
+            print(f"  Regressor: {regvar}")
+
+            x_reg = subj_reg[regvar].to_numpy(dtype=float)
+            x_rt = rt_vals.copy()
+
+            if zscore_reg:
+                x_reg = stats.zscore(x_reg)
+            if zscore_rt:
+                x_rt = stats.zscore(x_rt)
+
+            design = pd.DataFrame({
+                "Intercept": np.ones(n_subj),
+                regvar: x_reg,
+                "rt": x_rt,
+            })
+
+            if not np.all(np.isfinite(design.to_numpy())):
+                print(f"Design has NaN/Inf for {regvar} in {subdir_name}, skipping.")
+                continue
+
+            res = mne.stats.linear_regression(
+                group_epochs,
+                design,
+                names=["Intercept", regvar, "rt"]
+            )
+
+            beta_ev = res[regvar].beta
+            t_ev    = res[regvar].t_val
+            p_ev    = res[regvar].p_val
+
+            betas_variant[regvar] = beta_ev
+            tvals_variant[regvar] = t_ev
+            pvals_variant[regvar] = p_ev
+
+            # save chan * time maps
+            np.save(variant_dir / f'groupglm_beta_{regvar}.npy', beta_ev.data)
+            np.save(variant_dir / f'groupglm_tval_{regvar}.npy', t_ev.data)
+            np.save(variant_dir / f'groupglm_pval_{regvar}.npy', p_ev.data)
+
+        return betas_variant, tvals_variant, pvals_variant, variant_dir
+
+    # ------------------------------------------------------------------
+    # three variants: NO_Zscoring, Zscoring, PartZscoring
+    
+    # NO_Zscoring, using raw v/a betas, raw RT
+    betas_noz, tvals_noz, pvals_noz, noz_dir_v5 = run_group_glm_variant(
+        subdir_name="NO_Zscoring",
+        zscore_reg=False,
+        zscore_rt=False
+    )
+
+    # Zscoring all predictors
+    betas_z, tvals_z, pvals_z, z_dir_v5 = run_group_glm_variant(
+        subdir_name="Zscoring",
+        zscore_reg=True,
+        zscore_rt=True
+    )
+
+    # PartZscoring, z-scored RT
+    betas_partz, tvals_partz, pvals_partz, partz_dir_v5 = run_group_glm_variant(
+        subdir_name="PartZscoring",
+        zscore_reg=False,
+        zscore_rt=True
+    )
+    #----------------------------------------------------------------------------------
+
+    noz_cluster_dir_v5 = run_group_cluster_variant(
+        subdir_name="NO_Zscoring",
+        zscore_reg=False,
+        zscore_rt=False
+    )
+
+    z_cluster_dir_v5 = run_group_cluster_variant(
+        subdir_name="Zscoring",
+        zscore_reg=True,
+        zscore_rt=True
+    )
+
+    partz_cluster_dir_v5 = run_group_cluster_variant(
+        subdir_name="PartZscoring",
+        zscore_reg=False,
+        zscore_rt=True
+    )
+
+    # ------------------------------------------------------------------
+    #difference maps v – a for each drift regressor (pain/money/interaction)
+    #Here done for the NO_Zscoring variant.
+    
+    diff_pairs_v_a = [
+        ('v_painlevel_subj',        'a_painlevel_subj',        'pain'),
+        ('v_moneylevel_subj',       'a_moneylevel_subj',       'money'),
+        ('v_interaction_subj',      'a_interaction_subj',      'interaction'),
+    ]
+
+    for v_name, a_name, label in diff_pairs_v_a:
+        if v_name not in betas_noz or a_name not in betas_noz:
+            print(f"Skipping v–a diff for {label}: missing {v_name} or {a_name} in NO_Zscoring betas.")
+            continue
+
+        beta_v = betas_noz[v_name].data   # (n_chan, n_time)
+        beta_a = betas_noz[a_name].data   # (n_chan, n_time)
+        beta_diff = beta_v - beta_a
+
+        np.save(noz_dir_v5 / f'groupglm_beta_v_minus_a_{label}.npy', beta_diff)
+
+    #----------------------------------------------------------------------------------------------------------
+    print("\n ROI-level R squared comparisons (v vs a)")
+
+    roi_chs = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']  # LPP
+    tmin, tmax = 0.4, 0.8
+
+    # subject × channels × times
+    roi_picks = mne.pick_channels(group_epochs.info['ch_names'], roi_chs)
+    tmask = (group_epochs.times >= tmin) & (group_epochs.times <= tmax)
+
+    data_roi = data[:, roi_picks][:, :, tmask]    # subj × ROIchan × timewin
+    y = data_roi.mean(axis=(1, 2))                # subj-level LPP amplitude
+
+    R2_rows = []
+    attr_labels = ['pain', 'money', 'interaction']
+
+    for v_col, a_col, attr_label in zip(v_subj_cols, a_subj_cols, attr_labels):
+
+        vals_v = subj_reg[v_col].to_numpy(dtype=float)
+        vals_a = subj_reg[a_col].to_numpy(dtype=float)
+        vals_rt = subj_reg["rt"].to_numpy(dtype=float)
+
+        keep = (
+            np.isfinite(vals_v) &
+            np.isfinite(vals_a) &
+            np.isfinite(vals_rt) &
+            np.isfinite(y)
+        )
+
+        if keep.sum() < 5:
+            print(f"Skipping ROI R² for {attr_label}: only {keep.sum()} valid subjects")
+            continue
+
+        yk = y[keep]
+        v_k = vals_v[keep]
+        a_k = vals_a[keep]
+        rt_k = vals_rt[keep]
+
+        # regression: y ~ Intercept + reg + RT
+        X_v = np.column_stack([np.ones(keep.sum()), v_k, rt_k])
+        X_a = np.column_stack([np.ones(keep.sum()), a_k, rt_k])
+
+        beta_v, _, _, _ = np.linalg.lstsq(X_v, yk, rcond=None)
+        pred_v = X_v @ beta_v
+
+        beta_a, _, _, _ = np.linalg.lstsq(X_a, yk, rcond=None)
+        pred_a = X_a @ beta_a
+
+        ss_tot = np.sum((yk - yk.mean())**2)
+        ss_res_v = np.sum((yk - pred_v)**2)
+        ss_res_a = np.sum((yk - pred_a)**2)
+
+        R2_v = 1.0 - ss_res_v / ss_tot if ss_tot > 0 else np.nan
+        R2_a = 1.0 - ss_res_a / ss_tot if ss_tot > 0 else np.nan
+
+        R2_rows.append(dict(
+            attribute=attr_label,   # 'pain','money','interaction'
+            R2_v=R2_v,
+            R2_a=R2_a,
+            delta_R2=R2_v - R2_a
+        ))
+
+    if len(R2_rows) > 0:
+        R2_df = pd.DataFrame(R2_rows)
+        R2_df.to_csv(noz_dir_v5 / 'ROI_R2_v_vs_a.csv', index=False)
+        print("Saved ROI_R2_v_vs_a.csv in", noz_dir_v5)
+
+    print(f"\nVersion 5 finished. Subject-level GLM results saved in:\n  {noz_dir_v5}\n  {z_dir_v5}\n  {partz_dir_v5}")
 
 ### old
 #-----------------------------------------------------------------------------------------------------------------------------
