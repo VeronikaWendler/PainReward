@@ -112,7 +112,7 @@ beh_participants = set(mod_data["participant"].unique())
 common_participants = sorted(list(eeg_participants & beh_participants))
 
 print("\n Subjects:", common_participants) # should be 38
-
+print(len(common_participants))
 
 part = common_participants
 
@@ -122,7 +122,7 @@ part_1 = part
 
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
-# Massunivariate Regression with 2 GLMs
+# Massunivariate Regression with 3 GLMs
 #
 raw_regcols = ['painlevel', 'moneylevel', 'interaction']
 v_regcols   = ['v_pain_contrib', 'v_money_contrib', 'v_interaction_contrib']

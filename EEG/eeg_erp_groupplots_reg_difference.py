@@ -30,36 +30,57 @@ inpath = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"
 outpathall = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives"
 
 layout = BIDSLayout(inpath)
-
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
-
 layout = BIDSLayout(outpathall)
 
-version = 3  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 2 GLMs
+version = 3  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+
+# 
+# noz     - NO_Zscoring      (raw regressors + raw RT)
+# z       - Zscoring         (z-scored regressors + z-scored RT)
+# partz   - PartZscoring     (raw regressors + z-scored RT)
+glm_version = 'noz'   # change 
 
 if version == 1:
-    outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9_2')
-    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_2_RT_strat')
+    outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_passive')
+    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_passive')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 elif version == 2:
-    outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9_2_passive')
-    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_2_passive')
+    outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_RT')
+    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_RT')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 elif version == 3:
-    # MUST MATCH the massunivariate script
-    outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9_2_RT_2GLMs')
-    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_2_RT_2GLMs')
+    outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_RT_3GLMs')
+    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_RT_3GLMs')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 elif version == 4:
-    outpath = opj(outpathall, 'statistics/erps_massuni_drift_mod_9_2_RTbin')
-    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_2_RTbin')
+    outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_RTbin')
+    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_RTbin')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 else:
     print("No Version")
+
+# map glm_version subfolder + file + figure name
+if glm_version == 'noz':
+    stats_subdir = 'NO_Zscoring'
+    suffix = '_noz'       
+    fig_prefix = 'noz_'   
+elif glm_version == 'z':
+    stats_subdir = 'Zscoring'
+    suffix = ''           
+    fig_prefix = 'z_'
+elif glm_version == 'partz':
+    stats_subdir = 'PartZscoring'
+    suffix = ''          
+    fig_prefix = 'partz_'
+else:
+    raise ValueError(f"Check glm_version: {glm_version}")
+
+outpath_glm = opj(outpath, stats_subdir)
 
 # 6 regressors total
 param = {
@@ -95,15 +116,12 @@ chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
 
 if version in [1, 2, 3]:
 
-    # Shape: (n_reg=6, n_times, n_channels)
-    tvals = np.load(opj(outpath, 'ols_2ndlevel_tvals_noz.npy'))
-    pvals = np.load(opj(outpath, 'ols_2ndlevel_pvals_noz.npy'))
+    tvals = np.load(opj(outpath_glm, f'ols_2ndlevel_tvals{suffix}.npy'))
+    pvals = np.load(opj(outpath_glm, f'ols_2ndlevel_pvals{suffix}.npy'))
 
-    # length 6; each element is an Evoked
-    beta_gavg = np.load(opj(outpath, 'ols_2ndlevel_betasavg_noz.npy'),
+    beta_gavg = np.load(opj(outpath_glm, f'ols_2ndlevel_betasavg{suffix}.npy'),
                         allow_pickle=True)
-    # Shape: (n_subj, n_reg=6, n_chan, n_time)
-    allbetas = np.load(opj(outpath, 'ols_2ndlevel_betas_noz.npy'),
+    allbetas = np.load(opj(outpath_glm, f'ols_2ndlevel_betas{suffix}.npy'),
                        allow_pickle=True)
 
     times_pos = [np.abs(beta_gavg[0].times - 0.2 - t).argmin() for t in plot_times]
@@ -137,8 +155,9 @@ if version in [1, 2, 3]:
 
         # Epochs that were used for this regressor GLM
         all_epos = mne.read_epochs(
-            opj(outpath, 'ols_2ndlevel_allepochs-epo_noz' + regvar + '.fif')
-        )
+            opj(outpath_glm, f'ols_2ndlevel_allepochs-epo{suffix}_{regvar}.fif')
+            )
+
 
         beta_gavg_nomast = beta_gavg[ridx].copy()
         # boolean mask for "keep" channels (exclude mastoids)
@@ -191,12 +210,16 @@ if version in [1, 2, 3]:
                                 fontdict={'fontsize': param["labelfontsize"]-1})
                 cbar1.ax.tick_params(labelsize=param['ticksfontsize']-2)
                 fig2.savefig(opj(outfigpath,
-                                 'noz_fig_topo_beta_cbar_' + regvar + '.svg'),
+                                 f'{fig_prefix}fig_topo_beta_cbar_{regvar}.svg'),
                              dpi=600, bbox_inches='tight')
-            fig.savefig(opj(outfigpath,
-                            'noz_fig_ols_erps_betas_topo_'
-                            + regvar + '_' + str(tidx) + '.svg'),
-                        dpi=600, bbox_inches='tight')
+
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}fig_ols_erps_betas_topo_{regvar}_{tidx}.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+            
 
         # -----------------------------------------------------------------
         # Binned-by-regressor line plots and topomaps 
@@ -267,12 +290,10 @@ if version in [1, 2, 3]:
             cbarout[0].axes[-1].yaxis.label.set_size(param['labelfontsize'])
             cbarout[0].axes[-1].tick_params(labelsize=param['ticksfontsize'])
             cbarout[0].axes[0].remove()
-            cbarout[0].savefig(
-                opj(outfigpath,
-                    'noz_fig_ols_erps_betas_line_cbar_' + regvar + '_' + c + '.svg'),
-                dpi=800,
-                bbox_inches='tight'
-            )
+            cbarout[0].savefig(opj(outfigpath,
+                                   f'{fig_prefix}fig_ols_erps_betas_line_cbar_{regvar}_{c}.svg'),dpi=800,
+                               bbox_inches='tight')
+
 
             bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
 
@@ -303,10 +324,11 @@ if version in [1, 2, 3]:
             fig.tight_layout()
             fig.savefig(
                 opj(outfigpath,
-                    'noz_fig_ols_erps_amp_bins_' + regvar + '_' + c + '.svg'),
+                    f'{fig_prefix}fig_ols_erps_amp_bins_{regvar}_{c}.svg'),
                 dpi=600,
                 bbox_inches='tight'
             )
+
 
         # Topo of binned amplitude at 0.6 s
         bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
@@ -336,10 +358,10 @@ if version in [1, 2, 3]:
 
             fig.savefig(
                 opj(outfigpath,
-                    f'noz_fig_binsamp_topo_{regvar}_bin{binnum}.svg'),
-                dpi=600,
-                bbox_inches='tight'
+                    f'{fig_prefix}fig_binsamp_topo_{regvar}_bin{binnum}.svg'),
+                dpi=600, bbox_inches='tight'
             )
+            
 
             if idx2 + 1 == len(bin_ids):
                 fig2, ax = plt.subplots(figsize=(0.2, 1))
@@ -354,10 +376,10 @@ if version in [1, 2, 3]:
                 cbar1.ax.tick_params(labelsize=param['ticksfontsize']-2)
                 fig2.savefig(
                     opj(outfigpath,
-                        f'noz_fig_topo_bins_cbar_{regvar}.svg'),
-                    dpi=600,
-                    bbox_inches='tight'
+                        f'{fig_prefix}fig_topo_bins_cbar_{regvar}.svg'),
+                    dpi=600, bbox_inches='tight'
                 )
+
 
         # -----------------------------------------------------------------
         # Mean beta and SEM over participants
@@ -418,10 +440,10 @@ if version in [1, 2, 3]:
             fig.tight_layout()
             fig.savefig(
                 opj(outfigpath,
-                    'noz_fig_ols_erps_betas_' + regvar + '_' + c + '.svg'),
+                    f'{fig_prefix}fig_ols_erps_betas_{regvar}_{c}.svg'),
                 dpi=600,
-                bbox_inches='tight'
-            )
+                bbox_inches='tight')
+
 
 # ---------------------------------------------------------------------------------------------------
 # beta-difference cluster tests (v – raw) at all time points
@@ -442,9 +464,10 @@ if version in [1, 2, 3]:
     chankeep = np.array([c not in ['M1', 'M2'] for c in info['ch_names']])
 
     for label in diff_labels:
-        # Load t and p maps for v - raw
-        tdiff = np.load(opj(outpath, f'ols_2ndlevel_tval_diff_{label}_noz.npy'))
-        pdiff = np.load(opj(outpath, f'ols_2ndlevel_pval_diff_{label}_noz.npy'))
+        
+        tdiff = np.load(opj(outpath_glm, f'ols_2ndlevel_tval_diff_{label}{suffix}.npy'))
+        pdiff = np.load(opj(outpath_glm, f'ols_2ndlevel_pval_diff_{label}{suffix}.npy'))
+
 
         for tidx, time_idx in enumerate(diff_times_pos):
             t_time = plot_times[tidx]
@@ -453,8 +476,8 @@ if version in [1, 2, 3]:
             # p-values at this time
             p_row = pdiff[time_idx, :]
             
-            alpha_diff = 0.05 / 3            
-            mask = (p_row < alpha_diff) & chankeep  # or 0.05/3 if you want Bonferroni over labels
+            alpha_diff = 0.05 / 3            # for the 3 difference levels
+            mask = (p_row < alpha_diff) & chankeep 
 
             fig, ax = plt.subplots(figsize=(2, 2))
             im, _ = plot_topomap(
@@ -488,14 +511,15 @@ if version in [1, 2, 3]:
 
             fig.savefig(
                 opj(outfigpath,
-                    f'noz_fig_topo_diff_{label}_{t_ms}ms.svg'),
+                    f'{fig_prefix}fig_topo_diff_{label}_{t_ms}ms.svg'),
                 dpi=600, bbox_inches='tight'
             )
             fig2.savefig(
                 opj(outfigpath,
-                    f'noz_fig_topo_diff_{label}_{t_ms}ms_cbar.svg'),
+                    f'{fig_prefix}fig_topo_diff_{label}_{t_ms}ms_cbar.svg'),
                 dpi=600, bbox_inches='tight'
             )
+
 
 # Version 4 --------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------
