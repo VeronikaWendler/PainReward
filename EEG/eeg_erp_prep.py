@@ -27,7 +27,7 @@ from pathlib import Path
 
 
 # set the version to run (either decision or passive phase)
-version = 2    # 1 = decision, 2 = passive
+version = 1    # 1 = decision, 2 = passive
 
 # Set bids directory
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
@@ -680,3 +680,71 @@ elif version == 2:
 else:
     print("No version for tfr")        
 
+
+
+# -------------------------------------------------------------------
+# Group-level subject-averaged ERPs - chan * time per subject
+# -------------------------------------------------------------------
+print("\n--- Building group-level subject-averaged ERP matrices ---")
+
+group_dir = opj(outpath, "group_level")
+os.makedirs(group_dir, exist_ok=True)
+
+evoked_data = []
+sub_ids = []
+
+for p in part:
+    if version == 1:
+        evoked_fname = opj(outpath, p, "eeg", "erps",
+                           f"{p}_decision_off+_ave.fif")
+        prefix = "decision"
+    elif version == 2:
+        evoked_fname = opj(outpath, p, "eeg", "erps_passive",
+                           f"{p}_passive_off+_ave.fif")
+        prefix = "passive"
+    else:
+        raise RuntimeError("Group-level ERPs only implemented for version 1 or 2.")
+
+    if not os.path.exists(evoked_fname):
+        print(f"  Skipping {p}, evoked file not found: {evoked_fname}")
+        continue
+
+    # Load subject-level ERP (off+)
+    ev = mne.read_evokeds(evoked_fname)[0]  # Evoked object
+    evoked_data.append(ev.data)             # (n_channels, n_times)
+    sub_ids.append(p)
+
+# Only proceed if we have at least one subject
+if len(evoked_data) > 0:
+    # Shape: (n_subjects, n_channels, n_times)
+    data_3d = np.stack(evoked_data, axis=0)
+    ch_names = ev.ch_names
+    times = ev.times
+
+    # Save as numpy arrays for flexible use
+    np.save(opj(group_dir, f"{prefix}_off+_subxchxtime.npy"), data_3d)
+    np.save(opj(group_dir, f"{prefix}_off+_times.npy"), times)
+    np.save(opj(group_dir, f"{prefix}_off+_ch_names.npy"),
+            np.array(ch_names, dtype=object))
+    np.save(opj(group_dir, f"{prefix}_off+_subjects.npy"),
+            np.array(sub_ids, dtype=object))
+
+    print(f"Saved {prefix}_off+_subxchxtime.npy with shape "
+          f"{data_3d.shape} = (n_subj, n_channels, n_times)")
+
+    # Optional: pack into an EpochsArray (1 epoch = 1 subject)
+    info = ev.info  # reuse montage, sfreq, etc.
+    meta_df = pd.DataFrame({"participant_id": sub_ids})
+    group_epochs = mne.EpochsArray(
+        data_3d,
+        info,
+        tmin=times[0],
+        metadata=meta_df
+    )
+
+    group_epochs_fname = opj(group_dir,
+                             f"{prefix}_off+_subaveraged-epo.fif")
+    group_epochs.save(group_epochs_fname, overwrite=True)
+    print(f"Saved group-level epochs: {group_epochs_fname}")
+else:
+    print("No evoked files found for group-level averaging.")
