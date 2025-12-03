@@ -1567,19 +1567,19 @@ if version == 5:
         cluster_threshold = param['cluster_threshold']
 
 
-    # subject IDs as in the ERP metadata (this defines the order)
-    subj_ids = group_epochs.metadata["participant_id"].tolist()
+    # subject IDs as in the ERP metadata
+    subj_ids_epochs = group_epochs.metadata["participant_id"].tolist()
 
     # ------------------------------------------------------------------
     # subject-level regressors from HDDM outputs
     # rt for mod 9 and 10 (hddm model) is the same 
-    
+
     v_subj_cols = ['v_painlevel_subj', 'v_moneylevel_subj', 'v_interaction_subj']
     a_subj_cols = ['a_painlevel_subj', 'a_moneylevel_subj', 'a_interaction_subj']
 
     # subject-level v-betas + mean RT
     subj_reg_v = (
-        mod_data[mod_data["participant"].isin(subj_ids)]
+        mod_data[mod_data["participant"].isin(subj_ids_epochs)]
         .groupby("participant")[v_subj_cols + ["rt"]]
         .mean()
         .reset_index()
@@ -1587,7 +1587,7 @@ if version == 5:
 
     # subject-level a-betas
     subj_reg_a = (
-        mod_data_a[mod_data_a["participant"].isin(subj_ids)]
+        mod_data_a[mod_data_a["participant"].isin(subj_ids_epochs)]
         .groupby("participant")[a_subj_cols]
         .mean()
         .reset_index()
@@ -1596,9 +1596,23 @@ if version == 5:
     # merge v + a on participant
     subj_reg = subj_reg_v.merge(subj_reg_a, on="participant", how="inner")
 
-    # align rows to the order of epochs
-    subj_reg = subj_reg.set_index("participant").loc[subj_ids].reset_index()
-    assert np.all(subj_reg["participant"].values == np.array(subj_ids)), "Subject ordering mismatch!"
+
+    subj_ids_reg   = subj_reg["participant"].tolist()
+    common_subj_ids = [s for s in subj_ids_epochs if s in subj_ids_reg]
+
+    print(f"using {len(common_subj_ids)} subjects with both ERPs and HDDM regressors.")
+    print("Subjects used:", common_subj_ids)
+
+    # subset group_epochs to those subjects
+    keep_idx = [i for i, s in enumerate(subj_ids_epochs) if s in common_subj_ids]
+    group_epochs = group_epochs[keep_idx]
+    data = group_epochs.get_data()
+    subj_reg = subj_reg.set_index("participant").loc[common_subj_ids].reset_index()
+    subj_ids = common_subj_ids
+    n_subj = len(subj_ids)
+
+    assert data.shape[0] == n_subj == subj_reg.shape[0], "Subject mismatch after filtering!"
+
 
     # final list of regressors, this contains both, the v ~ painlevel + moneylevel + interaction and the a ~ painlevel + moneylevel + interaction models betas
     regvars_v5 = v_subj_cols + a_subj_cols
