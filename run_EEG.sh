@@ -17,7 +17,7 @@ export PYTHONUNBUFFERED=1
 export MPLBACKEND=Agg
 export MPLCONFIGDIR=/tmp/mplcache
 
-# Path to your container and project directory
+
 IMAGE=$HOME/containers/mne_latest.sif
 PROJECT=$HOME/sharedscratch/PainReward_ULaval
 
@@ -28,6 +28,6 @@ export PATH=$HOME/.local/bin:$PATH
 singularity exec \
     --bind ${PROJECT}:/workspace \
     ${IMAGE} \
-    python /workspace/EEG/eeg_erp_massunivariate_reg_difference.py
+    python /workspace/EEG/eeg_erp_prep.py
 
 

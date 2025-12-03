@@ -21,7 +21,6 @@ PROJECT=$HOME/sharedscratch/PainReward_ULaval
 export PROJECT_DIR=/workspace
 export MPLBACKEND=Agg
 
-# Run inside the container
 singularity exec \
     --bind ${PROJECT}:/workspace \
     ${IMAGE} \

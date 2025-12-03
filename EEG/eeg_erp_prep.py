@@ -410,6 +410,7 @@ else:
 ## #------------------------------------------------------------------------------------------------------------------
 ## # TFR 
 #---------------------------------------------------------------------------------------------------------------------
+# TFR specific libs
 
 from mne.report import Report
 import pprint
@@ -466,10 +467,9 @@ param = {
    'tfrepochstart': -2,  # Used for TFR transform
    'tfrepochend': 2,
    'ttfreqs': np.arange(4, 101, 1),  # Frequencies
-   'n_cycles': 0.5*np.arange(4, 101, 1),  # Wavelet cycles
+   'n_cycles': 0.5*np.arange(4, 101, 1),  # Wavelet cycles (check with MP again)
    'testresampfreq': 256,  # Sfreq to downsample to
    'njobs': 8,  # N cpus to run TFR
-   # Removed shocked trails
    #'ignoreshocks': False,
 }
 
@@ -671,7 +671,7 @@ elif version == 2:
         strials.save(opj(outdir_tfr,  p + '_passive_cues_'
                          + 'epochs-tfr.h5'), overwrite=True)
         # clear for memory
-        strials = None  # Clear for memory
+        strials = None  
         
     removed_frame['percleft_cue'] = percleft_cue
     removed_frame['percremoved_cue_comperp'] = percremoved_cue_comperp
@@ -684,8 +684,9 @@ else:
 
 # -------------------------------------------------------------------
 # Group-level subject-averaged ERPs - chan * time per subject
-# -------------------------------------------------------------------
-print("\n--- Building group-level subject-averaged ERP matrices ---")
+# this is for the massunivariate between-subjects file
+
+print("\n--- group-level subject-averaged ERP matrices ---")
 
 group_dir = opj(outpath, "group_level")
 os.makedirs(group_dir, exist_ok=True)
@@ -703,18 +704,18 @@ for p in part:
                            f"{p}_passive_off+_ave.fif")
         prefix = "passive"
     else:
-        raise RuntimeError("Group-level ERPs only implemented for version 1 or 2.")
+        raise RuntimeError("Group-level ERPs only implemented for version 1 or 2")
 
     if not os.path.exists(evoked_fname):
-        print(f"  Skipping {p}, evoked file not found: {evoked_fname}")
+        print(f"Skipping {p}, evoked file not found: {evoked_fname}")
         continue
 
     # Load subject-level ERP (off+)
     ev = mne.read_evokeds(evoked_fname)[0]  # Evoked object
-    evoked_data.append(ev.data)             # (n_channels, n_times)
+    evoked_data.append(ev.data)             # n_channels * n_times
     sub_ids.append(p)
 
-# Only proceed if we have at least one subject
+# proceed if we have at least one subject
 if len(evoked_data) > 0:
     # Shape: (n_subjects, n_channels, n_times)
     data_3d = np.stack(evoked_data, axis=0)
@@ -732,7 +733,7 @@ if len(evoked_data) > 0:
     print(f"Saved {prefix}_off+_subxchxtime.npy with shape "
           f"{data_3d.shape} = (n_subj, n_channels, n_times)")
 
-    # Optional: pack into an EpochsArray (1 epoch = 1 subject)
+    # pack into an EpochsArray
     info = ev.info  # reuse montage, sfreq, etc.
     meta_df = pd.DataFrame({"participant_id": sub_ids})
     group_epochs = mne.EpochsArray(
@@ -745,6 +746,6 @@ if len(evoked_data) > 0:
     group_epochs_fname = opj(group_dir,
                              f"{prefix}_off+_subaveraged-epo.fif")
     group_epochs.save(group_epochs_fname, overwrite=True)
-    print(f"Saved group-level epochs: {group_epochs_fname}")
+    print(f"Saved group-level epochs as {group_epochs_fname}")
 else:
-    print("No evoked files found for group-level averaging.")
+    print("No evoked files found for group-level averaging")
