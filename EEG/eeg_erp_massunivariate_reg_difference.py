@@ -155,63 +155,58 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes
 
-filtered_data = []
-for p in part:
-    # data for this part
-    df = mod_data[mod_data['participant'] == p]
-    
-    # Load single epochs file (cotains one epoch/trial)
-    if version == 1:
-        epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_passive',                   
-                              p + '_passive_cues_singletrials-epo.fif'))
-        epo_1 = epo.copy()
-    elif version == 2:
-        epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
-                              p + '_decision_cues_singletrials-epo.fif'))
-        epo_1 = epo.copy()
-    elif version == 3:
-        epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
-                              p + '_decision_cues_singletrials-epo.fif'))
-        epo_1 = epo.copy()
-    elif version == 4:
-        epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
-                              p + '_decision_cues_singletrials-epo.fif'))
-        epo_1 = epo.copy()
+#------------------------------------------------------------------------------------------------------------------------------------------------
+# Creating the dataframes (only needed for versions 1–4)
 
+if version in [1, 2, 3, 4]:
+    filtered_data = []
+    for p in part:
+        # data for this participant
+        df = mod_data[mod_data['participant'] == p]
+        
+        # Load single epochs file
+        if version == 1:
+            epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_passive',                   
+                                  p + '_passive_cues_singletrials-epo.fif'))
+            epo_1 = epo.copy()
+        elif version in [2, 3, 4]:
+            epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
+                                  p + '_decision_cues_singletrials-epo.fif'))
+            epo_1 = epo.copy()
 
-    participants = epo_1.metadata['participant_id'].unique()
-    trialblocks = []
-    blocks_idx = []
+        participants = epo_1.metadata['participant_id'].unique()
+        trialblocks = []
+        blocks_idx = []
 
-    # create blocks for metadata
-    for participant in participants:
-        p_df = epo_1.metadata[epo_1.metadata['participant_id'] == participant]
-        blocks = list(range(25)) * 5
-        blocks_idx_participant = [i for i in range(5) for _ in range(25)]
-        trialblocks.extend(blocks)
-        blocks_idx.extend(blocks_idx_participant)
-            
-    epo_1.metadata['trialblocks'] = trialblocks
-    epo_1.metadata['blocks_idx'] = blocks_idx
-
-    epo_1_filtered = pd.DataFrame()
-
-    # filter for unique participants in the behavioral frame
-    for participant in df['participant'].unique():
-        erps_p_df = epo_1.metadata[epo_1.metadata['participant_id'] == participant]
-        df_unique = df[df['participant'] == participant]   
-
-        # Loop through each block
-        for block_x in df_unique['blocks.thisRepN'].unique():
-            erps_block_df = erps_p_df[erps_p_df['blocks_idx'] == block_x]
-            df_block_df = df_unique[df_unique['blocks.thisRepN'] == block_x]
+        # create blocks for metadata
+        for participant in participants:
+            p_df = epo_1.metadata[epo_1.metadata['participant_id'] == participant]
+            blocks = list(range(25)) * 5
+            blocks_idx_participant = [i for i in range(5) for _ in range(25)]
+            trialblocks.extend(blocks)
+            blocks_idx.extend(blocks_idx_participant)
                 
-            filtered_block_df = erps_block_df[erps_block_df['trialblocks'].isin(df_block_df['trials.thisN'])]            
-            epo_1_filtered = pd.concat([epo_1_filtered, filtered_block_df], ignore_index=True)
-    
-    filtered_data.append(epo_1_filtered)
+        epo_1.metadata['trialblocks'] = trialblocks
+        epo_1.metadata['blocks_idx'] = blocks_idx
 
-epo_1_filtered_combined = pd.concat(filtered_data, ignore_index=True)
+        epo_1_filtered = pd.DataFrame()
+
+        # filter for unique participants in the behavioral frame
+        for participant in df['participant'].unique():
+            erps_p_df = epo_1.metadata[epo_1.metadata['participant_id'] == participant]
+            df_unique = df[df['participant'] == participant]   
+
+            for block_x in df_unique['blocks.thisRepN'].unique():
+                erps_block_df = erps_p_df[erps_p_df['blocks_idx'] == block_x]
+                df_block_df = df_unique[df_unique['blocks.thisRepN'] == block_x]
+                    
+                filtered_block_df = erps_block_df[erps_block_df['trialblocks'].isin(df_block_df['trials.thisN'])]            
+                epo_1_filtered = pd.concat([epo_1_filtered, filtered_block_df], ignore_index=True)
+        
+        filtered_data.append(epo_1_filtered)
+
+    epo_1_filtered_combined = pd.concat(filtered_data, ignore_index=True)
+
 #epo_2_filtered_combined.to_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/epo_2_filtered_combined')
 
 
@@ -1540,8 +1535,7 @@ elif version == 4:
     print("\n Version 4 RT-stratified cluster tests done ;)")
 
 #---------------------------------------------------------------------------------------------------------------------------- 
-# Between-subjects mass-univariate GLM on subject-averaged ERPs
-
+# Between-subjects mass-univariate GLM on ERPs averaged per subject
 
 
 if version == 5:
