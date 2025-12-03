@@ -266,11 +266,24 @@ if version in [1, 2, 3]:
                 sub_evokeds.append(sub_evoked)
 
             # Grand average over subjects
+            # evokeds = dict()
+            # for i in range(len(bin_labels)):
+            #     evoked = [sub_evoked[i] for sub_evoked in sub_evokeds
+            #               if sub_evoked[i] != 0]
+            #     evokeds[str(i+1)] = mne.grand_average(evoked)
+            
+            
             evokeds = dict()
             for i in range(len(bin_labels)):
-                evoked = [sub_evoked[i] for sub_evoked in sub_evokeds
-                          if sub_evoked[i] != 0]
-                evokeds[str(i+1)] = mne.grand_average(evoked)
+                evoked_list = [sub_evoked[i] for sub_evoked in sub_evokeds
+                               if sub_evoked[i] != 0]
+            
+                if len(evoked_list) == 0:
+                    print(f"Skipping bin {i+1}: no valid epochs in this bin for any sub")
+                    continue
+            
+                evokeds[str(i+1)] = mne.grand_average(evoked_list)
+
 
             pick = beta_gavg[ridx].ch_names.index(c)
 

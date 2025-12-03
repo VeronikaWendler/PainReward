@@ -216,6 +216,9 @@ if version in [1, 2, 3]:
 
     included_subjects = []
     skipped_subjects = []
+    
+    noz_dir = Path(outpath) / "NO_Zscoring"
+    noz_dir.mkdir(parents=True, exist_ok=True)
 
     for pa in part_1:
         print(f"\n--- NOT Z-Scored Version: Processing {pa} ---")
@@ -426,8 +429,6 @@ if version in [1, 2, 3]:
         tvals.append(tval)
         pvalues.append(pvals)
         
-        noz_dir = Path(outpath) / "NO_Zscoring"
-        noz_dir.mkdir(parents=True, exist_ok=True)
         
         np.save(noz_dir / f'ols_2ndlevel_tval_noz_{regvar}.npy', tvals[-1])
         np.save(noz_dir / f'ols_2ndlevel_pval_noz_{regvar}.npy', pvalues[-1])
@@ -602,25 +603,23 @@ if version in [1, 2, 3]:
         R2_df.to_csv(noz_dir / f'ROI_R2_raw_vs_v.csv', index=False)
         print("Saved ROI_R2_raw_vs_v.csv in", noz_dir)
     
-##########################################################################################
-##########################################################################################
+    ##########################################################################################
+    ##########################################################################################
 
-# Z scored version
+    # Z scored version
+    z_dir = Path(outpath) / "Zscoring"
+    z_dir.mkdir(parents=True, exist_ok=True)
 
+    all_epos = [[] for _ in range(len(regvars))]
+    allbetasnp = []
+    betas = [[] for _ in range(len(regvars))]
+    included_subjects = []
+    skipped_subjects = []
+    
     for pa in part_1:
-        
-        all_epos = [[] for _ in range(len(regvars))]
-        allbetasnp = []
-        betas = [[] for _ in range(len(regvars))]
-        included_subjects = []
-        skipped_subjects = []
-        
         print(f"\n--- YES: Z-Scored Version: Processing {pa} ---")
         df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
         mod2 = part_1_dat[part_1_dat['participant'] == pa]
-
-        z_dir = Path(outpath) / "Zscoring"
-        z_dir.mkdir(parents=True, exist_ok=True)
 
         # Load epochs
         if version == 1:
@@ -968,26 +967,23 @@ if version in [1, 2, 3]:
         R2_df.to_csv(z_dir / f'ROI_R2_raw_vs_v.csv', index=False)
         print("Saved ROI_R2_raw_vs_v.csv in", z_dir)    
     
-#-------------------PARTIAL Z-SCORED VERSION--------------------------------
-##########################################################################################
-##########################################################################################
+    #-------------------PARTIAL Z-SCORED VERSION--------------------------------
+    ##########################################################################################
+    ##########################################################################################
 
-# Partial Z scored version
+    # Partial Z scored version
+    partz_dir = Path(outpath) / "PartZscoring"
+    partz_dir.mkdir(parents=True, exist_ok=True)
+    all_epos = [[] for _ in range(len(regvars))]
+    allbetasnp = []
+    betas = [[] for _ in range(len(regvars))]
+    included_subjects = []
+    skipped_subjects = []
 
     for pa in part_1:
-        
-        all_epos = [[] for _ in range(len(regvars))]
-        allbetasnp = []
-        betas = [[] for _ in range(len(regvars))]
-        included_subjects = []
-        skipped_subjects = []
-        
-        print(f"\n--- YES: Z-Scored Version: Processing {pa} ---")
+        print(f"\n--- YES Partially: Z-Scored Version: Processing {pa} ---")
         df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
         mod2 = part_1_dat[part_1_dat['participant'] == pa]
-
-        partz_dir = Path(outpath) / "PartZscoring"
-        partz_dir.mkdir(parents=True, exist_ok=True)
 
         # Load epochs
         if version == 1:
