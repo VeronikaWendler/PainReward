@@ -55,7 +55,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 5    # version 1 is for decision and version 2 is for passive phase 
+version = 6    # version 1 is for decision and version 2 is for passive phase 
 
 
 if version == 1:
@@ -76,6 +76,14 @@ elif version == 4: #with RT covariate
         os.mkdir(outpath)
 elif version == 5:  #between subs
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_subjectGLM')
+    if not os.path.exists(outpath):
+        os.mkdir(outpath)
+elif version == 6:
+    outpath = opj(outpath, 'erps_massuni_drift_mod_9_v6_beta_vs_drift')
+    if not os.path.exists(outpath):
+        os.mkdir(outpath)
+elif version == 7: # this is the directory, I'll use for testing  pure sv_pain again (now that I made some changes to keep more participants)
+    outpath = opj(outpath, 'erps_massuni_drift_mod_9_sv_pain')
     if not os.path.exists(outpath):
         os.mkdir(outpath)
 else:
@@ -1995,6 +2003,173 @@ if version == 5:
         print("Saved ROI_R2_v_vs_a.csv in", noz_dir_v5)
 
     print(f"\nVersion 5 finished. Subject-level GLM results saved in:\n  {noz_dir_v5}\n  {z_dir_v5}\n  {partz_dir_v5}")
+
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------------
+# ======================================================================
+# Version 6 – second-level GLM: subject β maps (from v=3) ~ HDDM drift
+# ======================================================================
+
+elif version == 6:
+    print("\n Second-level β ~ drift(GLM) on v3 betas\n")
+
+    v3_dir = basepath / "statistics_new" / "erps_massuni_drift_mod_9_RT_3GLMs"
+    v3_z_dir = v3_dir / "Zscoring"
+
+    # load subject-level beta maps & list of subjects that entered v3
+    allbetas = np.load(v3_z_dir / "ols_2ndlevel_betas.npy")          # (subj, reg, chan, time)
+    beta_gavg = np.load(v3_z_dir / "ols_2ndlevel_betasavg.npy",
+                        allow_pickle=True)
+    included_subjects = np.load(v3_z_dir / "included_subjects.npy",
+                                allow_pickle=True)
+
+    # regressor bookkeeping must match v3
+    regvars = [
+        "painlevel", "moneylevel", "interaction",
+        "v_pain_contrib", "v_money_contrib", "v_interaction_contrib"
+    ]
+    reg_labels = ["pain", "money", "interaction"]   # just the raw ones
+
+    # EEG info / adjacency
+    info = beta_gavg[0].info
+    times = beta_gavg[0].times
+    connect, _ = mne.channels.find_ch_adjacency(info, ch_type="eeg")
+
+    # Where to save the v6 results
+    v6_dir = basepath / "statistics_new" / "erps_massuni_drift_mod_9_v6_beta_vs_drift"
+    v6_dir.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Build subject-level behavioural regressors (drift + mean RT)
+    # ------------------------------------------------------------------
+    # we already loaded mod_data above in the script
+    mod_subj = (mod_data[mod_data["participant"].isin(included_subjects)]
+                .groupby("participant")
+                .agg(
+                    v_pain=("v_painlevel_subj", "mean"),
+                    v_money=("v_moneylevel_subj", "mean"),
+                    v_inter=("v_interaction_subj", "mean"),
+                    mean_rt=("rt", "mean"),
+                )
+                .reindex(included_subjects)   # ensure same order as allbetas
+               )
+
+    # sanity check
+    assert all(mod_subj.index.to_list()[i] == included_subjects[i]
+               for i in range(len(included_subjects))), "Subject order mismatch!"
+
+    v_pain = mod_subj["v_pain"].to_numpy(dtype=float)
+    v_money = mod_subj["v_money"].to_numpy(dtype=float)
+    v_inter = mod_subj["v_inter"].to_numpy(dtype=float)
+    mean_rt = mod_subj["mean_rt"].to_numpy(dtype=float)
+
+    # cluster threshold params (same logic as v1–3)
+    if not isinstance(param['cluster_threshold'], dict):
+        p_thresh = param['cluster_threshold'] / 2
+        base_thr = -stats.t.ppf(p_thresh, len(included_subjects) - 1)
+    else:
+        base_thr = param['cluster_threshold']
+
+    chankeep = np.array([c not in ["M1", "M2"] for c in info["ch_names"]])
+
+    # ------------------------------------------------------------------
+    # helper: compute slope map γ1(c,t) and cluster-test it
+    # ------------------------------------------------------------------
+    def run_beta_vs_drift(label, reg_name, v_vec):
+        """
+        label    = 'pain', 'money', or 'interaction'
+        reg_name = 'painlevel', 'moneylevel', 'interaction'
+        v_vec    = per-subject drift array (len = n_subj)
+        """
+        print(f"\n  ==> β_{label} ~ v_{label} second-level GLM")
+
+        # index of raw regressor in allbetas
+        ridx = regvars.index(reg_name)
+
+        # betas for this regressor: (subj, chan, time)
+        betas_reg = allbetas[:, ridx, :, :]
+
+        # orthogonalise drift wrt mean RT: v_res = v - (Intercept+RT)*beta
+        X_cov = np.column_stack([np.ones(len(v_vec)), mean_rt])
+        beta_cov, _, _, _ = np.linalg.lstsq(X_cov, v_vec, rcond=None)
+        v_res = v_vec - X_cov @ beta_cov
+
+        # keep only finite data
+        eeg_finite = np.all(np.isfinite(betas_reg.reshape(len(v_res), -1)), axis=1)
+        keep = np.isfinite(v_res) & eeg_finite
+        if keep.sum() < 5:
+            print(f"    Skipping {label}: only {keep.sum()} valid subjects")
+            return
+
+        v_res_k = v_res[keep]
+        betas_k = betas_reg[keep, :, :]
+        n_kept = betas_k.shape[0]
+
+        # --- 1) slope map γ1(c,t) ------------------------------------
+        denom = np.sum(v_res_k ** 2)
+        gamma1 = np.tensordot(v_res_k, betas_k, axes=(0, 0)) / denom   # (chan, time)
+        np.save(v6_dir / f"v6_gamma1_beta_{label}_vs_v.npy", gamma1)
+
+        # --- 2) effect_data for cluster test -------------------------
+        # effect_s(c,t) = v_res_s * β_s(c,t)
+        effect_data = betas_k * v_res_k[:, None, None]   # (subj, chan, time)
+        testdata = np.swapaxes(effect_data, 2, 1)        # (subj, time, chan)
+
+        if not isinstance(param['cluster_threshold'], dict):
+            p_thresh = param['cluster_threshold'] / 2
+            thr = -stats.t.ppf(p_thresh, n_kept - 1)
+        else:
+            thr = base_thr
+
+        tvals, clusters, cluster_p_values, _ = st_clust_1s_ttest(
+            testdata,
+            n_jobs=param["njobs"],
+            threshold=thr,
+            adjacency=connect,
+            n_permutations=param['nperms'],
+            buffer_size=None
+        )
+
+        pvals = np.ones_like(tvals)
+        for c, p_val in zip(clusters, cluster_p_values):
+            pvals[c] = p_val
+
+        np.save(v6_dir / f"v6_tvals_beta_{label}_vs_v.npy", tvals)
+        np.save(v6_dir / f"v6_pvals_beta_{label}_vs_v.npy", pvals)
+
+        roi_chs = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']  # ['Fz'], ['FCz'], ['POz'], ['Cz'], ['CPz'], ['Pz'], ['Oz']
+        tmin, tmax = 0.4, 0.8
+
+        picks = mne.pick_channels(info['ch_names'], roi_chs)
+        tmask = (times >= tmin) & (times <= tmax)
+
+        beta_roi = betas_k[:, picks][:, :, tmask].mean(axis=(1, 2))  # (n_kept,)
+
+        r, p = stats.pearsonr(v_res_k, beta_roi)
+        print(f"    ROI β_{label}(0.4–0.8s, LPP spec. electrodes) vs v_res: r={r:.3f}, p={p:.3g}")
+
+        return dict(
+            label=label,
+            n=n_kept,
+            r=r,
+            p=p
+        )
+
+    # run for pain / money / interaction
+    roi_rows = []
+    roi_rows.append(run_beta_vs_drift("pain", "painlevel", v_pain))
+    roi_rows.append(run_beta_vs_drift("money", "moneylevel", v_money))
+    roi_rows.append(run_beta_vs_drift("interaction", "interaction", v_inter))
+    roi_rows = [row for row in roi_rows if row is not None]
+
+    if len(roi_rows) > 0:
+        R2_df = pd.DataFrame(roi_rows)
+        R2_df.to_csv(v6_dir / "v6_ROI_corr_beta_vs_v.csv", index=False)
+        print("\nSaved ROI summary correlations in v6_ROI_corr_beta_vs_v.csv")
+
+    print(f"\nVersion 6 done. Results in:\n  {v6_dir}\n")
+
 
 ### old
 #-----------------------------------------------------------------------------------------------------------------------------
