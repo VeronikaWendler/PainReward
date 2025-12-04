@@ -1537,7 +1537,6 @@ elif version == 4:
 #---------------------------------------------------------------------------------------------------------------------------- 
 # Between-subjects mass-univariate GLM on ERPs averaged per subject
 
-
 if version == 5:
     print("\n Between-subjects subj-level GLM ---")
 
@@ -1743,6 +1742,106 @@ if version == 5:
             np.save(variant_dir / f'groupglm_pval_{regvar}.npy', p_ev.data)
 
         return betas_variant, tvals_variant, pvals_variant, variant_dir
+        # ------------------------------------------------------------------
+        
+        
+        
+    # cluster test on v–a difference effect maps
+    # ------------------------------------------------------------------
+    def run_group_cluster_diff_va(subdir_name, zscore_reg=False, zscore_rt=False):
+        print(f"\n --- Running cluster-based v–a difference GLM: {subdir_name} ---")
+        variant_dir = Path(outpath) / (subdir_name + "_cluster")
+        variant_dir.mkdir(parents=True, exist_ok=True)
+
+        rt_vals = subj_reg["rt"].to_numpy(dtype=float)
+
+        # same v/a pairs as for beta_diff
+        diff_pairs_v_a = [
+            ('v_painlevel_subj',   'a_painlevel_subj',   'pain'),
+            ('v_moneylevel_subj',  'a_moneylevel_subj',  'money'),
+            ('v_interaction_subj', 'a_interaction_subj', 'interaction'),
+        ]
+
+        for v_name, a_name, label in diff_pairs_v_a:
+            print(f"v–a diff cluster: {label}")
+
+            # ---------------------- effect for v ----------------------
+            x_v = subj_reg[v_name].to_numpy(dtype=float)
+            x_rt = rt_vals.copy()
+
+            if zscore_reg:
+                x_v = stats.zscore(x_v)
+            if zscore_rt:
+                x_rt = stats.zscore(x_rt)
+
+            X_cov = np.column_stack([np.ones(n_subj), x_rt])
+            beta_cov, _, _, _ = np.linalg.lstsq(X_cov, x_v, rcond=None)
+            x_v_res = x_v - X_cov @ beta_cov
+
+            # ---------------------- effect for a ----------------------
+            x_a = subj_reg[a_name].to_numpy(dtype=float)
+            x_rt2 = rt_vals.copy()
+
+            if zscore_reg:
+                x_a = stats.zscore(x_a)
+            if zscore_rt:
+                x_rt2 = stats.zscore(x_rt2)
+
+            X_cov_a = np.column_stack([np.ones(n_subj), x_rt2])
+            beta_cov_a, _, _, _ = np.linalg.lstsq(X_cov_a, x_a, rcond=None)
+            x_a_res = x_a - X_cov_a @ beta_cov_a
+
+            # only keep subjects that are finite & have finite EEG
+            eeg_finite = np.all(np.isfinite(data.reshape(n_subj, -1)), axis=1)
+            keep = (
+                np.isfinite(x_v_res) &
+                np.isfinite(x_a_res) &
+                eeg_finite
+            )
+
+            if keep.sum() < 5:
+                print(f"  skipping {label} in {subdir_name}: only {keep.sum()} valid subjects")
+                continue
+
+            x_v_k = x_v_res[keep]
+            x_a_k = x_a_res[keep]
+            data_k = data[keep, :, :]   # (n_kept, n_chan, n_time)
+            n_kept = data_k.shape[0]
+
+            effect_v = np.empty_like(data_k)
+            effect_a = np.empty_like(data_k)
+            for i_sub in range(n_kept):
+                effect_v[i_sub] = x_v_k[i_sub] * data_k[i_sub]
+                effect_a[i_sub] = x_a_k[i_sub] * data_k[i_sub]
+
+            # v – a difference map per subject
+            effect_diff = effect_v - effect_a  # (n_kept, n_chan, n_time)
+
+            # cluster test: (subjects, times, channels)
+            testdata = np.swapaxes(effect_diff, 2, 1)
+
+            if not isinstance(param['cluster_threshold'], dict):
+                p_thresh = param['cluster_threshold'] / 2
+                thr = -stats.t.ppf(p_thresh, n_kept - 1)
+            else:
+                thr = param['cluster_threshold']
+
+            tval_diff, clusters, cluster_p_values, _ = st_clust_1s_ttest(
+                testdata,
+                n_jobs=param["njobs"],
+                threshold=thr,
+                adjacency=connect,
+                n_permutations=param['nperms'],
+                buffer_size=None
+            )
+
+            pvals_diff = np.ones_like(tval_diff)
+            for c, p_val in zip(clusters, cluster_p_values):
+                pvals_diff[c] = p_val
+
+            # save: shape (n_times, n_channels)
+            np.save(variant_dir / f'groupglm_v_minus_a_tval_{label}.npy', tval_diff)
+            np.save(variant_dir / f'groupglm_v_minus_a_pval_{label}.npy', pvals_diff)
 
     # ------------------------------------------------------------------
     # three variants: NO_Zscoring, Zscoring, PartZscoring
@@ -1782,6 +1881,26 @@ if version == 5:
     )
 
     partz_cluster_dir_v5 = run_group_cluster_variant(
+        subdir_name="PartZscoring",
+        zscore_reg=False,
+        zscore_rt=True
+    )
+    
+    
+    # v–a difference cluster tests for each variant
+    run_group_cluster_diff_va(
+        subdir_name="NO_Zscoring",
+        zscore_reg=False,
+        zscore_rt=False
+    )
+
+    run_group_cluster_diff_va(
+        subdir_name="Zscoring",
+        zscore_reg=True,
+        zscore_rt=True
+    )
+
+    run_group_cluster_diff_va(
         subdir_name="PartZscoring",
         zscore_reg=False,
         zscore_rt=True
