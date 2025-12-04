@@ -33,7 +33,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 6  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 7 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 # 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
@@ -71,6 +71,11 @@ elif version == 6:
     outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_v6_beta_vs_drift')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
+elif version == 7:        
+    outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_sv_pain_para')
+    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_sv_pain_para')
+    if not os.path.exists(outfigpath):
+        os.mkdir(outfigpath)
 else:
     print("No Version")
 
@@ -94,7 +99,7 @@ outpath_glm = opj(outpath, stats_subdir)
 
 # 6 regressors total
 param = {
-    'alpha': 0.05 / 3,     # Bonferroni over 6 regressors for version 1-5 only
+    'alpha': 0.05,     # Bonferroni over 6 regressors for version 1-5 only
     'titlefontsize': 12,
     'labelfontsize': 12,
     'ticksfontsize': 11,
@@ -128,13 +133,18 @@ regvarsnames_v5 = [
     'A_pain_subj', 'A_money_subj', 'A_interaction_subj'
 ]
 
+if version == 7:
+    regvars = ['sv_pain_para']
+    regvarsnames = ['SV_pain_para']
+    
+    
 plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
 chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
 
 
 # Version 1, 2, 3 ---------------------------------------------------------------------------------------------------
 
-if version in [1, 2, 3]:
+if version in [1, 2, 3, 7]:
 
     tvals = np.load(opj(outpath_glm, f'ols_2ndlevel_tvals{suffix}.npy'))
     pvals = np.load(opj(outpath_glm, f'ols_2ndlevel_pvals{suffix}.npy'))

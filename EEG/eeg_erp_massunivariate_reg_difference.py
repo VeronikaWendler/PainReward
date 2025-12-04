@@ -55,7 +55,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 6    # version 1 is for decision and version 2 is for passive phase 
+version = 7    # version 1 is for decision and version 2 is for passive phase 
 
 
 if version == 1:
@@ -83,7 +83,7 @@ elif version == 6:
     if not os.path.exists(outpath):
         os.mkdir(outpath)
 elif version == 7: # this is the directory, I'll use for testing  pure sv_pain again (now that I made some changes to keep more participants)
-    outpath = opj(outpath, 'erps_massuni_drift_mod_9_sv_pain')
+    outpath = opj(outpath, 'erps_massuni_drift_mod_9_sv_pain_para')
     if not os.path.exists(outpath):
         os.mkdir(outpath)
 else:
@@ -154,7 +154,10 @@ regvarsnames = [
     'V_pain_contrib', 'V_money_contrib', 'V_interaction_contrib'
 ]
 
-
+if version == 7:
+    regvars = ['sv_pain_para']
+    regvarsnames = ['SV_pain_para']
+    
 #all_epos = [[] for i in range(len(regvars))]
 #allbetasnp = []
 #betas = [[] for i in range(len(regvars))]
@@ -166,7 +169,7 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1, 2, 3, 4]:
+if version in [1, 2, 3, 4, 7]:
     filtered_data = []
     for p in part:
         # data for this participant
@@ -177,7 +180,7 @@ if version in [1, 2, 3, 4]:
             epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_passive',                   
                                   p + '_passive_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
-        elif version in [2, 3, 4]:
+        elif version in [2, 3, 4, 7]:
             epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
                                   p + '_decision_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
@@ -2204,8 +2207,201 @@ elif version == 6:
         print("\nSaved ROI summary correlations in v6_ROI_corr_beta_vs_v.csv")
 
     print(f"\nVersion 6 done. Results in:\n  {v6_dir}\n")
+    
 
+#-------------------------------------------------------------------------------------------------------------    
 
+elif version == 7:
+    # Z scored version
+    z_dir = Path(outpath) / "Zscoring"
+    z_dir.mkdir(parents=True, exist_ok=True)
+
+    all_epos = [[] for _ in range(len(regvars))]
+    allbetasnp = []
+    betas = [[] for _ in range(len(regvars))]
+    included_subjects = []
+    skipped_subjects = []
+    
+    for pa in part_1:
+        print(f"\n--- YES: Z-Scored Version: Processing {pa} ---")
+        df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa]
+        mod2 = part_1_dat[part_1_dat['participant'] == pa]
+
+        epo = mne.read_epochs(
+            opj(basepath, pa, 'eeg', 'erps',
+                pa + '_decision_cues_singletrials-epo.fif')
+        )
+        
+        epo_cop = epo.copy()
+
+        # Check that trials match
+        matching = epo_cop.metadata['trialsnum'].isin(df2['trialsnum'])
+        epo_filt = epo_cop[matching]
+
+        # Downsample
+        if epo_filt.info['sfreq'] != param['testresampfreq']:
+            epo_filt = epo_filt.resample(param['testresampfreq'])
+
+        # Drop bad trials
+        goodtrials = np.where(epo_filt.metadata['badtrial'] == 0)[0]
+        df2 = df2.iloc[goodtrials]
+        mod2 = mod2.iloc[goodtrials]
+        epo_filt = epo_filt[goodtrials]
+
+        # Z-score EEG across trials
+        scale = Scaler(scalings='mean')
+        epo_z = mne.EpochsArray(scale.fit_transform(epo_filt.get_data()),
+                                epo_filt.info)
+
+        # If there are too few trials after matching, skip subject (but this here can be adjusted obviously; as long as the desgin matrix holds it should be fine)
+        if len(df2) < 5:
+            print(f"Skipping {pa} as only {len(df2)} working trials after cleaning")
+            skipped_subjects.append(pa)
+            continue
+
+        rt_col = "rt"
+        
+        betasnp = []
+        subject_has_regressors = False
+
+        for idx, regvar in enumerate(regvars):
+
+            #get rid of NANs and inf
+            vals_reg = mod2[regvar].to_numpy(dtype=float)
+            vals_rt = mod2[rt_col].to_numpy(dtype=float)
+            keep = np.where(np.isfinite(vals_reg) & np.isfinite(vals_rt))[0]
+
+            if len(keep) < 5:
+                print(f"Skipping {regvar} as only {len(keep)} valid trials")
+                continue
+
+            df_reg = mod2.iloc[keep].copy()
+            epo_reg = epo_z.copy()[keep]
+            epo_keep = epo_filt.copy()[keep]
+
+            # check variance
+            if np.nanstd(df_reg[regvar]) == 0:
+                print(f"Skipping {regvar} due to zero variance")
+                continue
+            if np.nanstd(df_reg[rt_col]) == 0:
+                print(f"Skipping {regvar} as RT has zero variance (subject {pa})")
+                continue
+
+            # Z-score predictors
+            df_reg[regvar + "_z"] = stats.zscore(df_reg[regvar].to_numpy(dtype=float))
+            df_reg["RT_z"] = stats.zscore(df_reg[rt_col].to_numpy(dtype=float))
+            df_reg["Intercept"] = 1.0
+
+            design = df_reg[["Intercept", regvar + "_z", "RT_z"]]
+
+            # safety check
+            if not np.all(np.isfinite(design.to_numpy())):
+                print(f"Skipping {regvar}: design matrix has NaN/Inf")
+                continue
+
+            # update metadata of kept epochs
+            df_meta = epo_keep.metadata.reset_index(drop=True).copy()
+            df_meta[regvar] = df_reg[regvar].values
+            df_meta[rt_col] = df_reg[rt_col].values
+            epo_keep.metadata = df_meta
+
+            # Store epochs for second-level visualization
+            all_epos[idx].append(epo_keep)
+
+            # regression: EEG ~ Intercept + regvar + RT
+            res = mne.stats.linear_regression(
+                epo_reg, design,
+                names=["Intercept", regvar + "_z", "RT_z"]
+            )
+
+            # beta for regressor 
+            beta_reg = res[regvar + "_z"].beta
+            betas[idx].append(beta_reg)
+            betasnp.append(beta_reg.data)
+            
+
+            subject_has_regressors = True
+            print(f"Metadata columns for {pa}, regvar '{regvar}':")
+            print(epo_keep.metadata.columns.tolist())
+
+        if not subject_has_regressors:
+            print(f"Skipping {pa} as no valid regressors with RT for this subject")
+            skipped_subjects.append(pa)
+            continue
+
+        included_subjects.append(pa)
+        allbetasnp.append(np.stack(betasnp))
+        print(f"Included {pa}")
+
+    # Stack all , shape (n_subj, n_reg, n_chan, n_time)
+    allbetas = np.stack(allbetasnp)
+
+    print(f"Total subjects: {len(part_1)}")
+    print(f"Included ({len(included_subjects)}): {included_subjects}")
+    print(f"Skipped  ({len(skipped_subjects)}): {skipped_subjects}")
+
+    # ---------------------------------------------------------------------
+    # Grand average & second-level cluster test (versions 1–3)
+    # ---------------------------------------------------------------------
+    beta_gavg = []
+    for idx, regvar in enumerate(regvars):
+        beta_gavg.append(mne.grand_average(betas[idx]))
+
+    # connectivity (from last epo_filt)
+    connect, names = mne.channels.find_ch_adjacency(epo_filt.info, ch_type='eeg')
+
+    # Get cluster entering threshold
+    if not isinstance(param['cluster_threshold'], dict):
+        p_thresh = param['cluster_threshold'] / 2
+        n_samples = allbetas.shape[0]
+        cluster_threshold = -stats.t.ppf(p_thresh, n_samples - 1)
+    else:
+        cluster_threshold = param['cluster_threshold']
+
+    # Perform test for each regressor
+    tvals, pvalues = [], []
+    for idx, regvar in enumerate(regvars):
+        # allbetas: (n_subj, n_reg, n_chan, n_time)
+        data_reg = allbetas[:, idx, :, :]           # (n_subj, n_chan, n_time)
+        testdata = np.swapaxes(data_reg, 2, 1)      # (n_subj, n_time, n_chan)
+
+        tval, clusters, cluster_p_values, _ = st_clust_1s_ttest(
+            testdata,
+            n_jobs=param["njobs"],
+            threshold=cluster_threshold,
+            adjacency=connect,
+            n_permutations=param['nperms'],
+            buffer_size=None
+        )
+
+        pvals = np.ones_like(tval)
+        for c, p_val in zip(clusters, cluster_p_values):
+            pvals[c] = p_val
+
+        tvals.append(tval)
+        pvalues.append(pvals)
+        
+        z_dir = Path(outpath) / "Zscoring"
+        z_dir.mkdir(parents=True, exist_ok=True)
+        
+        np.save(z_dir / f'ols_2ndlevel_tval_{regvar}.npy', tvals[-1])
+        np.save(z_dir / f'ols_2ndlevel_pval_{regvar}.npy', pvalues[-1])
+
+    # Stack and save group-level results
+    tvals = np.stack(tvals)
+    pvals = np.stack(pvalues)
+
+    np.save(z_dir / f'ols_2ndlevel_tvals.npy', tvals)
+    np.save(z_dir / f'ols_2ndlevel_pvals.npy', pvals)
+    np.save(z_dir / f'ols_2ndlevel_betas.npy', allbetas)
+
+    for idx, regvar in enumerate(regvars):
+        epo_save = mne.concatenate_epochs(all_epos[idx])
+        epo_save.save(z_dir / f'ols_2ndlevel_allepochs-epo_{regvar}.fif', overwrite=True)
+
+    np.save(z_dir / f'ols_2ndlevel_betasavg.npy', beta_gavg)
+    
+    
 ### old
 #-----------------------------------------------------------------------------------------------------------------------------
 # for pa in part_1:
