@@ -2115,6 +2115,41 @@ elif version == 6:
         # effect_s(c,t) = v_res_s * β_s(c,t)
         effect_data = betas_k * v_res_k[:, None, None]   # (subj, chan, time)
         testdata = np.swapaxes(effect_data, 2, 1)        # (subj, time, chan)
+        
+        
+        from scipy.stats import ttest_1samp
+        from statsmodels.stats.multitest import fdrcorrection
+        
+        # effect_data has shape (n_kept, n_chan, n_time)
+        n_sub, n_chan, n_time = effect_data.shape
+        
+        # 1) pointwise t-tests: t and uncorrected p
+        tvals_pt = np.zeros((n_time, n_chan))
+        pvals_pt = np.ones((n_time, n_chan))
+        
+        for ti in range(n_time):
+            # test across subjects at each channel
+            t_, p_ = ttest_1samp(effect_data[:, :, ti], popmean=0.0, axis=0, nan_policy='omit')
+            tvals_pt[ti, :] = t_
+            pvals_pt[ti, :] = p_
+        
+        # 2) restrict to channels we care about (e.g. drop M1/M2)
+        chankeep = np.array([c not in ["M1", "M2"] for c in info["ch_names"]])
+        pvals_flat = pvals_pt[:, chankeep].ravel()
+        
+        # 3) FDR correction
+        alpha_fdr = 0.05  # or 0.05/3 if you Bonferroni across pain/money/interaction
+        rej, pvals_fdr = fdrcorrection(pvals_flat, alpha=alpha_fdr)
+        
+        # 4) reshape back to (time, chan)
+        sig_fdr = np.zeros_like(pvals_pt, dtype=bool)
+        sig_fdr[:, chankeep] = rej.reshape(pvals_pt[:, chankeep].shape)
+        
+        # save for plotting
+        np.save(v6_dir / f"v6_tvals_pointwise_{label}.npy", tvals_pt)
+        np.save(v6_dir / f"v6_pvals_pointwise_{label}.npy", pvals_pt)
+        np.save(v6_dir / f"v6_sigmask_fdr_{label}.npy", sig_fdr)
+
 
         if not isinstance(param['cluster_threshold'], dict):
             p_thresh = param['cluster_threshold'] / 2

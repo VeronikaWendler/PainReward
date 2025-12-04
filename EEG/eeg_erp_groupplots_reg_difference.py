@@ -971,7 +971,7 @@ elif version == 6:
         "interaction": "β_interaction ~ v_interaction"
     }
 
-    plot_times = [0.4, 0.6, 0.8]
+    plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
     times_pos = [np.abs(times - t).argmin() for t in plot_times]
     chankeep = np.array([c not in ['M1', 'M2'] for c in info['ch_names']])
 
@@ -989,14 +989,16 @@ elif version == 6:
         pvals = np.load(pval_file)     # (time, chan)
 
         gamma_ev = mne.EvokedArray(gamma1, info, tmin=times[0])
-
+        sig_fdr = np.load(v6_dir / f"v6_sigmask_fdr_{label}.npy") 
         # --------------------------------------------------------------
         # Topomaps of γ1 at selected times (mask = cluster p<α)
         # --------------------------------------------------------------
         for tidx, tpos in enumerate(times_pos):
             fig, ax = plt.subplots(figsize=(1.5, 1.5))
-            p_row = pvals[tpos, :]        # (chan,)
-            mask = (p_row < param['alpha']) & chankeep
+            sig_fdr = np.load(v6_dir / f"v6_sigmask_fdr_{label}.npy")  # (time, chan)
+            p_row_mask = sig_fdr[tpos, :]
+            mask = p_row_mask & chankeep
+            
 
             vmax = np.max(np.abs(gamma_ev.data))
             im, _ = plot_topomap(
@@ -1066,14 +1068,15 @@ elif version == 6:
 
             timestep = 1000.0 * (times[1] - times[0])
             for ti, tt in enumerate(times * 1000):
-                if pvals[ti, pick] < param['alpha']:
+                if sig_fdr[ti, pick]:   # <--- HERE is your line
                     ax.fill_between(
                         [tt, tt + timestep],
                         ax.get_ylim()[0],
                         ax.get_ylim()[0] + 0.15*(ax.get_ylim()[1]-ax.get_ylim()[0]),
                         alpha=0.3
-                    )
-
+                        )
+            
+            
             ax.set_xticks(np.arange(-200, 1200, 200))
             ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
             ax.tick_params(labelsize=param['ticksfontsize'])
