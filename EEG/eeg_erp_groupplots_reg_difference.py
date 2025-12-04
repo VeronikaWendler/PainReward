@@ -901,7 +901,7 @@ if version == 5:
             cbar.set_label('t (v - a)', rotation=270, labelpad=12,
                            fontdict={'fontsize': param["labelfontsize"]-1})
             cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
-
+            print("Saving Figures")
             fig.savefig(
                 opj(outfigpath,
                     f'{fig_prefix}v5_topo_diff_{label}_{t_ms}ms.svg'),
@@ -925,7 +925,7 @@ if version == 5:
         sns.barplot(data=R2_df, x="attribute", y="delta_R2", ax=ax)
         ax.axhline(0, color='gray', linestyle='--')
         ax.set_xlabel("Attribute")
-        ax.set_ylabel("ΔR² (v - a)")
+        ax.set_ylabel("Diff in Rsquared (v - a)")
         ax.tick_params(labelsize=param['ticksfontsize'])
         fig.tight_layout()
         fig.savefig(
@@ -933,6 +933,7 @@ if version == 5:
             dpi=600,
             bbox_inches='tight'
         )
+        print("Saving Rsqured Figures")
     else:
         print("No ROI_R2_v_vs_a.csv found for version 5")
 
