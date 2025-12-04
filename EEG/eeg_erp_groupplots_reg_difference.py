@@ -39,7 +39,7 @@ version = 3  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GL
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
 # partz   - PartZscoring     (raw regressors + z-scored RT)
-glm_version = 'z'   # change 
+glm_version = 'partz'   
 
 if version == 1:
     outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_passive')
