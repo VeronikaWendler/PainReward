@@ -33,13 +33,13 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 3  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 6  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 # 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
 # partz   - PartZscoring     (raw regressors + z-scored RT)
-glm_version = 'partz'   
+glm_version = 'z'   
 
 if version == 1:
     outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_passive')
@@ -66,6 +66,10 @@ elif version == 5:
     outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_subjectGLM')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
+elif version == 6:
+    outpath = opj(outpath, 'erps_massuni_drift_mod_9_v6_beta_vs_drift')
+    if not os.path.exists(outpath):
+        os.mkdir(outpath)
 else:
     print("No Version")
 
@@ -89,7 +93,7 @@ outpath_glm = opj(outpath, stats_subdir)
 
 # 6 regressors total
 param = {
-    'alpha': 0.05 / 6,     # Bonferroni over 6 regressors
+    'alpha': 0.05 / 3,     # Bonferroni over 6 regressors for version 1-5 only
     'titlefontsize': 12,
     'labelfontsize': 12,
     'ticksfontsize': 11,
@@ -936,6 +940,150 @@ if version == 5:
         print("Saving Rsqured Figures")
     else:
         print("No ROI_R2_v_vs_a.csv found for version 5")
+        
+
+
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+#
+# comparision between beta pain and drift at second-level 
+
+elif version == 6:
+    print("\nPlotting Version 6 (beta_pain ~ v) results\n")
+
+    v6_dir = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" \
+        / "derivatives" / "statistics_new" / "erps_massuni_drift_mod_9_v6_beta_vs_drift"
+
+    # We need info / times from the v3 beta grand-average
+    v3_z_dir = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" \
+        / "derivatives" / "statistics_new" / "erps_massuni_drift_mod_9_RT_3GLMs" / "Zscoring"
+
+    beta_gavg = np.load(v3_z_dir / "ols_2ndlevel_betasavg.npy", allow_pickle=True)
+    info = beta_gavg[0].info
+    times = beta_gavg[0].times
+
+    reg_labels = ["pain", "money", "interaction"]
+    pretty_names = {
+        "pain": "β_pain ~ v_pain",
+        "money": "β_money ~ v_money",
+        "interaction": "β_interaction ~ v_interaction"
+    }
+
+    plot_times = [0.4, 0.6, 0.8]
+    times_pos = [np.abs(times - t).argmin() for t in plot_times]
+    chankeep = np.array([c not in ['M1', 'M2'] for c in info['ch_names']])
+
+    for label in reg_labels:
+        gamma_file = v6_dir / f"v6_gamma1_beta_{label}_vs_v.npy"
+        tval_file = v6_dir / f"v6_tvals_beta_{label}_vs_v.npy"
+        pval_file = v6_dir / f"v6_pvals_beta_{label}_vs_v.npy"
+
+        if not (gamma_file.exists() and tval_file.exists() and pval_file.exists()):
+            print(f"  Missing files for {label}, skipping.")
+            continue
+
+        gamma1 = np.load(gamma_file)   # (chan, time)
+        tvals = np.load(tval_file)     # (time, chan)
+        pvals = np.load(pval_file)     # (time, chan)
+
+        gamma_ev = mne.EvokedArray(gamma1, info, tmin=times[0])
+
+        # --------------------------------------------------------------
+        # Topomaps of γ1 at selected times (mask = cluster p<α)
+        # --------------------------------------------------------------
+        for tidx, tpos in enumerate(times_pos):
+            fig, ax = plt.subplots(figsize=(1.5, 1.5))
+            p_row = pvals[tpos, :]        # (chan,)
+            mask = (p_row < param['alpha']) & chankeep
+
+            vmax = np.max(np.abs(gamma_ev.data))
+            im, _ = plot_topomap(
+                gamma_ev.data[:, tpos],
+                pos=gamma_ev.info,
+                mask=mask,
+                mask_params=dict(marker='o',
+                                 markerfacecolor='w',
+                                 markeredgecolor='k',
+                                 linewidth=0,
+                                 markersize=2),
+                cmap='RdBu_r',
+                show=False,
+                ch_type='eeg',
+                outlines='head',
+                extrapolate='head',
+                vlim=(-vmax, vmax),
+                axes=ax,
+                sensors=False,
+                contours=0,
+            )
+            ax.set_title(f"{pretty_names[label]}\n{int(plot_times[tidx]*1000)} ms",
+                         fontdict={'size': param['labelfontsize']-1},
+                         pad=0.1)
+
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}v6_topo_gamma1_{label}_{tidx}.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+
+            if tidx + 1 == len(times_pos):
+                fig2, cax = plt.subplots(figsize=(0.3, 1.2))
+                cbar = fig2.colorbar(im, cax=cax,
+                                     orientation='vertical', aspect=1)
+                cbar.set_label('Slope γ₁ (µV / v-unit)',
+                               rotation=270, labelpad=12,
+                               fontdict={'fontsize': param['labelfontsize']-1})
+                cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
+                fig2.savefig(
+                    opj(outfigpath,
+                        f'{fig_prefix}v6_topo_gamma1_cbar_{label}.svg'),
+                    dpi=600,
+                    bbox_inches='tight'
+                )
+
+        # --------------------------------------------------------------
+        # Time-course of γ1 at LPP channels with significance bar
+        # --------------------------------------------------------------
+        for c in chan_to_plot:
+            if c not in gamma_ev.ch_names:
+                continue
+
+            pick = gamma_ev.ch_names.index(c)
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2.5))
+
+            y = gamma_ev.data[pick, :]
+            ax.plot(times * 1000, y, linewidth=2)
+
+            ax.set_xlabel('Time (ms)',
+                          fontdict={'size': param['labelfontsize']})
+            ax.set_ylabel(f'Slope γ₁ ({pretty_names[label]})',
+                          fontdict={'size': param['labelfontsize']})
+            ax.axhline(0, linestyle='--', color='gray')
+            ax.axvline(0, linestyle='--', color='gray')
+
+            timestep = 1000.0 * (times[1] - times[0])
+            for ti, tt in enumerate(times * 1000):
+                if pvals[ti, pick] < param['alpha']:
+                    ax.fill_between(
+                        [tt, tt + timestep],
+                        ax.get_ylim()[0],
+                        ax.get_ylim()[0] + 0.15*(ax.get_ylim()[1]-ax.get_ylim()[0]),
+                        alpha=0.3
+                    )
+
+            ax.set_xticks(np.arange(-200, 1200, 200))
+            ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
+            ax.tick_params(labelsize=param['ticksfontsize'])
+            fig.tight_layout()
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}v6_timecourse_gamma1_{label}_{c}.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+
 
 # old ------------------------------------------------------------------------------------------------------------------------
 ##############################################################################################################################
