@@ -33,7 +33,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 3  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 5  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 # 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
@@ -702,9 +702,8 @@ elif version == 4:
 
     print("\nVersion 4 plotting done ;))))\n")
 
-# ======================================================================
-# Version 5: Between-subject subject-level GLM
-# ======================================================================
+# -------------------------------------------------------------------------------------
+# Between-subject subject-level GLM 
 
 if version == 5:
     from pathlib import Path
@@ -843,56 +842,79 @@ if version == 5:
             )
 
     # ------------------------------------------------------------------
-    # v – a difference maps
-    if glm_version == 'noz':
-        diff_labels = ['pain', 'money', 'interaction']
-        for label in diff_labels:
-            diff_fname = Path(outpath_glm) / f'groupglm_beta_v_minus_a_{label}.npy'
-            if not diff_fname.exists():
-                print(f"No v–a diff file for {label} in {diff_fname}")
-                continue
+    # 
+    # v – a difference maps with cluster-corrected sig 
+    # 
+    diff_labels = ['pain', 'money', 'interaction']
 
-            beta_diff = np.load(diff_fname)  # (n_chan, n_time)
-            diff_ev = mne.EvokedArray(beta_diff, info, tmin=times[0])
+    # time indices which are the same as above
+    diff_times_pos = [np.abs(times - t).argmin() for t in plot_times]
 
-            # simple topo at 0.6 s
-            t_idx = np.abs(times - 0.6).argmin()
+    # Bonferroni over 3 v–a contrasts
+    alpha_diff = 0.05 / 3
 
-            fig, ax = plt.subplots(figsize=(1.5, 1.5))
+    for label in diff_labels:
+        # load t and p for v–a difference 
+        tdiff_path = cluster_dir / f'groupglm_v_minus_a_tval_{label}.npy'
+        pdiff_path = cluster_dir / f'groupglm_v_minus_a_pval_{label}.npy'
+
+        if not (tdiff_path.exists() and pdiff_path.exists()):
+            print(f"No v–a cluster files for {label} in {cluster_dir}")
+            continue
+
+        tdiff = np.load(tdiff_path)   # (n_times, n_channels)
+        pdiff = np.load(pdiff_path)   # (n_times, n_channels)
+
+        for tidx, time_idx in enumerate(diff_times_pos):
+            t_time = plot_times[tidx]
+            t_ms = int(t_time * 1000)
+
+            p_row = pdiff[time_idx, :]  
+            mask = (p_row < alpha_diff) & chankeep
+
+            fig, ax = plt.subplots(figsize=(2, 2))
             im, _ = plot_topomap(
-                diff_ev.data[:, t_idx],
-                pos=diff_ev.info,
+                tdiff[time_idx, :],
+                pos=info,
+                mask=mask,
+                mask_params=dict(marker='o',
+                                 markerfacecolor='w',
+                                 markeredgecolor='k',
+                                 linewidth=0,
+                                 markersize=3),
+                cmap='RdBu_r',
+                show=False,
                 ch_type='eeg',
                 outlines='head',
-                show=False,
                 extrapolate='head',
-                vlim=(-0.15, 0.15),
-                cmap='RdBu_r',
-                contours=0,
-                sensors=False,
                 axes=ax,
+                sensors=False,
+                contours=0,
             )
-            ax.set_title(f'v - a ({label})\n600 ms',
+            ax.set_title(f'{label} (v - a), {t_ms} ms',
                          fontdict={'size': param['labelfontsize']-1},
                          pad=0.1)
 
+            # colourbar
+            fig2, cax = plt.subplots(figsize=(0.2, 1))
+            cbar = fig2.colorbar(im, cax=cax, orientation='vertical', aspect=1)
+            cbar.set_label('t (v - a)', rotation=270, labelpad=12,
+                           fontdict={'fontsize': param["labelfontsize"]-1})
+            cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
+
             fig.savefig(
                 opj(outfigpath,
-                    f'{fig_prefix}v5_topo_v_minus_a_{label}_600ms.svg'),
+                    f'{fig_prefix}v5_topo_diff_{label}_{t_ms}ms.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+            fig2.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}v5_topo_diff_{label}_{t_ms}ms_cbar.svg'),
                 dpi=600,
                 bbox_inches='tight'
             )
 
-            fig2, cax = plt.subplots(figsize=(0.3, 1.2))
-            cbar = fig2.colorbar(im, cax=cax, orientation='vertical', aspect=1)
-            cbar.set_label('v - a beta', rotation=270, labelpad=12,
-                           fontdict={'fontsize': param['labelfontsize']-1})
-            cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
-            fig2.savefig(
-                opj(outfigpath,
-                    f'{fig_prefix}v5_topo_v_minus_a_{label}_600ms_cbar.svg'),
-                dpi=600, bbox_inches='tight'
-            )
 
     # ------------------------------------------------------------------
     # ROI-level R² bar plot
@@ -912,7 +934,7 @@ if version == 5:
             bbox_inches='tight'
         )
     else:
-        print("No ROI_R2_v_vs_a.csv found for version 5.")
+        print("No ROI_R2_v_vs_a.csv found for version 5")
 
 # old ------------------------------------------------------------------------------------------------------------------------
 ##############################################################################################################################
