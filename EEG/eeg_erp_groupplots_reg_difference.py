@@ -66,10 +66,11 @@ elif version == 5:
     outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_subjectGLM')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
-elif version == 6:
-    outpath = opj(outpath, 'erps_massuni_drift_mod_9_v6_beta_vs_drift')
-    if not os.path.exists(outpath):
-        os.mkdir(outpath)
+elif version == 6:        
+    outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_v6_beta_vs_drift')
+    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_v6_beta_vs_drift')
+    if not os.path.exists(outfigpath):
+        os.mkdir(outfigpath)
 else:
     print("No Version")
 
