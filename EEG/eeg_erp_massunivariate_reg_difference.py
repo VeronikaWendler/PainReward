@@ -2564,6 +2564,10 @@ if version == 8:
 # trial-wise TFR betas for sv_pain_para
 
 
+#----------------------------------------------------------------------------------------------------------------------------------------------
+# trial-wise TFR betas for sv_pain_para
+
+
 if version == 9:
     from mne.time_frequency import read_tfrs
 
@@ -2700,6 +2704,8 @@ if version == 9:
         print("Shapes: all_betas:", all_betas.shape)
         print("Subjects:", used_subs)
 
+
+### old
 
 ### old
 #-----------------------------------------------------------------------------------------------------------------------------
