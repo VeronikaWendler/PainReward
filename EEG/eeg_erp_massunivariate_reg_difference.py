@@ -126,7 +126,11 @@ mod_data_path = PROJECT_DIR / "Hddm_Docker_August_24" / "figures_dir" / "painrew
 mod_data = pd.read_csv(mod_data_path, sep=None, engine="python")
 mod_data["rt"] = mod_data["choice_resp.rt"]
 mod_data["interaction"] = mod_data["moneylevel"]*mod_data["painlevel"]
-
+mod_data["trialsnum"] = (
+    mod_data["blocks.thisRepN"].astype(int) * 25
+    + mod_data["trials.thisN"].astype(int)
+    + 1
+)
 # same file but for threshold (a) parameters
 mod_data_a_path = PROJECT_DIR / "Hddm_Docker_August_24" / "figures_dir" / "painreward_behavioural_data_mod_10" / "diagnostics" / "a_pain_money_interaction.csv"
 mod_data_a = pd.read_csv(mod_data_a_path, sep=None, engine="python")
