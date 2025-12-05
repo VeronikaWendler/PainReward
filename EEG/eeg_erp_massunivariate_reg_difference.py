@@ -2576,8 +2576,8 @@ if version == 9:
     # sanity checks on trial_map
     if "sv_pain_para" not in trial_map.columns:
         raise ValueError("sv_pain_para not found in trial_map columns.")
-    if "trialsnum_x" not in trial_map.columns:
-        raise ValueError("trial_map is missing 'trialsnum_x'. "
+    if "trialsnum" not in trial_map.columns:
+        raise ValueError("trial_map is missing 'trialsnum'. "
                          "Current columns: "
                          f"{[c for c in trial_map.columns if 'trialsnum' in c]}")
 
@@ -2597,13 +2597,13 @@ if version == 9:
             continue
 
         # we need ERP trials (trialsnum_x), sv_pain_para and badtrial
-        needed_cols = ["trialsnum_x", "sv_pain_para", "badtrial"]
+        needed_cols = ["trialsnum", "sv_pain_para", "badtrial"]
         missing = [c for c in needed_cols if c not in sub_map.columns]
         if missing:
             raise ValueError(f"For {pa}, trial_map is missing columns: {missing}")
 
         # make sure trialsnum_x is integer
-        sub_map["trialsnum_x"] = sub_map["trialsnum_x"].astype(int)
+        sub_map["trialsnum"] = sub_map["trialsnum"].astype(int)
 
         # ----- 2) TFR side -----
         tfr_fname = opj(
@@ -2631,11 +2631,10 @@ if version == 9:
         # ----- 3) merge on trialsnum (TFR) vs trialsnum_x (ERP/behaviour) -----
         meta = meta.reset_index().rename(columns={"index": "row_id"})
         merged = meta.merge(
-            sub_map[["trialsnum_x", "sv_pain_para", "badtrial"]],
-            left_on="trialsnum",
-            right_on="trialsnum_x",
+            sub_map[["trialsnum", "sv_pain_para", "badtrial"]],
+            on="trialsnum",
             how="inner"
-        )
+            )
 
         if merged.empty:
             print(f"  {pa}: no overlapping trials by trialsnum, skipping.")
