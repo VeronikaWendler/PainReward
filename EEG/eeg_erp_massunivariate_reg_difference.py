@@ -55,7 +55,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 7    # version 1 is for decision and version 2 is for passive phase 
+version = 3    # version 1 is for decision and version 2 is for passive phase 
 
 
 if version == 1:
@@ -983,7 +983,55 @@ if version in [1, 2, 3]:
     if len(R2_rows) > 0:
         R2_df = pd.DataFrame(R2_rows)
         R2_df.to_csv(z_dir / f'ROI_R2_raw_vs_v.csv', index=False)
-        print("Saved ROI_R2_raw_vs_v.csv in", z_dir)    
+        print("Saved ROI_R2_raw_vs_v.csv in", z_dir)
+        
+        # ---------------------------------------------------------------------
+    # Between-subject correlation: LPP β(pain) vs HDDM v_pain
+    # ---------------------------------------------------------------------
+    print("\n Between-subject LPP beta painlevel vs v_pain ")
+
+
+    pain_reg_name = 'painlevel'      
+    if pain_reg_name not in regvars:
+        raise ValueError(f"{pain_reg_name} not found in regvars: {regvars}")
+    pain_idx = regvars.index(pain_reg_name)
+
+    betas_pain = allbetas[:, pain_idx, :, :]   # (n_subj, n_chan, n_time)
+
+    roi_chs = ['Fz', 'FCz', 'Cz', 'CPz', 'Pz', 'POz', 'Oz']
+    tmin, tmax = 0.4, 0.8
+
+    ch_names = epo_filt.info['ch_names']   
+    times = epo_filt.times
+
+    picks = mne.pick_channels(ch_names, roi_chs)
+    tmask = (times >= tmin) & (times <= tmax)
+
+   
+    beta_LPP_pain = betas_pain[:, picks][:, :, tmask].mean(axis=(1, 2))
+
+   
+    v_pain_df = (
+        mod_data[mod_data["participant"].isin(included_subjects)]
+        .groupby("participant")["v_painlevel_subj"]
+        .mean()
+        .reindex(included_subjects)   
+    )
+    v_pain = v_pain_df.to_numpy(dtype=float)
+
+    from scipy.stats import pearsonr
+    r, p = pearsonr(beta_LPP_pain, v_pain)
+    print(f"LPP β(pain, 400–800 ms, LPP ROI) vs v_pain:")
+    print(f"  r = {r:.3f}, p = {p:.3g}, n = {len(included_subjects)}")
+
+    between_df = pd.DataFrame({
+        "participant": included_subjects,
+        "beta_LPP_pain": beta_LPP_pain,
+        "v_pain": v_pain
+    })
+    between_df.to_csv(z_dir / "between_subj_LPPpain_vs_vpain.csv", index=False)
+    print("Saved between-subject data to", z_dir / "between_subj_LPPpain_vs_vpain.csv")
+    
     
     #-------------------PARTIAL Z-SCORED VERSION--------------------------------
     ##########################################################################################
