@@ -244,6 +244,13 @@ if version in [1, 2, 3, 4, 7, 9]:
     print("trial_map shape:", trial_map.shape)
     print("trial_map columns:", trial_map.columns.tolist())
 
+    if "trialsnum_x" in trial_map.columns:
+        trial_map = trial_map.rename(columns={"trialsnum_x": "trialsnum"})
+    
+    if "trialsnum_y" in trial_map.columns:
+        trial_map = trial_map.drop(columns=["trialsnum_y"])
+    
+
 
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
