@@ -55,7 +55,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 3    # version 1 is for decision and version 2 is for passive phase 
+version = 8    # version 1 is for decision and version 2 is for passive phase 
 
 
 if version == 1:
@@ -84,6 +84,14 @@ elif version == 6:
         os.mkdir(outpath)
 elif version == 7: # this is the directory, I'll use for testing  pure sv_pain again (now that I made some changes to keep more participants)
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_sv_pain_para')
+    if not os.path.exists(outpath):
+        os.mkdir(outpath)
+elif version == 8:  # NEW: TFR ROI vs drift (between-subject)
+    outpath = opj(outpath, 'tfr_mod_9_v8_drift_ROI')
+    if not os.path.exists(outpath):
+        os.mkdir(outpath)
+elif version == 9:  # NEW: TFR trial-wise sv_pain_para betas
+    outpath = opj(outpath, 'tfr_mod_9_v9_sv_pain_para')
     if not os.path.exists(outpath):
         os.mkdir(outpath)
 else:
@@ -169,7 +177,7 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1, 2, 3, 4, 7]:
+if version in [1, 2, 3, 4, 7, 9]:
     filtered_data = []
     for p in part:
         # data for this participant
@@ -2450,6 +2458,215 @@ elif version == 7:
     np.save(z_dir / f'ols_2ndlevel_betasavg.npy', beta_gavg)
     
     
+    
+    
+    
+#------------------------------------------------------------------------------------------------------------------------------------
+if version == 8:
+    from mne.time_frequency import read_tfrs
+
+    print("\n--- Version 8: TFR ROI vs drift (between-subject) ---")
+
+    group_dir = Path(outpath)
+    group_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- define ROIs / bands / time-window ----
+    roi_theta = ['Fz', 'FCz', 'Cz']          # frontal / fronto-central theta
+    roi_alpha = ['Cz', 'CPz', 'Pz']          # centro-parietal alpha
+    theta_band = (4., 7.)
+    alpha_band = (8., 13.)
+    time_win = (0.0, 1.0)                    # anticipation window after cue (off+)
+
+    rows = []
+
+    for pa in part:
+        # TFR file (decision phase)
+        tfr_fname = opj(basepath, pa, 'eeg', 'tfr',
+                        f"{pa}_decision_cues_epochs-tfr.h5")
+        if not os.path.exists(tfr_fname):
+            print(f"Skipping {pa}, no TFR file {tfr_fname}")
+            continue
+
+        # Load single-trial TFR
+        tfr_epochs = read_tfrs(tfr_fname)[0]   # EpochsTFR
+        data = tfr_epochs.data                 # (n_trials, n_chan, n_freq, n_time)
+        freqs = tfr_epochs.freqs
+        times = tfr_epochs.times
+        ch_names = np.array(tfr_epochs.ch_names)
+
+        # Average across trials -> (n_chan, n_freq, n_time)
+        subj_power = data.mean(axis=0)
+
+        # Masks
+        theta_mask = (freqs >= theta_band[0]) & (freqs <= theta_band[1])
+        alpha_mask = (freqs >= alpha_band[0]) & (freqs <= alpha_band[1])
+        time_mask = (times >= time_win[0]) & (times <= time_win[1])
+
+        # Channel indices
+        try:
+            theta_ch_idx = [np.where(ch_names == c)[0][0] for c in roi_theta]
+            alpha_ch_idx = [np.where(ch_names == c)[0][0] for c in roi_alpha]
+        except IndexError as e:
+            print(f"Channel missing for {pa}: {e}")
+            continue
+
+        # ROI-averaged power
+        theta_power = subj_power[theta_ch_idx][:, theta_mask][:, :, time_mask].mean()
+        alpha_power = subj_power[alpha_ch_idx][:, alpha_mask][:, :, time_mask].mean()
+
+        # ---- subject-level drift summary ----
+        # Here I use the mean of v_pain_contrib across trials as a "pain-drift" proxy.
+        # If you have a separate subject-level drift CSV, you can replace this with that.
+        sub_mod = mod_data[mod_data["participant"] == pa]
+        if "v_painlevel_subj" in sub_mod.columns:
+            drift_val = sub_mod["v_painlevel_subj"].mean()
+        else:
+            print(f"No v_pain_contrib/v_pain column for {pa}, skipping.")
+            continue
+
+        rows.append({
+            "participant_id": pa,
+            "theta_power": theta_power,
+            "alpha_power": alpha_power,
+            "drift_pain": drift_val
+        })
+
+    roi_tfr_df = pd.DataFrame(rows)
+    roi_tfr_csv = group_dir / "tfr_roi_theta_alpha_vs_drift.csv"
+    roi_tfr_df.to_csv(roi_tfr_csv, index=False)
+    print("Saved ROI TFR vs drift summary to:", roi_tfr_csv)
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------------
+# =====================================================================
+# VERSION 9: trial-wise TFR betas for sv_pain_para
+# =====================================================================
+if version == 9:
+    from mne.time_frequency import read_tfrs
+
+    print("\n--- Version 9: TFR trial-wise betas for sv_pain_para ---")
+
+    if "sv_pain_para" not in mod_data.columns:
+        raise ValueError("sv_pain_para not found in mod_data columns. "
+                         "Make sure it is in v_pain_money_interaction.csv")
+
+    group_dir = Path(outpath)
+    group_dir.mkdir(parents=True, exist_ok=True)
+
+    all_betas = []     # list of (n_chan, n_freq, n_time)
+    used_subs = []
+
+    for pa in part:
+        print(f"Subject {pa}...")
+
+        # behaviour for this subject
+        mod2 = mod_data[mod_data["participant"] == pa].copy()
+        if mod2.empty:
+            print(f"No mod_data for {pa}, skipping.")
+            continue
+
+        # TFR file (decision phase)
+        tfr_fname = opj(basepath, pa, 'eeg', 'tfr',
+                        f"{pa}_decision_cues_epochs-tfr.h5")
+        if not os.path.exists(tfr_fname):
+            print(f"No TFR file for {pa}, skipping.")
+            continue
+
+        tfr_epo = read_tfrs(tfr_fname)[0]       # EpochsTFR
+        data = tfr_epo.data                     # (n_trials, n_chan, n_freq, n_time)
+
+        # We use epo_1_filtered_combined to keep ONLY the trials that matched behaviour+ERP earlier
+        df2 = epo_1_filtered_combined[epo_1_filtered_combined['participant_id'] == pa].copy()
+        if df2.empty:
+            print(f"No matching ERP-metadata rows for {pa}, skipping.")
+            continue
+
+        # Match by trialsnum
+        if "trialsnum" not in tfr_epo.metadata.columns:
+            raise ValueError("TFR metadata has no 'trialsnum' column; "
+                             "make sure you created TFR with ERP metadata including trialsnum.")
+
+        matching = tfr_epo.metadata['trialsnum'].isin(df2['trialsnum'])
+        if matching.sum() < 5:
+            print(f"{pa}: only {matching.sum()} matching trials between TFR and ERP/behaviour, skipping.")
+            continue
+
+        tfr_filt = tfr_epo[matching]
+        meta_filt = tfr_filt.metadata.reset_index(drop=True)
+
+        # Align behaviour (mod2) to these trials via trialsnum
+        # Assumes mod2 also has a 'trialsnum' column, if not adjust join key.
+        if "trialsnum" in mod2.columns:
+            mod2_align = pd.merge(meta_filt[['trialsnum']], mod2,
+                                  on="trialsnum", how="left")
+        else:
+            # fallback: assume behavioural rows are in the same order as trials
+            mod2_align = mod2.iloc[:len(meta_filt)].reset_index(drop=True)
+
+        # Drop bad trials
+        if "badtrial" in meta_filt.columns:
+            good_idx = np.where(meta_filt["badtrial"] == 0)[0]
+        else:
+            good_idx = np.arange(len(meta_filt))
+
+        if len(good_idx) < 5:
+            print(f"{pa}: <5 good trials after badtrial filtering, skipping.")
+            continue
+
+        tfr_good = tfr_filt[good_idx]
+        data_good = tfr_good.data               # (n_good, n_chan, n_freq, n_time)
+        mod2_good = mod2_align.iloc[good_idx].copy()
+
+        # Extract sv_pain_para and z-score within subject
+        sv = mod2_good["sv_pain_para"].to_numpy(dtype=float)
+        keep = np.isfinite(sv)
+        if keep.sum() < 5:
+            print(f"{pa}: <5 finite sv_pain_para values, skipping.")
+            continue
+
+        sv = sv[keep]
+        data_good = data_good[keep, :, :, :]    # keep same trials in TFR
+        sv_z = (sv - sv.mean()) / sv.std()
+
+        n_trials, n_chan, n_freq, n_time = data_good.shape
+        betas_sub = np.zeros((n_chan, n_freq, n_time), dtype=float)
+
+        # regression at each ch × freq × time: power ~ sv_z
+        # beta = cov(power, sv_z) / var(sv_z)
+        var_sv = sv_z.var()
+        if var_sv == 0:
+            print(f"{pa}: sv_pain_para has zero variance, skipping.")
+            continue
+
+        # Loop channels & freqs (time is vectorized)
+        for ci in range(n_chan):
+            for fi in range(n_freq):
+                Pw = data_good[:, ci, fi, :]          # (n_trials, n_time)
+                # cov over trials for each timepoint
+                cov = (Pw * sv_z[:, None]).mean(axis=0) - Pw.mean(axis=0) * sv_z.mean()
+                betas_sub[ci, fi, :] = cov / var_sv
+
+        all_betas.append(betas_sub)
+        used_subs.append(pa)
+        print(f"{pa}: beta map computed.")
+
+    if len(all_betas) == 0:
+        print("No subjects with valid beta maps; nothing saved.")
+    else:
+        all_betas = np.stack(all_betas)  # (n_subj, n_chan, n_freq, n_time)
+        np.save(group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy", all_betas)
+        np.save(group_dir / "tfr_beta_sv_pain_para_subjects.npy",
+                np.array(used_subs, dtype=object))
+        # Save axis info from last subject
+        np.save(group_dir / "tfr_beta_sv_pain_para_freqs.npy", tfr_epo.freqs)
+        np.save(group_dir / "tfr_beta_sv_pain_para_times.npy", tfr_epo.times)
+        np.save(group_dir / "tfr_beta_sv_pain_para_ch_names.npy",
+                np.array(tfr_epo.ch_names, dtype=object))
+
+        print("Saved beta maps for sv_pain_para to:", group_dir)
+        print("Shapes: all_betas:", all_betas.shape)
+        print("Subjects:", used_subs)
+
 ### old
 #-----------------------------------------------------------------------------------------------------------------------------
 # for pa in part_1:
