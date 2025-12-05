@@ -2564,7 +2564,7 @@ if version == 9:
             continue
 
         # we expect these columns to exist in both mod_data and TFR metadata
-        needed_cols = ["blocks.thisRepN", "trials.thisN", "sv_pain_para"]
+        needed_cols = ["trialsnum", "sv_pain_para"]
         missing = [c for c in needed_cols if c not in mod2.columns]
         if missing:
             raise ValueError(f"For {pa}, mod_data is missing columns: {missing}")
@@ -2581,7 +2581,7 @@ if version == 9:
         meta = tfr_epo.metadata.copy()
 
         # we expect blocks.thisRepN and trials.thisN here too
-        needed_meta_cols = ["blocks.thisRepN", "trials.thisN"]
+        needed_meta_cols = ["trialsnum"]
         missing_meta = [c for c in needed_meta_cols if c not in meta.columns]
         if missing_meta:
             raise ValueError(f"For {pa}, TFR metadata is missing columns: {missing_meta}")
@@ -2591,8 +2591,8 @@ if version == 9:
         meta = meta.reset_index().rename(columns={"index": "row_id"})
 
         merged = meta.merge(
-            mod2[["blocks.thisRepN", "trials.thisN", "sv_pain_para"]],
-            on=["blocks.thisRepN", "trials.thisN"],
+            mod2[["trialsnum", "sv_pain_para"]],
+            on=["trialsnum"],
             how="inner"
         )
 
