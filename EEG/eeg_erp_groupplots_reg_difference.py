@@ -1488,127 +1488,120 @@ if version == 8:
 # 9 
 
 if version == 9:
-    print("\n--- Plotting Version 9: TFR betas for sv_pain_para ---")
+    from mne.time_frequency import read_tfrs
 
-    beta_path = opj(outpath, "tfr_beta_sv_pain_para_subxchxfxt.npy")
-    freqs_path = opj(outpath, "tfr_beta_sv_pain_para_freqs.npy")
-    times_path = opj(outpath, "tfr_beta_sv_pain_para_times.npy")
-    ch_path = opj(outpath, "tfr_beta_sv_pain_para_ch_names.npy")
+    print("\n--- Version 9: TFR trial-wise betas for sv_pain_para ---")
 
-    if not os.path.exists(beta_path):
-        raise FileNotFoundError(f"Beta array not found: {beta_path}")
+    if "sv_pain_para" not in mod_data.columns:
+        raise ValueError("sv_pain_para not found in mod_data columns.")
 
-    betas = np.load(beta_path)           # (n_subj, n_chan, n_freq, n_time)
-    freqs = np.load(freqs_path)
-    times = np.load(times_path)
-    ch_names = np.load(ch_path, allow_pickle=True)
+    group_dir = Path(outpath)
+    group_dir.mkdir(parents=True, exist_ok=True)
 
-    print("betas shape:", betas.shape)
+    all_betas = []     # list of (n_chan, n_freq, n_time)
+    used_subs = []
 
-    # ---- mean beta across subjects ----
-    mean_beta = betas.mean(axis=0)      # (n_chan, n_freq, n_time)
+    for pa in part:
+        print(f"Subject {pa}...")
 
-    # Choose a channel or ROI for TF plots
-    # Example: single channel Cz
-    chan_name = "Cz"
-    if chan_name not in ch_names:
-        raise ValueError(f"{chan_name} not in channel list.")
-    ci = np.where(ch_names == chan_name)[0][0]
+        # behaviour for this subject
+        beh_sub = mod_data[mod_data["participant"] == pa].copy()
+        if beh_sub.empty:
+            print(f"No mod_data for {pa}, skipping.")
+            continue
 
-    # ---- TF map at Cz ----
-    fig, ax = plt.subplots(figsize=(5, 4))
-    im = ax.imshow(
-        mean_beta[ci, :, :],
-        aspect="auto",
-        origin="lower",
-        extent=[times[0]*1000, times[-1]*1000, freqs[0], freqs[-1]]
-    )
-    ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
-    ax.set_ylabel("Frequency (Hz)", fontsize=param["labelfontsize"])
-    ax.set_title(f"Mean beta (sv_pain_para) at {chan_name}",
-                 fontsize=param["titlefontsize"])
-    cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label("Beta", fontsize=param["labelfontsize"])
-    ax.tick_params(labelsize=param["ticksfontsize"])
-    fig.tight_layout()
-    fig.savefig(opj(outfigpath, f"v9_tf_beta_{chan_name}.svg"),
-                dpi=600, bbox_inches="tight")
+        # TFR file (decision phase)
+        tfr_fname = opj(basepath, pa, 'eeg', 'tfr',
+                        f"{pa}_decision_cues_epochs-tfr.h5")
+        if not os.path.exists(tfr_fname):
+            print(f"No TFR file for {pa}, skipping.")
+            continue
 
-    # ---- ROI-averaged TF map (e.g. centro-parietal) ----
-    roi = ["Cz", "CPz", "Pz"]
-    roi_idx = [np.where(ch_names == c)[0][0] for c in roi if c in ch_names]
+        tfr_epo = read_tfrs(tfr_fname)[0]       # EpochsTFR
+        data = tfr_epo.data                     # (n_trials, n_chan, n_freq, n_time)
+        meta = tfr_epo.metadata.reset_index(drop=True)
 
-    if len(roi_idx) > 0:
-        roi_beta = mean_beta[roi_idx, :, :].mean(axis=0)  # (freq, time)
+        # ---- 1) check metadata columns in TFR ----
+        needed_cols = ["blocks.thisRepN", "trials.thisN", "badtrial"]
+        missing_meta = [c for c in needed_cols if c not in meta.columns]
+        if missing_meta:
+            raise ValueError(
+                f"For {pa}, TFR metadata is missing columns: {missing_meta}"
+            )
 
-        fig, ax = plt.subplots(figsize=(5, 4))
-        im = ax.imshow(
-            roi_beta,
-            aspect="auto",
-            origin="lower",
-            extent=[times[0]*1000, times[-1]*1000, freqs[0], freqs[-1]]
+        # ---- 2) check behaviour columns ----
+        needed_beh = ["blocks.thisRepN", "trials.thisN"]
+        missing_beh = [c for c in needed_beh if c not in beh_sub.columns]
+        if missing_beh:
+            raise ValueError(
+                f"For {pa}, mod_data is missing columns: {missing_beh}"
+            )
+
+        # ---- 3) merge TFR metadata with behaviour on block + trial ----
+        merge_keys = ["blocks.thisRepN", "trials.thisN"]
+        merged = meta.merge(
+            beh_sub[merge_keys + ["sv_pain_para"]],
+            on=merge_keys,
+            how="left",
+            validate="one_to_one"
         )
-        ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
-        ax.set_ylabel("Frequency (Hz)", fontsize=param["labelfontsize"])
-        ax.set_title("Mean beta (sv_pain_para)\nROI: Cz/CPz/Pz",
-                     fontsize=param["titlefontsize"])
-        cbar = fig.colorbar(im, ax=ax)
-        cbar.set_label("Beta", fontsize=param["labelfontsize"])
-        ax.tick_params(labelsize=param["ticksfontsize"])
-        fig.tight_layout()
-        fig.savefig(opj(outfigpath, "v9_tf_beta_ROI_Cz_CPz_Pz.svg"),
-                    dpi=600, bbox_inches="tight")
 
-    # ---- Optional: topomap at a specific freq/time ----
-    # e.g. 8–12 Hz, 0–1 s
-    fmin, fmax = 8., 12.
-    tmin, tmax = 0.0, 1.0
+        if len(merged) != len(meta):
+            raise ValueError(
+                f"For {pa}, merge changed number of trials: {len(meta)} -> {len(merged)}"
+            )
 
-    f_mask = (freqs >= fmin) & (freqs <= fmax)
-    t_mask = (times >= tmin) & (times <= tmax)
-    beta_ft = mean_beta[:, f_mask, :][:, :, t_mask].mean(axis=(1, 2))  # (n_chan,)
+        # ---- 4) keep good trials: badtrial == 0 and finite sv_pain_para ----
+        sv = merged["sv_pain_para"].to_numpy(dtype=float)
+        bad = merged["badtrial"].to_numpy(dtype=float)
 
-    # Build a fake Evoked-like info to use plot_topomap
-    # easiest is to grab an EEG info from any existing evoked/epochs file,
-    # but if you prefer, you can load one of your ERP evokeds and reuse its info.
-    # Here I'll assume you have an evoked file from the decision phase:
-    evoked_example_path = opj(outpathall, "sub-001", "eeg", "erps",
-                              "sub-001_decision_off+_ave.fif")
-    if os.path.exists(evoked_example_path):
-        ev = mne.read_evokeds(evoked_example_path)[0]
-        info = ev.info
-        # Make sure channel order matches ch_names saved for TFR
-        # (if not, you'll need to reorder beta_ft accordingly)
-        fig, ax = plt.subplots(figsize=(2, 2))
-        im, _ = plot_topomap(
-            beta_ft,
-            pos=info,
-            cmap="RdBu_r",
-            show=False,
-            ch_type="eeg",
-            outlines="head",
-            extrapolate="head",
-            axes=ax,
-            sensors=False,
-            contours=0
-        )
-        ax.set_title(f"Mean beta (sv_pain_para)\n{fmin}-{fmax} Hz, {int(tmin*1000)}-{int(tmax*1000)} ms",
-                     fontsize=param["labelfontsize"]-1)
-        cbar_fig, cax = plt.subplots(figsize=(0.2, 1))
-        cbar = cbar_fig.colorbar(im, cax=cax, orientation="vertical", aspect=1)
-        cbar.set_label("Beta", rotation=270, labelpad=12,
-                       fontsize=param["labelfontsize"]-1)
-        cbar.ax.tick_params(labelsize=param["ticksfontsize"]-2)
+        keep = (bad == 0) & np.isfinite(sv)
+        if keep.sum() < 5:
+            print(f"{pa}: <5 good trials with finite sv_pain_para, skipping.")
+            continue
 
-        fig.savefig(opj(outfigpath,
-                        f"v9_topomap_beta_{int(fmin)}-{int(fmax)}Hz_{int(tmin*1000)}-{int(tmax*1000)}ms.svg"),
-                    dpi=600, bbox_inches="tight")
-        cbar_fig.savefig(opj(outfigpath,
-                             f"v9_topomap_beta_{int(fmin)}-{int(fmax)}Hz_{int(tmin*1000)}-{int(tmax*1000)}ms_cbar.svg"),
-                         dpi=600, bbox_inches="tight")
+        data_good = data[keep, :, :, :]        # (n_good, n_chan, n_freq, n_time)
+        sv_good = sv[keep]
+
+        # ---- 5) z-score sv_pain_para within subject ----
+        sv_z = (sv_good - sv_good.mean()) / sv_good.std()
+        var_sv = sv_z.var()
+        if var_sv == 0:
+            print(f"{pa}: sv_pain_para has zero variance after z-scoring, skipping.")
+            continue
+
+        n_trials, n_chan, n_freq, n_time = data_good.shape
+        betas_sub = np.zeros((n_chan, n_freq, n_time), dtype=float)
+
+        # ---- 6) regression at each ch × freq × time: power ~ sv_z ----
+        # beta = cov(power, sv_z) / var(sv_z)
+        for ci in range(n_chan):
+            for fi in range(n_freq):
+                Pw = data_good[:, ci, fi, :]          # (n_trials, n_time)
+                cov = (Pw * sv_z[:, None]).mean(axis=0) - Pw.mean(axis=0) * sv_z.mean()
+                betas_sub[ci, fi, :] = cov / var_sv
+
+        all_betas.append(betas_sub)
+        used_subs.append(pa)
+        print(f"{pa}: beta map computed with {keep.sum()} trials.")
+
+    if len(all_betas) == 0:
+        print("No subjects with valid beta maps; nothing saved.")
     else:
-        print("Evoked example not found, skipping topomap for version 9.")
+        all_betas = np.stack(all_betas)  # (n_subj, n_chan, n_freq, n_time)
+        np.save(group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy", all_betas)
+        np.save(group_dir / "tfr_beta_sv_pain_para_subjects.npy",
+                np.array(used_subs, dtype=object))
 
+        # Save axis info from last subject
+        np.save(group_dir / "tfr_beta_sv_pain_para_freqs.npy", tfr_epo.freqs)
+        np.save(group_dir / "tfr_beta_sv_pain_para_times.npy", tfr_epo.times)
+        np.save(group_dir / "tfr_beta_sv_pain_para_ch_names.npy",
+                np.array(tfr_epo.ch_names, dtype=object))
+
+        print("Saved beta maps for sv_pain_para to:", group_dir)
+        print("Shapes: all_betas:", all_betas.shape)
+        print("Subjects:", used_subs)
 
 
 # old ------------------------------------------------------------------------------------------------------------------------
