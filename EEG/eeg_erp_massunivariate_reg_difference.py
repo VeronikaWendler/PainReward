@@ -232,6 +232,18 @@ if version in [1, 2, 3, 4, 7, 9]:
 
 #epo_2_filtered_combined.to_csv('D:/Aberdeen_Uni_June24/MPColl_Lab/All_Files_Relevant_For_Git/Hddm_Docker_August_24/data_sets/epo_2_filtered_combined')
 
+    merge_left = ['participant_id', 'blocks_idx', 'trialblocks']
+    merge_right = ['participant', 'blocks.thisRepN', 'trials.thisN']
+
+    trial_map = epo_1_filtered_combined.merge(
+        mod_data,
+        left_on=merge_left,
+        right_on=merge_right,
+        how='inner'
+    )
+    print("trial_map shape:", trial_map.shape)
+    print("trial_map columns:", trial_map.columns.tolist())
+
 
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2544,20 +2556,17 @@ if version == 8:
 #----------------------------------------------------------------------------------------------------------------------------------------------
 # trial-wise TFR betas for sv_pain_para
 
+# 9  ----------------------------------------------------------------------
+# TFR trial-wise betas for sv_pain_para
 
 if version == 9:
     from mne.time_frequency import read_tfrs
 
     print("\n--- Version 9: TFR trial-wise betas for sv_pain_para ---")
 
-    if "sv_pain_para" not in mod_data.columns:
-        raise ValueError("sv_pain_para not found in mod_data columns.")
-
-    # sanity: we need block/trial indices on the behaviour side
-    for col in ["blocks.thisRepN", "trials.thisN"]:
-        if col not in mod_data.columns:
-            raise ValueError(f"mod_data is missing column '{col}' – "
-                             "this must be present to align trials.")
+    # we now expect sv_pain_para to be in trial_map, not raw mod_data
+    if "sv_pain_para" not in trial_map.columns:
+        raise ValueError("sv_pain_para not found in trial_map columns.")
 
     group_dir = Path(outpath)
     group_dir.mkdir(parents=True, exist_ok=True)
@@ -2568,74 +2577,79 @@ if version == 9:
     for pa in part:
         print(f"Subject {pa}...")
 
-        # --- behaviour for this subject ---
-        beh_sub = mod_data[mod_data["participant"] == pa].copy()
-        if beh_sub.empty:
-            print(f"No mod_data for {pa}, skipping.")
+        # ---- 1) get the trial-level mapping for this subject ----
+        sub_map = trial_map[trial_map["participant_id"] == pa].copy()
+        if sub_map.empty:
+            print(f"No trial_map rows for {pa}, skipping.")
             continue
 
-        # sort by block + trial so the order is block0:0..24, block1:0..24, ...
-        beh_sub = beh_sub.sort_values(
-            ["blocks.thisRepN", "trials.thisN"]
-        ).reset_index(drop=True)
+        # we need at least trialsnum, badtrial, sv_pain_para
+        needed_cols = ["trialsnum", "badtrial", "sv_pain_para"]
+        missing = [c for c in needed_cols if c not in sub_map.columns]
+        if missing:
+            raise ValueError(f"For {pa}, trial_map is missing columns: {missing}")
 
-        # --- TFR file (decision phase) ---
+        # ---- 2) read TFR file (decision phase) ----
         tfr_fname = opj(basepath, pa, 'eeg', 'tfr',
                         f"{pa}_decision_cues_epochs-tfr.h5")
         if not os.path.exists(tfr_fname):
             print(f"No TFR file for {pa}, skipping.")
             continue
 
-        tfr_epo = read_tfrs(tfr_fname)[0]       # EpochsTFR
-        data = tfr_epo.data                     # (n_trials, n_chan, n_freq, n_time)
-        meta = tfr_epo.metadata.copy().reset_index(drop=True)
+        tfr_epo = read_tfrs(tfr_fname)[0]    # EpochsTFR
+        data = tfr_epo.data                  # (n_trials, n_chan, n_freq, n_time)
+        meta_tfr = tfr_epo.metadata.reset_index().rename(columns={"index": "row_id"})
 
-        # safety: align lengths by trimming the longer side
-        n_beh = len(beh_sub)
-        n_tfr = data.shape[0]
-        n = min(n_beh, n_tfr)
+        if "trialsnum" not in meta_tfr.columns:
+            raise ValueError(f"For {pa}, TFR metadata has no 'trialsnum' column.")
 
-        if n < 5:
-            print(f"{pa}: only {n} overlapping trials by order, skipping.")
+        # ---- 3) merge TFR metadata with trial_map on trialsnum ----
+        merged = meta_tfr.merge(
+            sub_map[["trialsnum", "badtrial", "sv_pain_para"]],
+            on="trialsnum",
+            how="inner"
+        )
+
+        if merged.empty:
+            print(f"{pa}: no overlapping trials between TFR metadata and trial_map, skipping.")
             continue
 
-        beh_sub = beh_sub.iloc[:n].reset_index(drop=True)
-        data = data[:n, :, :, :]
-        meta = meta.iloc[:n].reset_index(drop=True)
+        row_ids = merged["row_id"].to_numpy(dtype=int)
 
-        # --- sv_pain_para for these trials ---
-        sv = beh_sub["sv_pain_para"].to_numpy(dtype=float)
+        if len(row_ids) < 5:
+            print(f"{pa}: only {len(row_ids)} trials after matching TFR and trial_map, skipping.")
+            continue
 
-        # drop bad trials and non-finite sv_pain_para
-        if "badtrial" in meta.columns:
-            good = (meta["badtrial"].to_numpy(dtype=float) == 0)
-        else:
-            good = np.ones(len(meta), dtype=bool)
+        # subset TFR to aligned trials
+        data_match = data[row_ids, :, :, :]   # (n_match, n_chan, n_freq, n_time)
 
-        good &= np.isfinite(sv)
+        # ---- 4) good trials: badtrial == 0 and finite sv_pain_para ----
+        sv = merged["sv_pain_para"].to_numpy(dtype=float)
+        bad = merged["badtrial"].to_numpy(dtype=float)
 
+        good = (bad == 0) & np.isfinite(sv)
         if good.sum() < 5:
             print(f"{pa}: <5 good trials after badtrial + sv filtering, skipping.")
             continue
 
-        data_good = data[good, :, :, :]       # (n_good, n_chan, n_freq, n_time)
+        data_good = data_match[good, :, :, :]     # (n_good, n_chan, n_freq, n_time)
         sv_good = sv[good]
 
-        # z-score sv within subject
+        # ---- 5) z-score sv within subject ----
         sv_z = (sv_good - sv_good.mean()) / sv_good.std()
         var_sv = sv_z.var()
         if var_sv == 0:
-            print(f"{pa}: sv_pain_para has zero variance after filtering, skipping.")
+            print(f"{pa}: sv_pain_para has zero variance after z-scoring, skipping.")
             continue
 
         n_trials, n_chan, n_freq, n_time = data_good.shape
         betas_sub = np.zeros((n_chan, n_freq, n_time), dtype=float)
 
-        # regression at each ch × freq × time: power ~ sv_z
+        # ---- 6) regression at each ch × freq × time: power ~ sv_z ----
         # beta = cov(power, sv_z) / var(sv_z)
         for ci in range(n_chan):
-            Pw_ci = data_good[:, ci, :, :]   # (n_trials, n_freq, n_time)
-            Pw_flat = Pw_ci.reshape(n_trials, -1)
+            Pw_ci = data_good[:, ci, :, :]           # (n_trials, n_freq, n_time)
+            Pw_flat = Pw_ci.reshape(n_trials, -1)    # (n_trials, n_freq*n_time)
             cov_flat = (
                 (Pw_flat * sv_z[:, None]).mean(axis=0)
                 - Pw_flat.mean(axis=0) * sv_z.mean()
@@ -2645,7 +2659,7 @@ if version == 9:
 
         all_betas.append(betas_sub)
         used_subs.append(pa)
-        print(f"{pa}: beta map computed, n_good trials = {n_trials}")
+        print(f"{pa}: beta map computed with {good.sum()} good trials.")
 
     if len(all_betas) == 0:
         print("No subjects with valid beta maps; nothing saved.")
@@ -2662,7 +2676,6 @@ if version == 9:
         print("Saved beta maps for sv_pain_para to:", group_dir)
         print("Shapes: all_betas:", all_betas.shape)
         print("Subjects:", used_subs)
-
 
 ### old
 #-----------------------------------------------------------------------------------------------------------------------------
