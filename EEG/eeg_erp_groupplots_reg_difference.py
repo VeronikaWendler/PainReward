@@ -144,7 +144,7 @@ chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
 
 # Version 1, 2, 3 ---------------------------------------------------------------------------------------------------
 
-if version in [1, 2, 3, 7]:
+if version in [1, 2, 3]:
 
     tvals = np.load(opj(outpath_glm, f'ols_2ndlevel_tvals{suffix}.npy'))
     pvals = np.load(opj(outpath_glm, f'ols_2ndlevel_pvals{suffix}.npy'))
@@ -1097,6 +1097,327 @@ elif version == 6:
                 dpi=600,
                 bbox_inches='tight'
             )
+
+
+elif version == 7:
+
+    tvals = np.load(opj(outpath_glm, 'ols_2ndlevel_tvals.npy'))
+    pvals = np.load(opj(outpath_glm, 'ols_2ndlevel_pvals.npy'))
+    beta_gavg = np.load(opj(outpath_glm, 'ols_2ndlevel_betasavg.npy'),
+                        allow_pickle=True)
+    allbetas = np.load(opj(outpath_glm, 'ols_2ndlevel_betas.npy'),
+                       allow_pickle=True)
+
+    times_pos = [np.abs(beta_gavg[0].times - 0.2 - t).argmin() for t in plot_times]
+
+    # only one regressor: sv_pain_para
+    for ridx, regvar in enumerate(regvars):
+        regvarname = regvarsnames[ridx]
+
+        # pick a colourmap / vminmax for this one
+        vminmax = 6
+        cmap = 'viridis'
+
+        all_epos = mne.read_epochs(
+            opj(outpath_glm, f'ols_2ndlevel_allepochs-epo_{regvar}.fif')
+        )
+
+        beta_gavg_nomast = beta_gavg[ridx].copy()
+        chankeep = np.array([c not in ['M1', 'M2']
+                             for c in beta_gavg[ridx].ch_names])
+
+        # Topo of beta – per time window
+        # -----------------------------------------------------------------
+        for tidx, timepos in enumerate(times_pos):
+            fig, topo_axis = plt.subplots(figsize=(1, 1))
+
+            # p-values at this time for all channels
+            p_row = pvals[ridx][timepos, :]  # shape (n_channels,)
+
+            # full-length mask: only non-mastoid sig channels are True
+            mask = np.zeros_like(p_row, dtype=bool)
+            sig_non_mastoid = (p_row < param['alpha']) & chankeep
+            mask[sig_non_mastoid] = True
+
+            im, _ = plot_topomap(
+                beta_gavg_nomast.data[:, timepos],
+                pos=beta_gavg_nomast.info,
+                mask=mask,
+                mask_params=dict(marker='o',
+                                 markerfacecolor='w',
+                                 markeredgecolor='k',
+                                 linewidth=0,
+                                 markersize=2),
+                cmap=cmap,
+                show=False,
+                ch_type='eeg',
+                outlines='head',
+                extrapolate='head',
+                vlim=(-0.15, 0.15),
+                axes=topo_axis,
+                sensors=False,
+                contours=0,
+            )
+            topo_axis.set_title(str(int(plot_times[tidx] * 1000)) + ' ms',
+                                fontdict={'size': param['labelfontsize']-1},
+                                pad=0.1)
+
+            if tidx + 1 == len(plot_times):
+                fig2, ax = plt.subplots(figsize=(0.2, 1))
+                cbar1 = fig2.colorbar(im, cax=ax,
+                                      orientation='vertical', aspect=1)
+                cbar1.set_label('Beta', rotation=270,
+                                labelpad=12,
+                                fontdict={'fontsize': param["labelfontsize"]-1})
+                cbar1.ax.tick_params(labelsize=param['ticksfontsize']-2)
+                fig2.savefig(opj(outfigpath,
+                                 f'{fig_prefix}fig_topo_beta_cbar_{regvar}.svg'),
+                             dpi=600, bbox_inches='tight')
+
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}fig_ols_erps_betas_topo_{regvar}_{tidx}.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+            
+
+        # -----------------------------------------------------------------
+        # Binned-by-regressor line plots and topomaps 
+        # -----------------------------------------------------------------
+        for c in chan_to_plot:
+            fig, line_axis = plt.subplots(1, 1, figsize=(4, 2.5))
+            all_epos.metadata.reset_index()
+
+            # Binning on regressor
+            nbins = 5
+            all_epos.metadata['bin'] = 0
+            unique_vals = all_epos.metadata[regvar].nunique()
+            nbins_eff = min(nbins, unique_vals)
+
+            all_epos.metadata['bin'], bins = pd.qcut(
+                all_epos.metadata[regvar],
+                q=nbins_eff,
+                labels=False,
+                retbins=True,
+                duplicates='drop'
+            )
+            all_epos.metadata['bin' + '_' + regvar] = all_epos.metadata['bin']
+
+            # Bin labels
+            bin_labels = []
+            for bidx, b in enumerate(bins):
+                if b < 0:
+                    b = 0
+                if bidx < len(bins)-1:
+                    lab = str(round(b, 10)) + '-' + str(round(bins[bidx+1], 10))
+                    bin_labels.append(lab)
+
+            # Average within participants
+            sub_evokeds = []
+            for p_id in all_epos.metadata['participant_id'].unique():
+                sub_dat = all_epos[all_epos.metadata['participant_id'] == p_id]
+                sub_evoked = {}
+                for val in range(nbins):
+                    if np.sum(sub_dat.metadata['bin'] == val) != 0:
+                        sub_evoked[val] = sub_dat[sub_dat.metadata['bin']
+                                                  == val].average()
+                    else:
+                        sub_evoked[val] = 0
+                sub_evokeds.append(sub_evoked)
+
+            # Grand average over subjects
+            # evokeds = dict()
+            # for i in range(len(bin_labels)):
+            #     evoked = [sub_evoked[i] for sub_evoked in sub_evokeds
+            #               if sub_evoked[i] != 0]
+            #     evokeds[str(i+1)] = mne.grand_average(evoked)
+            
+            
+            evokeds = dict()
+            for i in range(len(bin_labels)):
+                evoked_list = [sub_evoked[i] for sub_evoked in sub_evokeds
+                               if sub_evoked[i] != 0]
+            
+                if len(evoked_list) == 0:
+                    print(f"Skipping bin {i+1}: no valid epochs in this bin for any sub")
+                    continue
+            
+                evokeds[str(i+1)] = mne.grand_average(evoked_list)
+
+
+            pick = beta_gavg[ridx].ch_names.index(c)
+
+            line_axis.set_ylabel('Beta (' + regvarname + ')',
+                                 fontdict={'size': param['labelfontsize']})
+
+            # Colourbar (separate figure)
+            _, axis = plt.subplots(figsize=(4, 2.5))
+            cbarout = mne.viz.plot_compare_evokeds(
+                evokeds,
+                picks=pick,
+                cmap=(regvarname + "\n(Decile)", cmap),
+                show_sensors=False,
+                show=False,
+                axes=axis
+            )
+            cbarout[0].axes[-1].yaxis.label.set_size(param['labelfontsize'])
+            cbarout[0].axes[-1].tick_params(labelsize=param['ticksfontsize'])
+            cbarout[0].axes[0].remove()
+            cbarout[0].savefig(opj(outfigpath,
+                                   f'{fig_prefix}fig_ols_erps_betas_line_cbar_{regvar}_{c}.svg'),dpi=800,
+                               bbox_inches='tight')
+
+
+            bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
+
+            for idx2, bin_id in enumerate(bin_ids):
+                line_axis.plot(
+                    all_epos[0].times * 1000,
+                    evokeds[bin_id].data[pick, :] * 1000000,
+                    label=str(idx2 + 1),
+                    linewidth=2,
+                    color=plt.get_cmap(cmap)(idx2 / len(bin_ids))
+                )
+
+            line_axis.tick_params(labelsize=12)
+            line_axis.set_xlabel('Time (ms)',
+                                 fontdict={'size': param['labelfontsize']})
+            line_axis.set_ylabel('Amplitude (uV)',
+                                 fontdict={'size': param['labelfontsize']})
+            line_axis.axhline(0, linestyle='--', color='gray')
+            line_axis.axvline(0, ymin=-0.2, ymax=0.2,
+                              linestyle='--', color='gray')
+            line_axis.get_xaxis().tick_bottom()
+            line_axis.get_yaxis().tick_left()
+            line_axis.set_xticks(ticks=np.arange(-200, 1200, 200))
+            line_axis.set_xticklabels(
+                labels=[str(i) for i in np.arange(-200, 1200, 200)]
+            )
+            line_axis.tick_params(labelsize=param['ticksfontsize'])
+            fig.tight_layout()
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}fig_ols_erps_amp_bins_{regvar}_{c}.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+
+
+        # Topo of binned amplitude at 0.6 s
+        bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
+
+        for idx2, binnum in enumerate(bin_ids):
+            fig, topo_axis = plt.subplots(figsize=(1, 1))
+
+            tidx = np.argmin(np.abs(evokeds[binnum].times - 0.6))
+            dat = evokeds[binnum].data[:, tidx] * 1000000
+
+            im, _ = plot_topomap(
+                dat,
+                pos=evokeds[binnum].info,
+                cmap=cmap,
+                show=False,
+                ch_type='eeg',
+                outlines='head',
+                vlim=(-vminmax, vminmax),
+                extrapolate='head',
+                axes=topo_axis,
+                sensors=False,
+                contours=0,
+            )
+            topo_axis.set_title('Ventile ' + binnum,
+                                fontdict={'size': param['labelfontsize']-1},
+                                pad=0.1)
+
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}fig_binsamp_topo_{regvar}_bin{binnum}.svg'),
+                dpi=600, bbox_inches='tight'
+            )
+            
+
+            if idx2 + 1 == len(bin_ids):
+                fig2, ax = plt.subplots(figsize=(0.2, 1))
+                cbar1 = fig2.colorbar(im, cax=ax,
+                                      orientation='vertical', aspect=1)
+                cbar1.set_label(
+                    'Amplitude (uV)',
+                    rotation=270,
+                    labelpad=12,
+                    fontdict={'fontsize': param["labelfontsize"]-1}
+                )
+                cbar1.ax.tick_params(labelsize=param['ticksfontsize']-2)
+                fig2.savefig(
+                    opj(outfigpath,
+                        f'{fig_prefix}fig_topo_bins_cbar_{regvar}.svg'),
+                    dpi=600, bbox_inches='tight'
+                )
+
+
+        # -----------------------------------------------------------------
+        # Mean beta and SEM over participants
+        # -----------------------------------------------------------------
+        for c in chan_to_plot:
+            fig, line_axis = plt.subplots(1, 1, figsize=(4, 2.5))
+
+            all_epos.metadata.reset_index()
+            pick = beta_gavg[ridx].ch_names.index(c)
+
+            sub_avg = []
+            for s in range(allbetas.shape[0]):
+                sub_avg.append(allbetas[s, ridx, pick, :])
+            sub_avg = np.stack(sub_avg)
+
+            sem = scipy.stats.sem(sub_avg, axis=0)
+            mean = beta_gavg[ridx].data[pick, :]
+
+            clrs = sns.color_palette("deep", 5)
+
+            line_axis.set_ylabel('Beta (' + regvarname + ')',
+                                 fontdict={'size': param['labelfontsize']})
+            line_axis.set_xlabel('Time (ms)',
+                                 fontdict={'size': param['labelfontsize']})
+
+            line_axis.plot(all_epos[0].times * 1000,
+                           mean,
+                           linewidth=3)
+            line_axis.fill_between(all_epos[0].times * 1000,
+                                   mean - sem,
+                                   mean + sem,
+                                   alpha=0.3,
+                                   facecolor=clrs[0])
+
+            line_axis.set_ylim((-0.25, 0.25))
+            line_axis.axhline(0, linestyle='--', color='gray')
+            line_axis.axvline(0, ymin=0, ymax=0.2,
+                              linestyle='--', color='gray')
+            line_axis.get_xaxis().tick_bottom()
+            line_axis.get_yaxis().tick_left()
+            line_axis.tick_params(axis='both',
+                                  labelsize=param['ticksfontsize'])
+
+            timestep = 1024 / param['testresampfreq']
+            for tidx2, t2 in enumerate(all_epos[0].times * 1000):
+                if pvals[ridx][tidx2, pick] < param['alpha']:
+                    line_axis.fill_between(
+                        [t2, t2 + timestep],
+                        -0.02, -0.005,
+                        alpha=0.3,
+                        facecolor='red'
+                    )
+
+            line_axis.set_xticks(ticks=np.arange(-200, 1200, 200))
+            line_axis.set_xticklabels(
+                labels=[str(i) for i in np.arange(-200, 1200, 200)]
+            )
+            fig.tight_layout()
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}fig_ols_erps_betas_{regvar}_{c}.svg'),
+                dpi=600,
+                bbox_inches='tight')
+
 
 
 # old ------------------------------------------------------------------------------------------------------------------------
