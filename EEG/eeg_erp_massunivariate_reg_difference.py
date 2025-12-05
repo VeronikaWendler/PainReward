@@ -55,7 +55,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 8    # version 1 is for decision and version 2 is for passive phase 
+version = 9    # version 1 is for decision and version 2 is for passive phase 
 
 
 if version == 1:
@@ -2547,8 +2547,7 @@ if version == 9:
     print("\n--- Version 9: TFR trial-wise betas for sv_pain_para ---")
 
     if "sv_pain_para" not in mod_data.columns:
-        raise ValueError("sv_pain_para not found in mod_data columns. "
-                         "Make sure it is in v_pain_money_interaction.csv")
+        raise ValueError("sv_pain_para not found in mod_data columns. ")
 
     group_dir = Path(outpath)
     group_dir.mkdir(parents=True, exist_ok=True)
