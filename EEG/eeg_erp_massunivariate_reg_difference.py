@@ -2539,7 +2539,9 @@ if version == 8:
 
 #----------------------------------------------------------------------------------------------------------------------------------------------
 # trial-wise TFR betas for sv_pain_para
-
+# =====================================================================
+# VERSION 9: trial-wise TFR betas for sv_pain_para
+# =====================================================================
 if version == 9:
     from mne.time_frequency import read_tfrs
 
@@ -2563,9 +2565,11 @@ if version == 9:
             print(f"No mod_data for {pa}, skipping.")
             continue
 
-        if "trialsnum" not in mod2.columns:
-            raise ValueError("mod_data has no 'trialsnum' column; "
-                             "need it to align TFR trials and behaviour.")
+        # we expect these columns to exist in both mod_data and TFR metadata
+        needed_cols = ["blocks.thisRepN", "trials.thisN", "sv_pain_para"]
+        missing = [c for c in needed_cols if c not in mod2.columns]
+        if missing:
+            raise ValueError(f"For {pa}, mod_data is missing columns: {missing}")
 
         # --- TFR file (decision phase) ---
         tfr_fname = opj(basepath, pa, 'eeg', 'tfr',
@@ -2578,15 +2582,19 @@ if version == 9:
         data = tfr_epo.data                     # (n_trials, n_chan, n_freq, n_time)
         meta = tfr_epo.metadata.copy()
 
-        if "trialsnum" not in meta.columns:
-            raise ValueError("TFR metadata has no 'trialsnum' column; "
-                             "make sure you created TFR with metadata including trialsnum.")
+        # we expect blocks.thisRepN and trials.thisN here too
+        needed_meta_cols = ["blocks.thisRepN", "trials.thisN"]
+        missing_meta = [c for c in needed_meta_cols if c not in meta.columns]
+        if missing_meta:
+            raise ValueError(f"For {pa}, TFR metadata is missing columns: {missing_meta}")
 
-        # --- align TFR metadata to behaviour via trialsnum ---
-        # inner join keeps only trials present in BOTH meta and mod2
+        # --- align TFR metadata to behaviour via block + trial index ---
+        # keep a row index so we know which TFR rows correspond to merged trials
+        meta = meta.reset_index().rename(columns={"index": "row_id"})
+
         merged = meta.merge(
-            mod2[["trialsnum", "sv_pain_para"]],
-            on="trialsnum",
+            mod2[["blocks.thisRepN", "trials.thisN", "sv_pain_para"]],
+            on=["blocks.thisRepN", "trials.thisN"],
             how="inner"
         )
 
@@ -2594,31 +2602,22 @@ if version == 9:
             print(f"{pa}: no overlapping trials between TFR metadata and mod_data, skipping.")
             continue
 
-
-        mask = tfr_epo.metadata["trialsnum"].isin(merged["trialsnum"])
-        if mask.sum() < 5:
-            print(f"{pa}: only {mask.sum()} trials after matching TFR and behaviour, skipping.")
+        good_idx = merged["row_id"].to_numpy(dtype=int)
+        if len(good_idx) < 5:
+            print(f"{pa}: only {len(good_idx)} trials after matching TFR and behaviour, skipping.")
             continue
 
-        # subset TFR
-        tfr_match = tfr_epo[mask]
-        data_match = tfr_match.data                 # (n_match, n_chan, n_freq, n_time)
-        meta_match = tfr_match.metadata.reset_index(drop=True)
-
-        # re-merge to ensure ordering is aligned and we have sv_pain_para alongside
-        merged2 = meta_match.merge(
-            mod2[["trialsnum", "sv_pain_para"]],
-            on="trialsnum",
-            how="left"
-        )
+        # subset TFR to aligned trials
+        data_match = data[good_idx, :, :, :]         # (n_match, n_chan, n_freq, n_time)
+        merged = merged.reset_index(drop=True)
 
         # drop bad trials and non-finite sv_pain_para
-        if "badtrial" in merged2.columns:
-            good = (merged2["badtrial"] == 0)
+        if "badtrial" in merged.columns:
+            good = (merged["badtrial"] == 0)
         else:
-            good = np.ones(len(merged2), dtype=bool)
+            good = np.ones(len(merged), dtype=bool)
 
-        sv = merged2["sv_pain_para"].to_numpy(dtype=float)
+        sv = merged["sv_pain_para"].to_numpy(dtype=float)
         good &= np.isfinite(sv)
 
         if good.sum() < 5:
@@ -2639,10 +2638,10 @@ if version == 9:
         betas_sub = np.zeros((n_chan, n_freq, n_time), dtype=float)
 
         # regression at each ch × freq × time: power ~ sv_z
+        # beta = cov(power, sv_z) / var(sv_z)
         for ci in range(n_chan):
-            Pw_ci = data_good[:, ci, :, :]   
+            Pw_ci = data_good[:, ci, :, :]   # (n_trials, n_freq, n_time)
             Pw_flat = Pw_ci.reshape(n_trials, -1)
-            # cov(power, sv_z) for each freq*time point
             cov_flat = (Pw_flat * sv_z[:, None]).mean(axis=0) - Pw_flat.mean(axis=0) * sv_z.mean()
             beta_flat = cov_flat / var_sv
             betas_sub[ci] = beta_flat.reshape(n_freq, n_time)
