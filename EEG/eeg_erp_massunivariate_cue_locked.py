@@ -50,7 +50,7 @@ import numba
 numba.config.CACHE_ENABLE = False
 
 # Outpath for analysis
-outpath = opj(basepath, 'statistics_new')       
+outpath = opj(basepath, 'statistics_response')       
 if not os.path.exists(outpath):
     os.mkdir(outpath)
     
@@ -2606,14 +2606,14 @@ if version == 9:
 
         epo_fname = opj(
             basepath,
-            pa, "eeg", "erps",
-            f"{pa}_decision_cues_singletrials-epo.fif"
+            pa, "eeg", "erps_resp",
+            f"{pa}_decision_resp_singletrials-epo.fif"
         )
         if not os.path.exists(epo_fname):
-            print(f"  No ERP single-trials file for {pa}, skipping.")
+            print(f"No ERP single-trials file for {pa}, skipping.")
             continue
 
-        print("  Reading ERP epochs:", epo_fname)
+        print("Reading ERP epochs:", epo_fname)
         epo = mne.read_epochs(epo_fname, preload=True)
         meta = epo.metadata.copy()
 
