@@ -83,7 +83,7 @@ elif version == 8:
         os.mkdir(outfigpath)
 elif version == 9:
     outpath = opj(outpathall, 'statistics_new/tfr_mod_9_v9_sv_pain_para')
-    outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para')
+    outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para_2')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 
@@ -1489,11 +1489,6 @@ if version == 8:
 # TFR beta maps for sv_pain_para (cue-locked) ----------------------------------------------------------------------
 # using fdr correction instead of bonferroni as it might be less conservative 
 
-# 9 
-# TFR beta maps for sv_pain_para (cue-locked), ERP-like per band
-# using FDR correction over chan x time within each band
-# ----------------------------------------------------------------------
-
 if version == 9:
     from scipy.stats import ttest_1samp
     from statsmodels.stats.multitest import fdrcorrection
@@ -1530,12 +1525,9 @@ if version == 9:
 
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
 
-    # >>> ADD THIS <<<
     from mne.channels import make_standard_montage
     montage = make_standard_montage('standard_1020')
     info.set_montage(montage)
-    # <<< END ADD >>>
-
 
     # exclude mastoids (same as ERP code)
     chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
@@ -1587,49 +1579,45 @@ if version == 9:
             tvals_band[ti, :] = t_t
             pvals_band[ti, :] = p_t
 
-             # 4) FDR correction restricted to ROI × time window
-            # ------------------------------------------------
-            # a priori ROI + time-window (adjust as needed)
-            roi = ['Cz', 'CPz', 'Pz']
-            roi_idx = [ch_names.index(c) for c in roi if c in ch_names]
-    
-            if len(roi_idx) == 0:
-                print("  -> ROI channels not found in ch_names, skipping FDR for this band.")
-                # fall back to "no significant" mask
+        # 4) FDR correction restricted to ROI × time window
+        # ------------------------------------------------
+        roi = ['Cz', 'CPz', 'Pz']
+        roi_idx = [ch_names.index(c) for c in roi if c in ch_names]
+
+        if len(roi_idx) == 0:
+            print("  -> ROI channels not found in ch_names, skipping FDR for this band.")
+            sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
+            pvals_fdr_band = np.full_like(pvals_band, np.nan)
+        else:
+            # time window (in seconds)
+            t_lo_roi, t_hi_roi = 0.3, 0.8
+            time_mask = (times >= t_lo_roi) & (times <= t_hi_roi)
+
+            if not np.any(time_mask):
+                print("  -> No time points in ROI window, skipping FDR for this band.")
                 sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
                 pvals_fdr_band = np.full_like(pvals_band, np.nan)
             else:
-                # time window (in seconds)
-                t_lo_roi, t_hi_roi = 0.3, 0.8
-                time_mask = (times >= t_lo_roi) & (times <= t_hi_roi)
-    
-                if not np.any(time_mask):
-                    print("  -> No time points in ROI window, skipping FDR for this band.")
-                    sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
-                    pvals_fdr_band = np.full_like(pvals_band, np.nan)
-                else:
-                    # subset of p-values: (time_in_window, n_roi)
-                    p_roi = pvals_band[time_mask][:, roi_idx]
-    
-                    # run FDR only on these
-                    p_flat = p_roi.reshape(-1)
-                    rej_flat, p_fdr_flat = fdrcorrection(p_flat, alpha=0.05)
-    
-                    # reshape back to window×ROI
-                    sig_roi = rej_flat.reshape(p_roi.shape)
-                    p_fdr_roi = p_fdr_flat.reshape(p_roi.shape)
-    
-                    # now build full-size arrays and fill only ROI×window
-                    sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
-                    pvals_fdr_band = np.full_like(pvals_band, np.nan)
-    
-                    # broadcast index trick: time_mask over rows, roi_idx over columns
-                    sig_mask_band[np.ix_(time_mask, roi_idx)] = sig_roi
-                    pvals_fdr_band[np.ix_(time_mask, roi_idx)] = p_fdr_roi
-    
-                print(f"Significant samples in ROI window (FDR, p<0.05): "
-                      f"{sig_mask_band.sum()}")
-    
+                # subset of p-values: (time_in_window, n_roi)
+                p_roi = pvals_band[time_mask][:, roi_idx]
+
+                # run FDR only on these
+                p_flat = p_roi.reshape(-1)
+                rej_flat, p_fdr_flat = fdrcorrection(p_flat, alpha=0.05)
+
+                # reshape back to window×ROI
+                sig_roi = rej_flat.reshape(p_roi.shape)
+                p_fdr_roi = p_fdr_flat.reshape(p_roi.shape)
+
+                # now build full-size arrays and fill only ROI×window
+                sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
+                pvals_fdr_band = np.full_like(pvals_band, np.nan)
+
+                sig_mask_band[np.ix_(time_mask, roi_idx)] = sig_roi
+                pvals_fdr_band[np.ix_(time_mask, roi_idx)] = p_fdr_roi
+
+            print(f"  -> Significant samples in ROI window (FDR, p<0.05): "
+                  f"{sig_mask_band.sum()}")
 
         # 5) Wrap mean beta into Evoked for plotting (like beta_gavg in ERP)
         beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
@@ -1637,7 +1625,6 @@ if version == 9:
         # ------------------------------------------------------------------
         # 5A. Topomaps at selected times (like ERP v7)
         # ------------------------------------------------------------------
-        # here we use the same plot_times defined earlier in your script
         times_pos = [np.abs(beta_ev_band.times - t).argmin() for t in plot_times]
 
         for tidx, tpos in enumerate(times_pos):
@@ -1646,7 +1633,6 @@ if version == 9:
             p_row = pvals_fdr_band[tpos, :]     # (n_chan,)
             valid = np.isfinite(p_row)
             sig_non_mastoid = valid & (p_row < 0.05) & chankeep
-
             mask = sig_non_mastoid
 
             vmax = np.max(np.abs(beta_ev_band.data))
@@ -1682,7 +1668,6 @@ if version == 9:
                 bbox_inches='tight'
             )
 
-            # save colourbar on last time point
             if tidx + 1 == len(times_pos):
                 fig2, ax = plt.subplots(figsize=(0.3, 1.2))
                 cbar = fig2.colorbar(im, cax=ax, orientation='vertical', aspect=1)
@@ -1719,7 +1704,6 @@ if version == 9:
             ax.axhline(0, linestyle='--', color='gray')
             ax.axvline(0, linestyle='--', color='gray')
 
-            # significance shading at the bottom (FDR-corrected)
             timestep = 1000.0 / param['testresampfreq']   # ms
             for tidx2, t_ms in enumerate(times * 1000):
                 if sig_mask_band[tidx2, pick]:
