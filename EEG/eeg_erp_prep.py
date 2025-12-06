@@ -504,15 +504,20 @@ if version == 1:
             outdir = opj(outpath,  p, 'eeg', 'erps_resp')
             epo = mne.read_epochs(opj(outdir, p + '_decision_resp_singletrials-epo.fif'))
 
+        # add amplitudes
         epo = average_time_win_strials(epo, chans_to_average, amp_lat)
+        # add participant ID
         epo.metadata['participant_id'] = p
         all_meta.append(epo.metadata)
 
+    # concatenate across participants
+    all_meta = pd.concat(all_meta, ignore_index=True)
+
+    # save one big CSV
     if lock_type == 'cue':
         all_meta.to_csv(opj(outpath, 'decision_erpsmeta_cue.csv'), index=False)
     else:
         all_meta.to_csv(opj(outpath, 'decision_erpsmeta_response.csv'), index=False)
-
              
 elif version == 2:
     all_meta = []
