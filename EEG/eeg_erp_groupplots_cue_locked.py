@@ -1537,26 +1537,28 @@ if version == 9:
     # NOTE: time_window is now response-locked: -0.5 to 0.1 s
     # ------------------------------------------------------------------
     HYPOTHESES = {
-        "theta_CP": {
+        "beta_motor": {
+            "band_name": "beta",
+            "freq_range": (13., 30.),
+            "roi": ["C3", "CP3", "C4", "CP4", "Cz"],
+            "time_window": (-0.4, 0.0),
+        },
+        "theta_frontal": {
             "band_name": "theta",
             "freq_range": (4., 7.),
-            "roi": ["Cz", "CPz", "Pz", "POz", "P1", "P2"],
-            "time_window": (-0.5, -0.05),
-        },
-        "alpha_frontal": {
-            "band_name": "alpha",
-            "freq_range": (8., 12.),
-            "roi": ["Fz", "FCz", "F1", "F2", "F4"],
-            "time_window": (-0.5, -0.05),
+            "roi": ["Fz", "FCz"],
+            "time_window": (-0.4, -0.1),
         },
     }
+    
 
     # bins relative to response for reporting (also negative)
     BIN_DEF = [
-        ("early", -0.5, -0.3),
-        ("mid",   -0.3, -0.1),
-        ("late",  -0.1,  -0.05),
+        ("early", -0.4, -0.25),
+        ("mid",   -0.25, -0.1),
+        ("late",  -0.1,  0.0),
     ]
+
 
     # ------------------------------------------------------------------
     # Loop over hypotheses: average over freq, then ERP-style stats & plots
