@@ -1547,7 +1547,7 @@ if version == 9:
             "band_name": "theta",
             "freq_range": (4., 7.),
             "roi": ["Fz", "FCz"],
-            "time_window": (-0.4, -0.1),
+            "time_window": (-0.4, 0.0),
         },
     }
     
