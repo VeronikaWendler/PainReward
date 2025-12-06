@@ -181,7 +181,7 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1, 2, 3, 4, 7, 9]:
+if version in [1, 2, 3, 4, 7]:
     filtered_data = []
     for p in part:
         # data for this participant
@@ -192,7 +192,7 @@ if version in [1, 2, 3, 4, 7, 9]:
             epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_passive',                   
                                   p + '_passive_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
-        elif version in [2, 3, 4, 7, 9]:
+        elif version in [2, 3, 4, 7]:
             epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
                                   p + '_decision_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
