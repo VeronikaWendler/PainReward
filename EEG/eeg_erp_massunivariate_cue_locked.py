@@ -2779,8 +2779,8 @@ if version == 9:
         raise ValueError("sv_pain_para not found in mod_data columns.")
     if "trialsnum" not in mod_data.columns:
         raise ValueError("mod_data is missing 'trialsnum' column.")
-    if "rt_column_name" not in mod_data.columns:   # <<< CHANGE THIS NAME
-        raise ValueError("RT column ('rt_column_name') not found in mod_data. "
+    if "rt" not in mod_data.columns:   # <<< CHANGE THIS NAME
+        raise ValueError("RT column ('rt') not found in mod_data. "
                          "Replace with your actual RT column name.")
 
     group_dir = Path(outpath)
@@ -2812,8 +2812,7 @@ if version == 9:
             print(f"  No behavioural rows in mod_data for {pa}, skipping.")
             continue
 
-        # <<< ADD RT COLUMN HERE: CHANGE 'rt_column_name' >>>
-        beh_sub = beh_sub[["trialsnum", "sv_pain_para", "rt_column_name"]].copy()
+        beh_sub = beh_sub[["trialsnum", "sv_pain_para", "rt"]].copy()
         beh_sub["trialsnum"] = beh_sub["trialsnum"].astype(int)
 
         epo_fname = opj(
