@@ -1315,13 +1315,15 @@ elif version == 7:
             )
 
 
-        # Topo of binned amplitude at 0.6 s
+        
         bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
 
         for idx2, binnum in enumerate(bin_ids):
             fig, topo_axis = plt.subplots(figsize=(1, 1))
 
-            tidx = np.argmin(np.abs(evokeds[binnum].times - 0.6))
+            # Topo of binned amplitude at 0.1 s (post-response)
+            target_time = 0.1   # in seconds, relative to response
+            tidx = np.argmin(np.abs(evokeds[binnum].times - target_time))
             dat = evokeds[binnum].data[:, tidx] * 1000000
 
             im, _ = plot_topomap(
@@ -1337,9 +1339,9 @@ elif version == 7:
                 sensors=False,
                 contours=0,
             )
-            topo_axis.set_title('Ventile ' + binnum,
-                                fontdict={'size': param['labelfontsize']-1},
-                                pad=0.1)
+            topo_axis.set_title('Ventile ' + binnum + ' @ 100 ms',
+                    fontdict={'size': param['labelfontsize']-1},
+                    pad=0.1)
 
             fig.savefig(
                 opj(outfigpath,
@@ -1418,10 +1420,12 @@ elif version == 7:
                         facecolor='red'
                     )
 
-            line_axis.set_xticks(ticks=np.arange(-200, 1200, 200))
-            line_axis.set_xticklabels(
-                labels=[str(i) for i in np.arange(-200, 1200, 200)]
-            )
+            
+            xticks = np.arange(-800, 300, 200)
+            line_axis.set_xticks(xticks)
+            line_axis.set_xticklabels([str(x) for x in xticks])
+            
+            
             fig.tight_layout()
             fig.savefig(
                 opj(outfigpath,
