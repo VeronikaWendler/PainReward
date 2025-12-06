@@ -1529,7 +1529,7 @@ if version == 9:
     chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
 
     # ----- RESPONSE-LOCKED plotting times and xticks -----
-    plot_times_resp = [-0.5, -0.3, -0.1, 0.1]     # in seconds
+    plot_times_resp = [-0.5, -0.3, -0.1, -0.05]     # in seconds
     xticks_resp_ms  = np.arange(-800, 300, 200)   # for timecourses (in ms)
 
     # ------------------------------------------------------------------
@@ -1541,13 +1541,13 @@ if version == 9:
             "band_name": "theta",
             "freq_range": (4., 7.),
             "roi": ["Cz", "CPz", "Pz", "POz", "P1", "P2"],
-            "time_window": (-0.5, 0.1),
+            "time_window": (-0.5, -0.05),
         },
         "alpha_frontal": {
             "band_name": "alpha",
             "freq_range": (8., 12.),
             "roi": ["Fz", "FCz", "F1", "F2", "F4"],
-            "time_window": (-0.5, 0.1),
+            "time_window": (-0.5, -0.05),
         },
     }
 
@@ -1555,7 +1555,7 @@ if version == 9:
     BIN_DEF = [
         ("early", -0.5, -0.3),
         ("mid",   -0.3, -0.1),
-        ("late",  -0.1,  0.1),
+        ("late",  -0.1,  -0.05),
     ]
 
     # ------------------------------------------------------------------
