@@ -2662,7 +2662,6 @@ if version == 9:
             print(f"  {pa}: no overlapping trials by trialsnum, skipping.")
             continue
 
-        # 5) select only merged rows (indices into epo_resamp)
         idx_keep = merged["row_id"].to_numpy(dtype=int)
         if len(idx_keep) < 5:
             print(f"  {pa}: only {len(idx_keep)} trials after matching ERP+beh, skipping.")
@@ -2696,9 +2695,9 @@ if version == 9:
             n_cycles=n_cycles,
             return_itc=False,
             use_fft=True,
-            decim=1,                 # already at target_sfreq
+            decim=1,                
             n_jobs=param.get("njobs", 8),
-            average=False            # <-- single-trial TFR
+            average=False            
         )
 
         # crop to desired window
