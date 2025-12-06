@@ -50,7 +50,7 @@ import numba
 numba.config.CACHE_ENABLE = False
 
 # Outpath for analysis
-outpath = opj(basepath, 'statistics')       
+outpath = opj(basepath, 'statistics_new')       
 if not os.path.exists(outpath):
     os.mkdir(outpath)
     
@@ -2779,7 +2779,7 @@ if version == 9:
         raise ValueError("sv_pain_para not found in mod_data columns.")
     if "trialsnum" not in mod_data.columns:
         raise ValueError("mod_data is missing 'trialsnum' column.")
-    if "rt" not in mod_data.columns:   # <<< CHANGE THIS NAME
+    if "rt" not in mod_data.columns:     
         raise ValueError("RT column ('rt') not found in mod_data. "
                          "Replace with your actual RT column name.")
 
@@ -2820,6 +2820,7 @@ if version == 9:
             pa, "eeg", "erps",
             f"{pa}_decision_cue_singletrials-epo.fif"
         )
+ 
         if not os.path.exists(epo_fname):
             print(f"No ERP single-trials file for {pa}, skipping.")
             continue
