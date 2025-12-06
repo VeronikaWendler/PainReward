@@ -30,7 +30,7 @@ from pathlib import Path
 version = 1    # 1 = decision, 2 = passive
 
 # what to lock to: 'cue' (off+) or 'response'
-lock_type = 'response'       # or 'response'
+lock_type = 'cue'       # or 'response'
 
 
 # Set bids directory
@@ -586,148 +586,172 @@ part = [p for p in os.listdir(opj(basepath)) if "sub" in p]
 part.sort()
 
 
-# set params
-param = {
-   # Length of epochs
-   'erpbaseline': -0.20,  # Used for trial rejection
-   'erpepochend': 1,
-   'tfrbaseline': -0.50,  # Used for trial rejection
-   'tfrcropend': 1,
-   'tfrepochstart': -2,  # Used for TFR transform
-   'tfrepochend': 2,
-   'ttfreqs': np.arange(4, 101, 1),  # Frequencies
-   'n_cycles': 0.5*np.arange(4, 101, 1),  # Wavelet cycles (check with MP again)
-   'testresampfreq': 256,  # Sfreq to downsample to
-   'njobs': 8,  # N cpus to run TFR
-   #'ignoreshocks': False,
+tfr_param = {
+    'tfrbaseline': -0.50,      # crop start (what you keep in the final TFR)
+    'tfrcropend': 1.0,         # crop end
+    'tfrepochstart': -2.0,     # epoch start around event (for TF transform)
+    'tfrepochend': 2.0,        # epoch end
+    'ttfreqs': np.arange(4, 101, 1),
+    'n_cycles': 0.5 * np.arange(4, 101, 1),
+    'testresampfreq': 256,
+    'njobs': 8,
 }
-
 
 removed_frame = pd.DataFrame(index=part)
 removed_frame['percleft_cue'] = 999
 percleft_cue = []
 percremoved_cue_comperp = []
 
-
-
 if version == 1:
     for p in tqdm(part):
-        # directories
-        indir = opj(outpath,  p, 'eeg')
+        print(f"\n--- TFR for {p} (version=1, lock_type={lock_type})")
 
-        # ERP directory for metadata
+        indir = opj(outpath, p, 'eeg')
+
         if lock_type == 'cue':
-            outdir_erp = opj(outpath,  p, 'eeg', 'erps')
-            erp_fname = p + '_decision_cues_singletrials-epo.fif'
+            outdir_erp = opj(outpath, p, 'eeg', 'erps')
+            erp_fname = f"{p}_decision_cues_singletrials-epo.fif"
         else:
-            outdir_erp = opj(outpath,  p, 'eeg', 'erps_resp')
-            erp_fname = p + '_decision_resp_singletrials-epo.fif'
+            outdir_erp = opj(outpath, p, 'eeg', 'erps_resp')
+            erp_fname = f"{p}_decision_resp_singletrials-epo.fif"
 
         if not os.path.exists(outdir_erp):
-            os.mkdir(outdir_erp)  # for cue-locked case this already exists, fine
+            raise RuntimeError(f"ERP dir not found for {p}: {outdir_erp}")
 
-        # TFR directory (you can keep a single one, filenames differ)
+        # TFR directory
         outdir_tfr = opj(outpath, p, 'eeg', 'tfr')
-        if not os.path.exists(outdir_tfr):
-            os.mkdir(outdir_tfr)
-
-        # Load cleaned raw file and events
-        raw = mne.io.read_raw_fif(opj(indir,
-                                     p + '_decision_cleaned-raw.fif'),
-                                 preload=True)
+        os.makedirs(outdir_tfr, exist_ok=True)
+        # raw events
+        raw = mne.io.read_raw_fif(
+            opj(indir, f"{p}_decision_cleaned-raw.fif"),
+            preload=True,
+        )
 
         subject_i = p.split('-')[-1]
-        events = pd.read_csv(layout.get(subject=subject_i,
-                                        extension='tsv',
-                                        suffix='events',
-                                        return_type='filename')[0], sep='\t')
+        events = pd.read_csv(
+            layout.get(
+                subject=subject_i,
+                extension='tsv',
+                suffix='events',
+                return_type='filename'
+            )[0],
+            sep='\t'
+        )
 
-        # Get erps metadata (cue or response)
+        # erp single-trial metadata
         erps = mne.read_epochs(opj(outdir_erp, erp_fname))
-        meta = erps.metadata
-        allbad = np.sum(meta.badtrial)
+        meta = erps.metadata.copy()
+        allbad = int(np.sum(meta.badtrial))
 
-       
-        #---------------------------------------------------------------------------------
-        # Epoch according to condition
+        print(f"{p}: ERP single-trials loaded: {len(erps)} epochs")
+        print(f"{p}: metadata length: {len(meta)}, bad trials: {allbad}")
+
+        # Prepare events for TFR
         # Drop unused channels
         chans_to_drop = [c for c in ['HEOGL', 'HEOGR', 'VEOGL',
-                                    'STI 014', 'Status'] if c in raw.ch_names]
+                                     'STI 014', 'Status'] if c in raw.ch_names]
         raw.drop_channels(chans_to_drop)
-    
+
         events['empty'] = 0
-        events_c = events[events['trial_type'].notna()]
-        
+        events_c = events[events['trial_type'].notna()].copy()
+
         if lock_type == 'cue':
             events_id = {"off+": 2}
-            events_c = events_c[events_c['trial_type'] == 'off+']
-            events_c['cue_num'] = [events_id[s] for s in events_c.trial_type]
+            events_c = events_c[events_c['trial_type'] == 'off+'].copy()
+            events_c['cue_num'] = events_c['trial_type'].map(events_id)
         elif lock_type == 'response':
             events_id = {"resp_any": 3}
-            events_c = events_c[events_c['trial_type'].isin(['res+','res-','resm'])]
-            events_c['cue_num'] = [events_id['resp_any'] for _ in events_c.trial_type]
+            events_c = events_c[events_c['trial_type'].isin(['res+', 'res-', 'resm'])].copy()
+            events_c['cue_num'] = events_id['resp_any']
+        else:
+            raise ValueError("lock_type must be 'cue' or 'response'")
+
+        events_c = events_c.sort_values('sample').reset_index(drop=True)
         
+        if 'trialsnum' in meta.columns:
+            meta = meta.sort_values('trialsnum').reset_index(drop=True)
+        else:
+            print(f"'trialsnum' not in metadata for {p}; relying on row order only.")
+
+        n_ev = len(events_c)
+        n_meta = len(meta)
+        print(f"{p}: events_c rows: {n_ev}, metadata rows: {n_meta}")
+
+        if n_ev != n_meta:
+            raise RuntimeError(
+                f"Metadata / events length mismatch for {p}: "
+                f"{n_meta} metadata rows vs {n_ev} events_c rows."
+            )
+
         events_cues = np.asarray(events_c[['sample', 'empty', 'cue_num']])
 
-        #----------------------------------------------------------------------------------
-        # Epoch for TFR
+        # Epoch for TFR 
         tf_cues_strials = mne.Epochs(
             raw,
             events=events_cues,
             event_id=events_id,
-            tmin=param['tfrepochstart'],
+            tmin=tfr_param['tfrepochstart'],
+            tmax=tfr_param['tfrepochend'],
             baseline=None,
             metadata=meta,
-            tmax=param['tfrepochend'],
             preload=True,
-            verbose=False)
-    
-        # # TFR single trials
+            verbose=False
+        )
+
+        print(f"{p}: tf_cues_strials n_epochs = {len(tf_cues_strials)}")
+
+        # Morlet TFR, single-trial
         strials = tfr_morlet(
             tf_cues_strials,
-            freqs=param['ttfreqs'],
-            n_cycles=param['n_cycles'],
+            freqs=tfr_param['ttfreqs'],
+            n_cycles=tfr_param['n_cycles'],
             return_itc=False,
             use_fft=True,
-            decim=int(1024/param["testresampfreq"]),
-            n_jobs=param['njobs'],
-            average=False)
-    
-        # Clear for memory
-        tf_cues_strials = None
-       
-        # Remove unused part
-        strials.crop(tmin=param['tfrbaseline'],
-                     tmax=param['tfrcropend'])
-    
-        # Check drop statistics
-        percleft_cue.append(
-            (len(strials) - np.sum(meta.badtrial))/len(strials)*100)
-        percremoved_cue_comperp.append(100-((125 - allbad)/125*100))
+            decim=int(1024 / tfr_param["testresampfreq"]),
+            n_jobs=tfr_param['njobs'],
+            average=False  
+        )
 
-        #----------------------------------------------------------------------------------
-        # save tfr 
+        tf_cues_strials = None  # free memory
+
+        print(f"{p}: TFR data shape BEFORE crop: {strials.data.shape}")
+
+        strials.crop(
+            tmin=tfr_param['tfrbaseline'],
+            tmax=tfr_param['tfrcropend']
+        )
+
+        print(f"{p}: TFR data shape AFTER crop:  {strials.data.shape}")
+        print(f"{p}: metadata length in TFR: {len(strials.metadata)}")
+
+
+        percleft_cue.append(
+            (len(strials) - np.sum(meta.badtrial)) / len(strials) * 100
+        )
+        percremoved_cue_comperp.append(
+            100 - ((125 - allbad) / 125 * 100)
+        )
+
+        # Save TFR
         if lock_type == 'cue':
-            fname = p + '_decision_cues_epochs-tfr.h5'
+            fname = f"{p}_decision_cues_epochs-tfr.h5"
+            tfr_prefix = "decision_cue"
         else:
-            fname = p + '_decision_resp_epochs-tfr.h5'
-        strials.save(opj(outdir_tfr, fname), overwrite=True)
-        
-        if version == 1:
-            if lock_type == 'cue':
-                tfr_prefix = 'decision_cue'
-            else:
-                tfr_prefix = 'decision_resp'
-        elif version == 2:
-            tfr_prefix = 'passive'
-           # clear for memory
-        strials = None  # Clear for memory
-        
+            fname = f"{p}_decision_resp_epochs-tfr.h5"
+            tfr_prefix = "decision_resp"
+
+        out_fname = opj(outdir_tfr, fname)
+        print(f"{p}: saving TFR to {out_fname}")
+        strials.save(out_fname, overwrite=True)
+
+        # free memory
+        strials = None
+
+    # Save rejection stats for TFR
     removed_frame['percleft_cue'] = percleft_cue
     removed_frame['percremoved_cue_comperp'] = percremoved_cue_comperp
     removed_frame.to_csv(opj(outpath, f'{tfr_prefix}_tfr_rejectionstats.csv'))
-
-
+    
 elif version == 2:
     for p in tqdm(part):
         
