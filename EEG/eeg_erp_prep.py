@@ -91,11 +91,16 @@ col_name = 'Off+'
 if lock_type == 'response':
     col_name = 'Resp_any'
 
+if lock_type == 'cue':
+    count_col = 'Off+'      # number of off+ epochs kept
+else:
+    count_col = 'Resp_any'  # number of response-locked epochs kept
+
 reject_stats = pd.DataFrame(data={
     'part': part,
     'perc_removed_cues': 9999,
     'perc_removed_shocks': 9999,
-    col_name: 0,
+    count_col: 0,
 })
 
 
@@ -246,15 +251,13 @@ for p in part:
     report.add_figure(fig, title='Drop log', section='Drop log')
     reject_stats.loc[reject_stats.part == p,
                      reject_stats.columns == 'perc_removed_cues'] = ((125 - len(erp_cues)) / 125 * 100)
-    
+        
     if lock_type == 'cue':
         # number of off+ trials kept
-        reject_stats.loc[reject_stats.part == p,
-                         reject_stats.columns == 'Off+'] = len(erp_cues['off+'])
-    elif lock_type == 'response':
-        # just store total number of response-locked epochs
-        reject_stats.loc[reject_stats.part == p,
-                         reject_stats.columns == 'Resp_any'] = len(erp_cues)
+        reject_stats.loc[reject_stats.part == p, count_col] = len(erp_cues['off+'])
+    else:
+        # number of response-locked epochs kept
+        reject_stats.loc[reject_stats.part == p, count_col] = len(erp_cues)
 
     # reject_stats.loc[reject_stats.part == p, reject_stats.columns == 'dIN8'] = len(erp_cues['DIN8'])
     # reject_stats.loc[reject_stats.part == p, reject_stats.columns == 'Res+'] = len(erp_cues['res+'])
@@ -409,15 +412,26 @@ for p in part:
     #-------------------------------------------------------------------------------------------
  
 # Save rejection stats
-if version == 1:
+if version == 1 and lock_type == 'cue':
     reject_stats['perc_removed_all'] = (
-        1-reject_stats[['Off+']].sum(axis=1)/(125))*100
+        1 - reject_stats[count_col] / 125
+    ) * 100
     reject_stats.to_csv(opj(outpath,
-                            'decision_erps_rejectionstats.csv'))          
+                            'decision_cue_erps_rejectionstats.csv'))          
     reject_stats.describe().to_csv(opj(outpath,
                                        'decision_'
-                                       + 'erps_rejectionstats_desc.csv'))
-    print("reject_stats.to_csv(opj(outpath,decision_erps_rejectionstats.csv'))")
+                                       + 'cue_erps_rejectionstats_desc.csv'))
+    print("reject_stats.to_csv(opj(outpath,decision_cue_erps_rejectionstats.csv'))")
+elif version == 1 and lock_type == "response":
+    reject_stats['perc_removed_all'] = (
+        1 - reject_stats[count_col] / 125
+    ) * 100
+    reject_stats.to_csv(opj(outpath,
+                            'decision_resp_erps_rejectionstats.csv'))          
+    reject_stats.describe().to_csv(opj(outpath,
+                                       'decision_'
+                                       + 'resp_erps_rejectionstats_desc.csv'))
+    print("reject_stats.to_csv(opj(outpath,decision_resp_erps_rejectionstats.csv'))")
 
 elif version == 2:
     reject_stats['perc_removed_all'] = (
@@ -693,13 +707,20 @@ if version == 1:
         else:
             fname = p + '_decision_resp_epochs-tfr.h5'
         strials.save(opj(outdir_tfr, fname), overwrite=True)
-
-        # clear for memory
+        
+        if version == 1:
+            if lock_type == 'cue':
+                tfr_prefix = 'decision_cue'
+            else:
+                tfr_prefix = 'decision_resp'
+        elif version == 2:
+            tfr_prefix = 'passive'
+           # clear for memory
         strials = None  # Clear for memory
-       
+        
     removed_frame['percleft_cue'] = percleft_cue
     removed_frame['percremoved_cue_comperp'] = percremoved_cue_comperp
-    removed_frame.to_csv(opj(outpath, 'decision_tfr_rejectionstats.csv'))
+    removed_frame.to_csv(opj(outpath, f'{tfr_prefix}_tfr_rejectionstats.csv'))
 
 
 elif version == 2:
