@@ -83,7 +83,7 @@ elif version == 8:
         os.mkdir(outfigpath)
 elif version == 9:
     outpath = opj(outpathall, 'statistics_new/tfr_mod_9_v9_sv_pain_para')
-    outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para_3')
+    outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para_4')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 
@@ -1484,11 +1484,9 @@ if version == 8:
 
 
 
-
 # 9 
-# TFR beta maps for sv_pain_para (cue-locked), hypothesis-driven ROIs
-# theta (CPz/Pz/Cz) and frontal alpha (Fz/FCz)
-# ----------------------------------------------------------------------
+# TFR beta maps for sv_pain_para (cue-locked)
+
 
 if version == 9:
     from scipy.stats import ttest_1samp
@@ -1539,13 +1537,13 @@ if version == 9:
         "theta_CP": {
             "band_name": "theta",
             "freq_range": (4., 7.),
-            "roi": ["Cz", "CPz", "Pz"],
+            "roi": ["Cz", "CPz", "Pz", "POz", "P1", "P2"],
             "time_window": (0.3, 0.8),
         },
         "alpha_frontal": {
             "band_name": "alpha",
             "freq_range": (8., 12.),
-            "roi": ["Fz", "FCz"],
+            "roi": ["Fz", "FCz", "F1", "F2", "F4"],
             "time_window": (0.3, 0.8),
         },
     }
@@ -1575,13 +1573,44 @@ if version == 9:
         # 2) Grand-average betas across subjects: (n_chan, n_time)
         beta_mean_band = all_betas_band.mean(axis=0)
 
-        # 3) Second-level t-test vs 0 at each (chan, time)
+        # ROI indices
+        roi_idx = [ch_names.index(c) for c in roi if c in ch_names]
+        if len(roi_idx) == 0:
+            print("  -> ROI channels not found in ch_names, skipping tests.")
+            sig_mask_band = np.zeros((n_time, n_chan), dtype=bool)
+            pvals_fdr_band = np.full((n_time, n_chan), np.nan)
+            beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
+            continue
+
+        time_mask_roi = (times >= t_lo_roi) & (times <= t_hi_roi)
+        if np.any(time_mask_roi):
+            # shape: (subj, ROI, time_in_window) -> mean -> (subj,)
+            beta_roi = all_betas[:, roi_idx][:, :, f_mask][:, :, :, time_mask_roi].mean(axis=(1, 2, 3))
+            t_full, p_full = ttest_1samp(beta_roi, popmean=0.0)
+            print(f"  ROI-mean beta {band_name} {t_lo_roi*1000:.0f}-{t_hi_roi*1000:.0f} ms: "
+                  f"t({len(beta_roi)-1}) = {t_full:.3f}, p = {p_full:.3g}")
+        else:
+            print("  -> No time points in main ROI window for ROI-mean test.")
+
+        BIN_DEF = [
+            ("early", 0.3, 0.5),
+            ("mid",   0.5, 0.7),
+            ("late",  0.7, 0.9),
+        ]
+        for bin_name, tb_lo, tb_hi in BIN_DEF:
+            tb_mask = (times >= tb_lo) & (times <= tb_hi)
+            if not np.any(tb_mask):
+                continue
+            beta_bin = all_betas[:, roi_idx][:, :, f_mask][:, :, :, tb_mask].mean(axis=(1, 2, 3))
+            t_bin, p_bin = ttest_1samp(beta_bin, popmean=0.0)
+            print(f"    Bin {bin_name} {tb_lo*1000:.0f}-{tb_hi*1000:.0f} ms: "
+                  f"t({len(beta_bin)-1}) = {t_bin:.3f}, p = {p_bin:.3g}")
+
+        # 3) Second-level t-test vs 0 at each (chan, time) for plotting
         tvals_band = np.zeros((n_time, n_chan))
         pvals_band = np.zeros((n_time, n_chan))
-
         for ti in range(n_time):
-            # betas at this time across subjects: shape (n_subj, n_chan)
-            b_t = all_betas_band[:, :, ti]
+            b_t = all_betas_band[:, :, ti]   # (subj, chan)
             t_t, p_t = ttest_1samp(
                 b_t,
                 popmean=0.0,
@@ -1591,46 +1620,26 @@ if version == 9:
             tvals_band[ti, :] = t_t
             pvals_band[ti, :] = p_t
 
-        #
-        roi_idx = [ch_names.index(c) for c in roi if c in ch_names]
-
-        if len(roi_idx) == 0:
-            print("  -> ROI channels not found in ch_names, skipping FDR.")
-            sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
-            pvals_fdr_band = np.full_like(pvals_band, np.nan)
-        else:
-            time_mask = (times >= t_lo_roi) & (times <= t_hi_roi)
-
-            if not np.any(time_mask):
-                print("  -> No time points in ROI window, skipping FDR.")
-                sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
-                pvals_fdr_band = np.full_like(pvals_band, np.nan)
-            else:
-                # subset of p-values: (time_in_window, n_roi)
-                p_roi = pvals_band[time_mask][:, roi_idx]
-
-                # run FDR only on these
-                p_flat = p_roi.reshape(-1)
-                rej_flat, p_fdr_flat = fdrcorrection(p_flat, alpha=0.05)
-
-                # reshape back to window×ROI
-                sig_roi = rej_flat.reshape(p_roi.shape)
-                p_fdr_roi = p_fdr_flat.reshape(p_roi.shape)
-
-                # full-size arrays, fill only ROI×window
-                sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
-                pvals_fdr_band = np.full_like(pvals_band, np.nan)
-
-                sig_mask_band[np.ix_(time_mask, roi_idx)] = sig_roi
-                pvals_fdr_band[np.ix_(time_mask, roi_idx)] = p_fdr_roi
-
+        # 4) FDR correction ONLY in ROI × main time window (for sig bars/dots)
+        sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
+        pvals_fdr_band = np.full_like(pvals_band, np.nan)
+        if np.any(time_mask_roi):
+            p_roi = pvals_band[time_mask_roi][:, roi_idx]
+            p_flat = p_roi.reshape(-1)
+            rej_flat, p_fdr_flat = fdrcorrection(p_flat, alpha=0.05)
+            sig_roi = rej_flat.reshape(p_roi.shape)
+            p_fdr_roi = p_fdr_flat.reshape(p_roi.shape)
+            sig_mask_band[np.ix_(time_mask_roi, roi_idx)] = sig_roi
+            pvals_fdr_band[np.ix_(time_mask_roi, roi_idx)] = p_fdr_roi
             print(f"  -> Significant samples in ROI window (FDR, p<0.05): "
                   f"{sig_mask_band.sum()}")
 
         # 5) Wrap mean beta into Evoked for plotting (like beta_gavg in ERP)
         beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
 
-    
+        # ------------------------------------------------------------------
+        # 5A. Topomaps at selected times (like ERP v7)
+        # ------------------------------------------------------------------
         times_pos = [np.abs(beta_ev_band.times - t).argmin() for t in plot_times]
 
         for tidx, tpos in enumerate(times_pos):
@@ -1690,7 +1699,10 @@ if version == 9:
                     bbox_inches='tight'
                 )
 
-        for c in roi:   
+        # ------------------------------------------------------------------
+        # 5B. Timecourses at ROI channels with sig bar (like ERP v7)
+        # ------------------------------------------------------------------
+        for c in roi:
             if c not in beta_ev_band.ch_names:
                 continue
 
