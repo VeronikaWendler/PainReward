@@ -2818,7 +2818,7 @@ if version == 9:
         epo_fname = opj(
             basepath,
             pa, "eeg", "erps",
-            f"{pa}_decision_cue_singletrials-epo.fif"
+            f"{pa}_decision_cues_singletrials-epo.fif"
         )
  
         if not os.path.exists(epo_fname):
