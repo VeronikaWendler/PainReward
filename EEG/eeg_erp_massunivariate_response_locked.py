@@ -7,8 +7,8 @@
  1.set versions
  2.cleaning and z scoring
  3.Grand average & second-level cluster test (versions 1–3)
- 4.Cluster test on beta differences (drift vs raw)
- 5.ROI-level R scquared comparison (raw vs drift)
+ 4.Cluster test on beta differences (drift vs raw) (this is stupid, I should have taken more math courses)
+ 5.ROI-level R scquared comparison (raw vs drift)  (this is stupid, needs change, ignore)
  
  '''
 
@@ -50,12 +50,12 @@ import numba
 numba.config.CACHE_ENABLE = False
 
 # Outpath for analysis
-outpath = opj(basepath, 'statistics_new')       
+outpath = opj(basepath, 'statistics_response')       
 if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 9    # version 1 is for decision and version 2 is for passive phase 
+version = 7    # version 1 is for decision and version 2 is for passive phase 
 
 
 if version == 1:
@@ -193,8 +193,8 @@ if version in [1, 2, 3, 4, 7, 9]:
                                   p + '_passive_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
         elif version in [2, 3, 4, 7, 9]:
-            epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
-                                  p + '_decision_cues_singletrials-epo.fif'))
+            epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_resp',                   
+                                  p + '_decision_resp_singletrials-epo.fif'))
             epo_1 = epo.copy()
 
         participants = epo_1.metadata['participant_id'].unique()
@@ -2307,8 +2307,8 @@ elif version == 7:
         mod2 = part_1_dat[part_1_dat['participant'] == pa]
 
         epo = mne.read_epochs(
-            opj(basepath, pa, 'eeg', 'erps',
-                pa + '_decision_cues_singletrials-epo.fif')
+            opj(basepath, pa, 'eeg', 'erps_resp',
+                pa + '_decision_resp_singletrials-epo.fif')
         )
         
         epo_cop = epo.copy()
@@ -2476,9 +2476,9 @@ elif version == 7:
 
     for idx, regvar in enumerate(regvars):
         epo_save = mne.concatenate_epochs(all_epos[idx])
-        epo_save.save(z_dir / f'ols_2ndlevel_allepochs-epo_{regvar}.fif', overwrite=True)
+        epo_save.save(z_dir / f'ols_2ndlevel_allepochs_resp-epo_{regvar}.fif', overwrite=True)
 
-    np.save(z_dir / f'ols_2ndlevel_betasavg.npy', beta_gavg)
+    np.save(z_dir / f'ols_2ndlevel_betasavg_resp.npy', beta_gavg)
     
     
     
@@ -2605,9 +2605,8 @@ if version == 9:
         # make sure trialsnum_x is integer
         sub_map["trialsnum"] = sub_map["trialsnum"].astype(int)
 
-        # ----- 2) TFR side -----
         tfr_fname = opj(
-            PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata",
+            basepath,        
             pa, "eeg", "tfr",
             f"{pa}_decision_cues_epochs-tfr.h5"
         )
