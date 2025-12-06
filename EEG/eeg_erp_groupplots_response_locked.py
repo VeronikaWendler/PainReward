@@ -149,7 +149,7 @@ if version == 7:
     regvarsnames = ['SV_pain_para']
     
     
-plot_times = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2]
+plot_times = [-0.5, -0.3, -0.1, 0.1]
 chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
 
 
@@ -1119,8 +1119,9 @@ elif version == 7:
     allbetas = np.load(opj(outpath_glm, 'ols_2ndlevel_betas.npy'),
                        allow_pickle=True)
 
-    times_pos = [np.abs(beta_gavg[0].times - 0.2 - t).argmin() for t in plot_times]
-
+    times = beta_gavg[0].times   
+    times_pos = [np.abs(times - t).argmin() for t in plot_times]
+    
     # only one regressor: sv_pain_para
     for ridx, regvar in enumerate(regvars):
         regvarname = regvarsnames[ridx]
@@ -1301,10 +1302,9 @@ elif version == 7:
                               linestyle='--', color='gray')
             line_axis.get_xaxis().tick_bottom()
             line_axis.get_yaxis().tick_left()
-            line_axis.set_xticks(ticks=np.arange(-200, 1200, 200))
-            line_axis.set_xticklabels(
-                labels=[str(i) for i in np.arange(-200, 1200, 200)]
-            )
+            xticks = np.arange(-800, 300, 200)
+            line_axis.set_xticks(xticks)
+            line_axis.set_xticklabels([str(x) for x in xticks])
             line_axis.tick_params(labelsize=param['ticksfontsize'])
             fig.tight_layout()
             fig.savefig(

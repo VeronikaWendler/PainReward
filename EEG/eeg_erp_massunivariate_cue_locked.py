@@ -2613,6 +2613,8 @@ if version == 9:
         if not os.path.exists(tfr_fname):
             print(f"  No TFR file for {pa}, skipping.")
             continue
+        print("Looking for TFR:", tfr_fname)
+
 
         tfr_epo = read_tfrs(tfr_fname)[0]   # EpochsTFR
         data = tfr_epo.data                 # (n_trials, n_chan, n_freq, n_time)
