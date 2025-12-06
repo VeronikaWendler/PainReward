@@ -2571,21 +2571,19 @@ if version == 8:
 # ----------------------------------------------------------------------------------------------------------------------------------------------
 # trial-wise TFR betas for sv_pain_para
 
+# ----------------------------------------------------------------------------------------------------------------------------------------------
+# trial-wise TFR betas for sv_pain_para (simplified: merge TFR metadata directly with mod_data)
+
 if version == 9:
     from mne.time_frequency import read_tfrs
 
-    print("\n--- Version 9: TFR trial-wise betas for sv_pain_para ---")
+    print("\n--- Version 9 (simplified): TFR trial-wise betas for sv_pain_para ---")
 
-    # sanity checks on trial_map
-    if "sv_pain_para" not in trial_map.columns:
-        raise ValueError("sv_pain_para not found in trial_map columns.")
-
-    for col in ["sample", "badtrial", "participant_id"]:
-        if col not in trial_map.columns:
-            raise ValueError(
-                f"trial_map is missing required column '{col}'. "
-                f"Current columns: {trial_map.columns.tolist()}"
-            )
+    # sanity checks on mod_data
+    if "sv_pain_para" not in mod_data.columns:
+        raise ValueError("sv_pain_para not found in mod_data columns.")
+    if "trialsnum" not in mod_data.columns:
+        raise ValueError("mod_data is missing 'trialsnum' column.")
 
     group_dir = Path(outpath)
     group_dir.mkdir(parents=True, exist_ok=True)
@@ -2594,22 +2592,17 @@ if version == 9:
     used_subs = []
 
     for pa in part:
-        print(f"Subject {pa}...")
+        print(f"\nSubject {pa}...")
 
-        # ----- 1) behaviour + ERP side: from trial_map -----
-        sub_map = trial_map[trial_map["participant_id"] == pa].copy()
-        if sub_map.empty:
-            print(f"  No rows in trial_map for {pa}, skipping.")
+        # ----- 1) behaviour side -----
+        beh_sub = mod_data[mod_data["participant"] == pa].copy()
+        if beh_sub.empty:
+            print(f"  No behavioural rows in mod_data for {pa}, skipping.")
             continue
 
-        # we need cue sample index, sv_pain_para and badtrial
-        needed_cols = ["sample", "sv_pain_para", "badtrial"]
-        missing = [c for c in needed_cols if c not in sub_map.columns]
-        if missing:
-            raise ValueError(f"For {pa}, trial_map is missing columns: {missing}")
-
-        # make sure 'sample' is integer
-        sub_map["sample"] = sub_map["sample"].astype(int)
+        # keep only needed columns
+        beh_sub = beh_sub[["trialsnum", "sv_pain_para"]].copy()
+        beh_sub["trialsnum"] = beh_sub["trialsnum"].astype(int)
 
         # ----- 2) TFR side -----
         tfr_fname = opj(
@@ -2620,31 +2613,36 @@ if version == 9:
         if not os.path.exists(tfr_fname):
             print(f"  No TFR file for {pa}, skipping.")
             continue
-        print("  Looking for TFR:", tfr_fname)
+        print("  Reading TFR:", tfr_fname)
 
-        tfr_epo = read_tfrs(tfr_fname)[0]   # EpochsTFR
-        data = tfr_epo.data                 # (n_trials, n_chan, n_freq, n_time)
+        tfr_epo = read_tfrs(tfr_fname)[0]      # EpochsTFR
+        data = tfr_epo.data                    # (n_trials, n_chan, n_freq, n_time)
         meta = tfr_epo.metadata.copy()
 
-        if "sample" not in meta.columns:
+        # check required columns in TFR metadata
+        needed_cols = ["trialsnum", "badtrial"]
+        missing = [c for c in needed_cols if c not in meta.columns]
+        if missing:
             raise ValueError(
-                f"For {pa}, TFR metadata has no 'sample' column. "
+                f"For {pa}, TFR metadata is missing {missing}. "
                 f"Columns are: {meta.columns.tolist()}"
             )
 
-        # make sure TFR 'sample' is integer
-        meta["sample"] = meta["sample"].astype(int)
+        meta["trialsnum"] = meta["trialsnum"].astype(int)
 
-        # ----- 3) merge on 'sample' (shared event index in raw) -----
+        # ----- 3) merge on 'trialsnum' -----
         meta = meta.reset_index().rename(columns={"index": "row_id"})
         merged = meta.merge(
-            sub_map[["sample", "sv_pain_para", "badtrial"]],
-            on="sample",
+            beh_sub,
+            on="trialsnum",
             how="inner"
         )
 
+        print(f"  TFR epochs: {len(meta)}, beh rows: {len(beh_sub)}, "
+              f"after merge: {len(merged)}")
+
         if merged.empty:
-            print(f"  {pa}: no overlapping trials by sample, skipping.")
+            print(f"  {pa}: no overlapping trials by trialsnum, skipping.")
             continue
 
         good_idx = merged["row_id"].to_numpy(dtype=int)
@@ -2653,10 +2651,10 @@ if version == 9:
             continue
 
         # subset TFR data to matched trials
-        data_match = data[good_idx, :, :, :]     # (n_match, n_chan, n_freq, n_time)
+        data_match = data[good_idx, :, :, :]   # (n_match, n_chan, n_freq, n_time)
         merged = merged.reset_index(drop=True)
 
-        # ----- 4) filter for good trials + finite sv_pain_para -----
+        # ----- 4) filter for good EEG trials + finite sv_pain_para -----
         bad = merged["badtrial"].to_numpy(dtype=float)
         sv = merged["sv_pain_para"].to_numpy(dtype=float)
 
@@ -2679,7 +2677,6 @@ if version == 9:
         betas_sub = np.zeros((n_chan, n_freq, n_time), dtype=float)
 
         # ----- 6) regression at each (chan, freq, time): power ~ sv_z -----
-        # beta = cov(power, sv_z) / var(sv_z)
         for ci in range(n_chan):
             Pw_ci = data_good[:, ci, :, :]      # (n_trials, n_freq, n_time)
             Pw_flat = Pw_ci.reshape(n_trials, -1)
@@ -2709,6 +2706,7 @@ if version == 9:
         print("Saved beta maps for sv_pain_para to:", group_dir)
         print("Shapes: all_betas:", all_betas.shape)
         print("Subjects:", used_subs)
+
 
 ### old
 
