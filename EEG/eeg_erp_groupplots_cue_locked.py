@@ -82,8 +82,8 @@ elif version == 8:
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 elif version == 9:
-    outpath = opj(outpathall, 'statistics_response/tfr_mod_9_v9_sv_pain_para')
-    outfigpath = opj(outpathall, 'figures_response/tfr_mod_9_v9_sv_pain_para_4')
+    outpath = opj(outpathall, 'statistics_new/tfr_mod_9_v9_sv_pain_para_RT_control')
+    outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para_RT_control')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 
@@ -1484,279 +1484,14 @@ if version == 8:
 
 
 
-# 9 
-# TFR beta maps for sv_pain_para (cue-locked)
-if version == 9: 
-    from scipy.stats import ttest_1samp
-    from statsmodels.stats.multitest import fdrcorrection
-    from mne.channels import make_standard_montage
-
-    print("\n--- Version 9: TFR betas for sv_pain_para (ROI-based bands, RESPONSE-LOCKED) ---")
-
-    group_dir = Path(outpath)  # already tfr_mod_9_v9_sv_pain_para
-    betas_file = group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy"
-    freqs_file = group_dir / "tfr_beta_sv_pain_para_freqs.npy"
-    times_file = group_dir / "tfr_beta_sv_pain_para_times.npy"
-    ch_file    = group_dir / "tfr_beta_sv_pain_para_ch_names.npy"
-
-    if not (betas_file.exists() and freqs_file.exists()
-            and times_file.exists() and ch_file.exists()):
-        raise FileNotFoundError("One or more TFR beta files are missing in "
-                                f"{group_dir}")
-
-    # shape: (n_subj, n_chan, n_freq, n_time)
-    all_betas = np.load(betas_file)
-    freqs     = np.load(freqs_file)                    # (n_freq,)
-    times     = np.load(times_file)                    # (n_time,)
-    ch_names  = np.load(ch_file, allow_pickle=True).tolist()
-
-    n_subj, n_chan, n_freq, n_time = all_betas.shape
-
-    print("all_betas shape:", all_betas.shape)
-    print("n_freq:", len(freqs), "n_time:", len(times), "n_chan:", len(ch_names))
-
-    # ------------------------------------------------------------------
-    # Build MNE Info (needed for topomaps & timecourses)
-    # ------------------------------------------------------------------
-    dt = float(times[1] - times[0])   # seconds
-    sfreq = 1.0 / dt                  # e.g. ~256 Hz
-
-    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
-    montage = make_standard_montage('standard_1020')
-    info.set_montage(montage)
-
-    # exclude mastoids (same as ERP code)
-    chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
-
-    # ----- RESPONSE-LOCKED plotting times and xticks -----
-    plot_times_resp = [-0.5, -0.3, -0.1, -0.05]     # in seconds
-    xticks_resp_ms  = np.arange(-800, 300, 200)   # for timecourses (in ms)
-
-    # ------------------------------------------------------------------
-    # Define *only* the hypotheses we care about
-    # NOTE: time_window is now response-locked: -0.5 to 0.1 s
-    # ------------------------------------------------------------------
-    HYPOTHESES = {
-        "beta_motor": {
-            "band_name": "beta",
-            "freq_range": (13., 30.),
-            "roi": ["C3", "CP3", "C4", "CP4", "Cz"],
-            "time_window": (-0.4, 0.0),
-        },
-        "theta_frontal": {
-            "band_name": "theta",
-            "freq_range": (4., 7.),
-            "roi": ["Fz", "FCz"],
-            "time_window": (-0.4, 0.0),
-        },
-    }
-    
-
-    # bins relative to response for reporting (also negative)
-    BIN_DEF = [
-        ("early", -0.4, -0.25),
-        ("mid",   -0.25, -0.1),
-        ("late",  -0.1,  0.0),
-    ]
-
-
-    # ------------------------------------------------------------------
-    # Loop over hypotheses: average over freq, then ERP-style stats & plots
-    # ------------------------------------------------------------------
-    for hyp_key, cfg in HYPOTHESES.items():
-        band_name = cfg["band_name"]
-        f_lo, f_hi = cfg["freq_range"]
-        roi = cfg["roi"]
-        t_lo_roi, t_hi_roi = cfg["time_window"]
-
-        print(f"\n--- Hypothesis: {hyp_key} | band {band_name} {f_lo}-{f_hi} Hz, "
-              f"ROI={roi}, t={t_lo_roi}-{t_hi_roi} s ---")
-
-        # Frequency mask for this band
-        f_mask = (freqs >= f_lo) & (freqs <= f_hi)
-        if not np.any(f_mask):
-            print("  -> No frequencies in this range, skipping.")
-            continue
-
-        # 1) Collapse freq dimension within band
-        all_betas_band = all_betas[:, :, f_mask, :].mean(axis=2)
-
-        # 2) Grand-average betas across subjects: (n_chan, n_time)
-        beta_mean_band = all_betas_band.mean(axis=0)
-
-        # ROI indices
-        roi_idx = [ch_names.index(c) for c in roi if c in ch_names]
-        if len(roi_idx) == 0:
-            print("  -> ROI channels not found in ch_names, skipping tests.")
-            sig_mask_band = np.zeros((n_time, n_chan), dtype=bool)
-            pvals_fdr_band = np.full((n_time, n_chan), np.nan)
-            beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
-            continue
-
-        # ---- ROI-mean tests in main window (-0.5 to 0.1 s) ----
-        time_mask_roi = (times >= t_lo_roi) & (times <= t_hi_roi)
-        if np.any(time_mask_roi):
-            beta_roi = all_betas[:, roi_idx][:, :, f_mask][:, :, :, time_mask_roi].mean(axis=(1, 2, 3))
-            t_full, p_full = ttest_1samp(beta_roi, popmean=0.0)
-            print(f"  ROI-mean beta {band_name} {t_lo_roi*1000:.0f}-{t_hi_roi*1000:.0f} ms: "
-                  f"t({len(beta_roi)-1}) = {t_full:.3f}, p = {p_full:.3g}")
-        else:
-            print("  -> No time points in main ROI window for ROI-mean test.")
-
-        # ---- binned ROI tests (early/mid/late) ----
-        for bin_name, tb_lo, tb_hi in BIN_DEF:
-            tb_mask = (times >= tb_lo) & (times <= tb_hi)
-            if not np.any(tb_mask):
-                continue
-            beta_bin = all_betas[:, roi_idx][:, :, f_mask][:, :, :, tb_mask].mean(axis=(1, 2, 3))
-            t_bin, p_bin = ttest_1samp(beta_bin, popmean=0.0)
-            print(f"    Bin {bin_name} {tb_lo*1000:.0f}-{tb_hi*1000:.0f} ms: "
-                  f"t({len(beta_bin)-1}) = {t_bin:.3f}, p = {p_bin:.3g}")
-
-        # 3) Second-level t-test vs 0 at each (chan, time) for plotting
-        tvals_band = np.zeros((n_time, n_chan))
-        pvals_band = np.zeros((n_time, n_chan))
-        for ti in range(n_time):
-            b_t = all_betas_band[:, :, ti]
-            t_t, p_t = ttest_1samp(
-                b_t,
-                popmean=0.0,
-                axis=0,
-                nan_policy="omit"
-            )
-            tvals_band[ti, :] = t_t
-            pvals_band[ti, :] = p_t
-
-        # 4) FDR correction ONLY in ROI × main time window
-        sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
-        pvals_fdr_band = np.full_like(pvals_band, np.nan)
-        if np.any(time_mask_roi):
-            p_roi = pvals_band[time_mask_roi][:, roi_idx]
-            p_flat = p_roi.reshape(-1)
-            rej_flat, p_fdr_flat = fdrcorrection(p_flat, alpha=0.05)
-            sig_roi = rej_flat.reshape(p_roi.shape)
-            p_fdr_roi = p_fdr_flat.reshape(p_roi.shape)
-            sig_mask_band[np.ix_(time_mask_roi, roi_idx)] = sig_roi
-            pvals_fdr_band[np.ix_(time_mask_roi, roi_idx)] = p_fdr_roi
-            print(f"  -> Significant samples in ROI window (FDR, p<0.05): "
-                  f"{sig_mask_band.sum()}")
-
-        # 5) Wrap mean beta into Evoked for plotting
-        beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
-
-        # ------------------------------------------------------------------
-        # 5A. Topomaps at selected times (response-locked)
-        # ------------------------------------------------------------------
-        times_pos = [np.abs(beta_ev_band.times - t).argmin() for t in plot_times_resp]
-
-        for tidx, tpos in enumerate(times_pos):
-            fig, topo_axis = plt.subplots(figsize=(1.5, 1.5))
-
-            p_row = pvals_fdr_band[tpos, :]
-            valid = np.isfinite(p_row)
-            sig_non_mastoid = valid & (p_row < 0.05) & chankeep
-            mask = sig_non_mastoid
-
-            vmax = np.max(np.abs(beta_ev_band.data))
-            im, _ = plot_topomap(
-                beta_ev_band.data[:, tpos],
-                pos=beta_ev_band.info,
-                mask=mask,
-                mask_params=dict(marker='o',
-                                 markerfacecolor='w',
-                                 markeredgecolor='k',
-                                 linewidth=0,
-                                 markersize=3),
-                cmap='RdBu_r',
-                show=False,
-                ch_type='eeg',
-                outlines='head',
-                extrapolate='head',
-                vlim=(-vmax, vmax),
-                axes=topo_axis,
-                sensors=False,
-                contours=0,
-            )
-            topo_axis.set_title(
-                f"{band_name} {int(plot_times_resp[tidx]*1000)} ms",
-                fontdict={'size': param['labelfontsize']-1},
-                pad=0.1
-            )
-
-            fig.savefig(
-                opj(outfigpath,
-                    f'{fig_prefix}v9_{hyp_key}_{band_name}_topo_beta_t{int(plot_times_resp[tidx]*1000)}.svg'),
-                dpi=600,
-                bbox_inches='tight'
-            )
-
-            if tidx + 1 == len(times_pos):
-                fig2, ax = plt.subplots(figsize=(0.3, 1.2))
-                cbar = fig2.colorbar(im, cax=ax, orientation='vertical', aspect=1)
-                cbar.set_label(
-                    f'Beta (power ~ sv_pain_para)\n{band_name}',
-                    rotation=270, labelpad=12,
-                    fontdict={'fontsize': param['labelfontsize']-1}
-                )
-                cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
-                fig2.savefig(
-                    opj(outfigpath,
-                        f'{fig_prefix}v9_{hyp_key}_{band_name}_topo_beta_cbar.svg'),
-                    dpi=600,
-                    bbox_inches='tight'
-                )
-
-        # ------------------------------------------------------------------
-        # 5B. Timecourses at ROI channels with sig bar (response-locked)
-        # ------------------------------------------------------------------
-        for c in roi:
-            if c not in beta_ev_band.ch_names:
-                continue
-
-            pick = beta_ev_band.ch_names.index(c)
-            fig, ax = plt.subplots(1, 1, figsize=(4, 2.5))
-
-            y = beta_ev_band.data[pick, :]
-            ax.plot(times * 1000, y, linewidth=2)
-
-            ax.set_xlabel('Time (ms)',
-                          fontdict={'size': param['labelfontsize']})
-            ax.set_ylabel(f'Beta ({band_name}, power ~ sv_pain_para) – {c}',
-                          fontdict={'size': param['labelfontsize']})
-            ax.axhline(0, linestyle='--', color='gray')
-            ax.axvline(0, linestyle='--', color='gray')
-
-            timestep = 1000.0 / param['testresampfreq']
-            for tidx2, t_ms in enumerate(times * 1000):
-                if sig_mask_band[tidx2, pick]:
-                    ax.fill_between(
-                        [t_ms, t_ms + timestep],
-                        y.min() - 0.02,
-                        y.min() - 0.005,
-                        alpha=0.4,
-                        facecolor='red'
-                    )
-
-            ax.set_xticks(xticks_resp_ms)
-            ax.set_xticklabels([str(i) for i in xticks_resp_ms])
-            ax.tick_params(labelsize=param['ticksfontsize'])
-            fig.tight_layout()
-            fig.savefig(
-                opj(outfigpath,
-                    f'{fig_prefix}v9_{hyp_key}_{band_name}_timecourse_{c}.svg'),
-                dpi=600,
-                bbox_inches='tight'
-            )
-
-    print("\nVersion 9 ROI-based TFR plotting done (response-locked).\n")
-
-
-# if version == 9:
+# # 9 
+# # TFR beta maps for sv_pain_para (cue-locked)
+# if version == 9: 
 #     from scipy.stats import ttest_1samp
 #     from statsmodels.stats.multitest import fdrcorrection
 #     from mne.channels import make_standard_montage
 
-#     print("\n--- Version 9: TFR betas for sv_pain_para (ROI-based bands) ---")
+#     print("\n--- Version 9: TFR betas for sv_pain_para (ROI-based bands, RESPONSE-LOCKED) ---")
 
 #     group_dir = Path(outpath)  # already tfr_mod_9_v9_sv_pain_para
 #     betas_file = group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy"
@@ -1793,23 +1528,37 @@ if version == 9:
 #     # exclude mastoids (same as ERP code)
 #     chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
 
+#     # ----- RESPONSE-LOCKED plotting times and xticks -----
+#     plot_times_resp = [-0.5, -0.3, -0.1, -0.05]     # in seconds
+#     xticks_resp_ms  = np.arange(-800, 300, 200)   # for timecourses (in ms)
+
 #     # ------------------------------------------------------------------
 #     # Define *only* the hypotheses we care about
+#     # NOTE: time_window is now response-locked: -0.5 to 0.1 s
 #     # ------------------------------------------------------------------
 #     HYPOTHESES = {
-#         "theta_CP": {
+#         "beta_motor": {
+#             "band_name": "beta",
+#             "freq_range": (13., 30.),
+#             "roi": ["C3", "CP3", "C4", "CP4", "Cz"],
+#             "time_window": (-0.4, 0.0),
+#         },
+#         "theta_frontal": {
 #             "band_name": "theta",
 #             "freq_range": (4., 7.),
-#             "roi": ["Cz", "CPz", "Pz", "POz", "P1", "P2"],
-#             "time_window": (0.3, 0.8),
-#         },
-#         "alpha_frontal": {
-#             "band_name": "alpha",
-#             "freq_range": (8., 12.),
-#             "roi": ["Fz", "FCz", "F1", "F2", "F4"],
-#             "time_window": (0.3, 0.8),
+#             "roi": ["Fz", "FCz"],
+#             "time_window": (-0.4, 0.0),
 #         },
 #     }
+    
+
+#     # bins relative to response for reporting (also negative)
+#     BIN_DEF = [
+#         ("early", -0.4, -0.25),
+#         ("mid",   -0.25, -0.1),
+#         ("late",  -0.1,  0.0),
+#     ]
+
 
 #     # ------------------------------------------------------------------
 #     # Loop over hypotheses: average over freq, then ERP-style stats & plots
@@ -1830,7 +1579,6 @@ if version == 9:
 #             continue
 
 #         # 1) Collapse freq dimension within band
-#         #    all_betas_band: (n_subj, n_chan, n_time)
 #         all_betas_band = all_betas[:, :, f_mask, :].mean(axis=2)
 
 #         # 2) Grand-average betas across subjects: (n_chan, n_time)
@@ -1845,9 +1593,9 @@ if version == 9:
 #             beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
 #             continue
 
+#         # ---- ROI-mean tests in main window (-0.5 to 0.1 s) ----
 #         time_mask_roi = (times >= t_lo_roi) & (times <= t_hi_roi)
 #         if np.any(time_mask_roi):
-#             # shape: (subj, ROI, time_in_window) -> mean -> (subj,)
 #             beta_roi = all_betas[:, roi_idx][:, :, f_mask][:, :, :, time_mask_roi].mean(axis=(1, 2, 3))
 #             t_full, p_full = ttest_1samp(beta_roi, popmean=0.0)
 #             print(f"  ROI-mean beta {band_name} {t_lo_roi*1000:.0f}-{t_hi_roi*1000:.0f} ms: "
@@ -1855,11 +1603,7 @@ if version == 9:
 #         else:
 #             print("  -> No time points in main ROI window for ROI-mean test.")
 
-#         BIN_DEF = [
-#             ("early", 0.3, 0.5),
-#             ("mid",   0.5, 0.7),
-#             ("late",  0.7, 0.9),
-#         ]
+#         # ---- binned ROI tests (early/mid/late) ----
 #         for bin_name, tb_lo, tb_hi in BIN_DEF:
 #             tb_mask = (times >= tb_lo) & (times <= tb_hi)
 #             if not np.any(tb_mask):
@@ -1873,7 +1617,7 @@ if version == 9:
 #         tvals_band = np.zeros((n_time, n_chan))
 #         pvals_band = np.zeros((n_time, n_chan))
 #         for ti in range(n_time):
-#             b_t = all_betas_band[:, :, ti]   # (subj, chan)
+#             b_t = all_betas_band[:, :, ti]
 #             t_t, p_t = ttest_1samp(
 #                 b_t,
 #                 popmean=0.0,
@@ -1883,7 +1627,7 @@ if version == 9:
 #             tvals_band[ti, :] = t_t
 #             pvals_band[ti, :] = p_t
 
-#         # 4) FDR correction ONLY in ROI × main time window (for sig bars/dots)
+#         # 4) FDR correction ONLY in ROI × main time window
 #         sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
 #         pvals_fdr_band = np.full_like(pvals_band, np.nan)
 #         if np.any(time_mask_roi):
@@ -1897,18 +1641,18 @@ if version == 9:
 #             print(f"  -> Significant samples in ROI window (FDR, p<0.05): "
 #                   f"{sig_mask_band.sum()}")
 
-#         # 5) Wrap mean beta into Evoked for plotting (like beta_gavg in ERP)
+#         # 5) Wrap mean beta into Evoked for plotting
 #         beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
 
 #         # ------------------------------------------------------------------
-#         # 5A. Topomaps at selected times (like ERP v7)
+#         # 5A. Topomaps at selected times (response-locked)
 #         # ------------------------------------------------------------------
-#         times_pos = [np.abs(beta_ev_band.times - t).argmin() for t in plot_times]
+#         times_pos = [np.abs(beta_ev_band.times - t).argmin() for t in plot_times_resp]
 
 #         for tidx, tpos in enumerate(times_pos):
 #             fig, topo_axis = plt.subplots(figsize=(1.5, 1.5))
 
-#             p_row = pvals_fdr_band[tpos, :]     # (n_chan,)
+#             p_row = pvals_fdr_band[tpos, :]
 #             valid = np.isfinite(p_row)
 #             sig_non_mastoid = valid & (p_row < 0.05) & chankeep
 #             mask = sig_non_mastoid
@@ -1934,14 +1678,14 @@ if version == 9:
 #                 contours=0,
 #             )
 #             topo_axis.set_title(
-#                 f"{band_name} {int(plot_times[tidx]*1000)} ms",
+#                 f"{band_name} {int(plot_times_resp[tidx]*1000)} ms",
 #                 fontdict={'size': param['labelfontsize']-1},
 #                 pad=0.1
 #             )
 
 #             fig.savefig(
 #                 opj(outfigpath,
-#                     f'{fig_prefix}v9_{hyp_key}_{band_name}_topo_beta_t{int(plot_times[tidx]*1000)}.svg'),
+#                     f'{fig_prefix}v9_{hyp_key}_{band_name}_topo_beta_t{int(plot_times_resp[tidx]*1000)}.svg'),
 #                 dpi=600,
 #                 bbox_inches='tight'
 #             )
@@ -1963,7 +1707,7 @@ if version == 9:
 #                 )
 
 #         # ------------------------------------------------------------------
-#         # 5B. Timecourses at ROI channels with sig bar (like ERP v7)
+#         # 5B. Timecourses at ROI channels with sig bar (response-locked)
 #         # ------------------------------------------------------------------
 #         for c in roi:
 #             if c not in beta_ev_band.ch_names:
@@ -1972,7 +1716,7 @@ if version == 9:
 #             pick = beta_ev_band.ch_names.index(c)
 #             fig, ax = plt.subplots(1, 1, figsize=(4, 2.5))
 
-#             y = beta_ev_band.data[pick, :]      # beta over time
+#             y = beta_ev_band.data[pick, :]
 #             ax.plot(times * 1000, y, linewidth=2)
 
 #             ax.set_xlabel('Time (ms)',
@@ -1982,7 +1726,7 @@ if version == 9:
 #             ax.axhline(0, linestyle='--', color='gray')
 #             ax.axvline(0, linestyle='--', color='gray')
 
-#             timestep = 1000.0 / param['testresampfreq']   # ms
+#             timestep = 1000.0 / param['testresampfreq']
 #             for tidx2, t_ms in enumerate(times * 1000):
 #                 if sig_mask_band[tidx2, pick]:
 #                     ax.fill_between(
@@ -1993,8 +1737,8 @@ if version == 9:
 #                         facecolor='red'
 #                     )
 
-#             ax.set_xticks(np.arange(-200, 1200, 200))
-#             ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
+#             ax.set_xticks(xticks_resp_ms)
+#             ax.set_xticklabels([str(i) for i in xticks_resp_ms])
 #             ax.tick_params(labelsize=param['ticksfontsize'])
 #             fig.tight_layout()
 #             fig.savefig(
@@ -2004,7 +1748,263 @@ if version == 9:
 #                 bbox_inches='tight'
 #             )
 
-#     print("\nVersion 9 ROI-based TFR plotting done.\n")
+#     print("\nVersion 9 ROI-based TFR plotting done (response-locked).\n")
+
+
+if version == 9:
+    from scipy.stats import ttest_1samp
+    from statsmodels.stats.multitest import fdrcorrection
+    from mne.channels import make_standard_montage
+
+    print("\n--- Version 9: TFR betas for sv_pain_para (ROI-based bands) ---")
+
+    group_dir = Path(outpath)  # already tfr_mod_9_v9_sv_pain_para
+    betas_file = group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy"
+    freqs_file = group_dir / "tfr_beta_sv_pain_para_freqs.npy"
+    times_file = group_dir / "tfr_beta_sv_pain_para_times.npy"
+    ch_file    = group_dir / "tfr_beta_sv_pain_para_ch_names.npy"
+
+    if not (betas_file.exists() and freqs_file.exists()
+            and times_file.exists() and ch_file.exists()):
+        raise FileNotFoundError("One or more TFR beta files are missing in "
+                                f"{group_dir}")
+
+    # shape: (n_subj, n_chan, n_freq, n_time)
+    all_betas = np.load(betas_file)
+    freqs     = np.load(freqs_file)                    # (n_freq,)
+    times     = np.load(times_file)                    # (n_time,)
+    ch_names  = np.load(ch_file, allow_pickle=True).tolist()
+
+    n_subj, n_chan, n_freq, n_time = all_betas.shape
+
+    print("all_betas shape:", all_betas.shape)
+    print("n_freq:", len(freqs), "n_time:", len(times), "n_chan:", len(ch_names))
+
+    # ------------------------------------------------------------------
+    # Build MNE Info (needed for topomaps & timecourses)
+    # ------------------------------------------------------------------
+    dt = float(times[1] - times[0])   # seconds
+    sfreq = 1.0 / dt                  # e.g. ~256 Hz
+
+    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
+    montage = make_standard_montage('standard_1020')
+    info.set_montage(montage)
+
+    # exclude mastoids (same as ERP code)
+    chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
+
+    # ------------------------------------------------------------------
+    # Define *only* the hypotheses we care about
+    # ------------------------------------------------------------------
+    HYPOTHESES = {
+        "theta_CP": {
+            "band_name": "theta",
+            "freq_range": (4., 7.),
+            "roi": ["Cz", "CPz", "Pz", "POz", "P1", "P2"],
+            "time_window": (0.3, 0.8),
+        },
+        "alpha_frontal": {
+            "band_name": "alpha",
+            "freq_range": (8., 12.),
+            "roi": ["Fz", "FCz", "F1", "F2", "F4"],
+            "time_window": (0.3, 0.8),
+        },
+    }
+
+    # ------------------------------------------------------------------
+    # Loop over hypotheses: average over freq, then ERP-style stats & plots
+    # ------------------------------------------------------------------
+    for hyp_key, cfg in HYPOTHESES.items():
+        band_name = cfg["band_name"]
+        f_lo, f_hi = cfg["freq_range"]
+        roi = cfg["roi"]
+        t_lo_roi, t_hi_roi = cfg["time_window"]
+
+        print(f"\n--- Hypothesis: {hyp_key} | band {band_name} {f_lo}-{f_hi} Hz, "
+              f"ROI={roi}, t={t_lo_roi}-{t_hi_roi} s ---")
+
+        # Frequency mask for this band
+        f_mask = (freqs >= f_lo) & (freqs <= f_hi)
+        if not np.any(f_mask):
+            print("  -> No frequencies in this range, skipping.")
+            continue
+
+        # 1) Collapse freq dimension within band
+        #    all_betas_band: (n_subj, n_chan, n_time)
+        all_betas_band = all_betas[:, :, f_mask, :].mean(axis=2)
+
+        # 2) Grand-average betas across subjects: (n_chan, n_time)
+        beta_mean_band = all_betas_band.mean(axis=0)
+
+        # ROI indices
+        roi_idx = [ch_names.index(c) for c in roi if c in ch_names]
+        if len(roi_idx) == 0:
+            print("  -> ROI channels not found in ch_names, skipping tests.")
+            sig_mask_band = np.zeros((n_time, n_chan), dtype=bool)
+            pvals_fdr_band = np.full((n_time, n_chan), np.nan)
+            beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
+            continue
+
+        time_mask_roi = (times >= t_lo_roi) & (times <= t_hi_roi)
+        if np.any(time_mask_roi):
+            # shape: (subj, ROI, time_in_window) -> mean -> (subj,)
+            beta_roi = all_betas[:, roi_idx][:, :, f_mask][:, :, :, time_mask_roi].mean(axis=(1, 2, 3))
+            t_full, p_full = ttest_1samp(beta_roi, popmean=0.0)
+            print(f"  ROI-mean beta {band_name} {t_lo_roi*1000:.0f}-{t_hi_roi*1000:.0f} ms: "
+                  f"t({len(beta_roi)-1}) = {t_full:.3f}, p = {p_full:.3g}")
+        else:
+            print("  -> No time points in main ROI window for ROI-mean test.")
+
+        BIN_DEF = [
+            ("early", 0.3, 0.5),
+            ("mid",   0.5, 0.7),
+            ("late",  0.7, 0.9),
+        ]
+        for bin_name, tb_lo, tb_hi in BIN_DEF:
+            tb_mask = (times >= tb_lo) & (times <= tb_hi)
+            if not np.any(tb_mask):
+                continue
+            beta_bin = all_betas[:, roi_idx][:, :, f_mask][:, :, :, tb_mask].mean(axis=(1, 2, 3))
+            t_bin, p_bin = ttest_1samp(beta_bin, popmean=0.0)
+            print(f"    Bin {bin_name} {tb_lo*1000:.0f}-{tb_hi*1000:.0f} ms: "
+                  f"t({len(beta_bin)-1}) = {t_bin:.3f}, p = {p_bin:.3g}")
+
+        # 3) Second-level t-test vs 0 at each (chan, time) for plotting
+        tvals_band = np.zeros((n_time, n_chan))
+        pvals_band = np.zeros((n_time, n_chan))
+        for ti in range(n_time):
+            b_t = all_betas_band[:, :, ti]   # (subj, chan)
+            t_t, p_t = ttest_1samp(
+                b_t,
+                popmean=0.0,
+                axis=0,
+                nan_policy="omit"
+            )
+            tvals_band[ti, :] = t_t
+            pvals_band[ti, :] = p_t
+
+        # 4) FDR correction ONLY in ROI × main time window (for sig bars/dots)
+        sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
+        pvals_fdr_band = np.full_like(pvals_band, np.nan)
+        if np.any(time_mask_roi):
+            p_roi = pvals_band[time_mask_roi][:, roi_idx]
+            p_flat = p_roi.reshape(-1)
+            rej_flat, p_fdr_flat = fdrcorrection(p_flat, alpha=0.05)
+            sig_roi = rej_flat.reshape(p_roi.shape)
+            p_fdr_roi = p_fdr_flat.reshape(p_roi.shape)
+            sig_mask_band[np.ix_(time_mask_roi, roi_idx)] = sig_roi
+            pvals_fdr_band[np.ix_(time_mask_roi, roi_idx)] = p_fdr_roi
+            print(f"  -> Significant samples in ROI window (FDR, p<0.05): "
+                  f"{sig_mask_band.sum()}")
+
+        # 5) Wrap mean beta into Evoked for plotting (like beta_gavg in ERP)
+        beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
+
+        # ------------------------------------------------------------------
+        # 5A. Topomaps at selected times (like ERP v7)
+        # ------------------------------------------------------------------
+        times_pos = [np.abs(beta_ev_band.times - t).argmin() for t in plot_times]
+
+        for tidx, tpos in enumerate(times_pos):
+            fig, topo_axis = plt.subplots(figsize=(1.5, 1.5))
+
+            p_row = pvals_fdr_band[tpos, :]     # (n_chan,)
+            valid = np.isfinite(p_row)
+            sig_non_mastoid = valid & (p_row < 0.05) & chankeep
+            mask = sig_non_mastoid
+
+            vmax = np.max(np.abs(beta_ev_band.data))
+            im, _ = plot_topomap(
+                beta_ev_band.data[:, tpos],
+                pos=beta_ev_band.info,
+                mask=mask,
+                mask_params=dict(marker='o',
+                                 markerfacecolor='w',
+                                 markeredgecolor='k',
+                                 linewidth=0,
+                                 markersize=3),
+                cmap='RdBu_r',
+                show=False,
+                ch_type='eeg',
+                outlines='head',
+                extrapolate='head',
+                vlim=(-vmax, vmax),
+                axes=topo_axis,
+                sensors=False,
+                contours=0,
+            )
+            topo_axis.set_title(
+                f"{band_name} {int(plot_times[tidx]*1000)} ms",
+                fontdict={'size': param['labelfontsize']-1},
+                pad=0.1
+            )
+
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}v9_{hyp_key}_{band_name}_topo_beta_t{int(plot_times[tidx]*1000)}.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+
+            if tidx + 1 == len(times_pos):
+                fig2, ax = plt.subplots(figsize=(0.3, 1.2))
+                cbar = fig2.colorbar(im, cax=ax, orientation='vertical', aspect=1)
+                cbar.set_label(
+                    f'Beta (power ~ sv_pain_para)\n{band_name}',
+                    rotation=270, labelpad=12,
+                    fontdict={'fontsize': param['labelfontsize']-1}
+                )
+                cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
+                fig2.savefig(
+                    opj(outfigpath,
+                        f'{fig_prefix}v9_{hyp_key}_{band_name}_topo_beta_cbar.svg'),
+                    dpi=600,
+                    bbox_inches='tight'
+                )
+
+        # ------------------------------------------------------------------
+        # 5B. Timecourses at ROI channels with sig bar (like ERP v7)
+        # ------------------------------------------------------------------
+        for c in roi:
+            if c not in beta_ev_band.ch_names:
+                continue
+
+            pick = beta_ev_band.ch_names.index(c)
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2.5))
+
+            y = beta_ev_band.data[pick, :]      # beta over time
+            ax.plot(times * 1000, y, linewidth=2)
+
+            ax.set_xlabel('Time (ms)',
+                          fontdict={'size': param['labelfontsize']})
+            ax.set_ylabel(f'Beta ({band_name}, power ~ sv_pain_para) – {c}',
+                          fontdict={'size': param['labelfontsize']})
+            ax.axhline(0, linestyle='--', color='gray')
+            ax.axvline(0, linestyle='--', color='gray')
+
+            timestep = 1000.0 / param['testresampfreq']   # ms
+            for tidx2, t_ms in enumerate(times * 1000):
+                if sig_mask_band[tidx2, pick]:
+                    ax.fill_between(
+                        [t_ms, t_ms + timestep],
+                        y.min() - 0.02,
+                        y.min() - 0.005,
+                        alpha=0.4,
+                        facecolor='red'
+                    )
+
+            ax.set_xticks(np.arange(-200, 1200, 200))
+            ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
+            ax.tick_params(labelsize=param['ticksfontsize'])
+            fig.tight_layout()
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}v9_{hyp_key}_{band_name}_timecourse_{c}.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+
+    print("\nVersion 9 ROI-based TFR plotting done.\n")
 
 # old ------------------------------------------------------------------------------------------------------------------------
 ##############################################################################################################################
