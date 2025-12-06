@@ -2576,35 +2576,34 @@ if version == 8:
 
 if version == 9:
     from mne.time_frequency import read_tfrs
-
+    
     print("\n--- Version 9 (simplified): TFR trial-wise betas for sv_pain_para ---")
-
+    
     # sanity checks on mod_data
     if "sv_pain_para" not in mod_data.columns:
         raise ValueError("sv_pain_para not found in mod_data columns.")
     if "trialsnum" not in mod_data.columns:
         raise ValueError("mod_data is missing 'trialsnum' column.")
-
+    
     group_dir = Path(outpath)
     group_dir.mkdir(parents=True, exist_ok=True)
-
-    all_betas = []     # list of (n_chan, n_freq, n_time)
+    
+    all_betas = []
     used_subs = []
-
+    
     for pa in part:
         print(f"\nSubject {pa}...")
-
-        # ----- 1) behaviour side -----
+    
+        # 1) behavioural side
         beh_sub = mod_data[mod_data["participant"] == pa].copy()
         if beh_sub.empty:
             print(f"  No behavioural rows in mod_data for {pa}, skipping.")
             continue
-
-        # keep only needed columns
+    
         beh_sub = beh_sub[["trialsnum", "sv_pain_para"]].copy()
         beh_sub["trialsnum"] = beh_sub["trialsnum"].astype(int)
-
-        # ----- 2) TFR side -----
+    
+        # 2) TFR side
         tfr_fname = opj(
             basepath,
             pa, "eeg", "tfr",
@@ -2614,87 +2613,99 @@ if version == 9:
             print(f"  No TFR file for {pa}, skipping.")
             continue
         print("  Reading TFR:", tfr_fname)
-
+    
         tfr_epo = read_tfrs(tfr_fname)[0]      # EpochsTFR
-        data = tfr_epo.data                    # (n_trials, n_chan, n_freq, n_time)
-        meta = tfr_epo.metadata.copy()
-
-        # check required columns in TFR metadata
-        needed_cols = ["trialsnum", "badtrial"]
-        missing = [c for c in needed_cols if c not in meta.columns]
-        if missing:
-            raise ValueError(
-                f"For {pa}, TFR metadata is missing {missing}. "
-                f"Columns are: {meta.columns.tolist()}"
-            )
-
+        data = tfr_epo.data                    # (n_trials_tfr, n_chan, n_freq, n_time)
+        n_trials_tfr = data.shape[0]
+    
+        # 3) ERP metadata (this is the ground truth for trialsnum + badtrial)
+        epo_fname = opj(
+            basepath,
+            pa, "eeg", "erps",
+            f"{pa}_decision_cues_singletrials-epo.fif"
+        )
+        epo = mne.read_epochs(epo_fname)
+        meta_erp = epo.metadata.copy()
+        n_trials_erp = len(meta_erp)
+    
+        print(f"  n_trials TFR: {n_trials_tfr}, n_trials ERP: {n_trials_erp}")
+    
+        # if they ever differ, be defensive and use the minimum length
+        n_use = min(n_trials_tfr, n_trials_erp)
+        if n_use < 5:
+            print(f"  {pa}: only {n_use} overlapping trials between ERP and TFR, skipping.")
+            continue
+    
+        # trim both to the common length
+        data = data[:n_use, :, :, :]
+        meta = meta_erp.iloc[:n_use].copy()
+    
+        # meta now has trialsnum + badtrial (and other columns if needed)
         meta["trialsnum"] = meta["trialsnum"].astype(int)
-
-        # ----- 3) merge on 'trialsnum' -----
+    
+        # 4) merge using ERP metadata (NOT tfr_epo.metadata!)
         meta = meta.reset_index().rename(columns={"index": "row_id"})
         merged = meta.merge(
             beh_sub,
             on="trialsnum",
             how="inner"
         )
-
-        print(f"  TFR epochs: {len(meta)}, beh rows: {len(beh_sub)}, "
-              f"after merge: {len(merged)}")
-
+    
+        print(f"  TFR/ERP trials used: {n_use}, beh rows: {len(beh_sub)}, after merge: {len(merged)}")
+    
         if merged.empty:
-            print(f"  {pa}: no overlapping trials by trialsnum, skipping.")
+            print(f"  {pa}: no overlapping trials by trialsnum even after ERP alignment, skipping.")
             continue
-
-        good_idx = merged["row_id"].to_numpy(dtype=int)
-        if len(good_idx) < 5:
-            print(f"  {pa}: only {len(good_idx)} trials after matching, skipping.")
+    
+        # 5) select only merged rows
+        # row_id tells you which-row in `meta`/TFR each behavioural trial corresponds to
+        idx_keep = merged["row_id"].to_numpy(dtype=int)
+        if len(idx_keep) < 5:
+            print(f"  {pa}: only {len(idx_keep)} trials after merge, skipping.")
             continue
-
-        # subset TFR data to matched trials
-        data_match = data[good_idx, :, :, :]   # (n_match, n_chan, n_freq, n_time)
-        merged = merged.reset_index(drop=True)
-
-        # ----- 4) filter for good EEG trials + finite sv_pain_para -----
-        bad = merged["badtrial"].to_numpy(dtype=float)
+    
+        data_good = data[idx_keep, :, :, :]         # (n_good, n_chan, n_freq, n_time)
+        bad = meta["badtrial"].to_numpy(dtype=float)[idx_keep]
         sv = merged["sv_pain_para"].to_numpy(dtype=float)
-
+    
+        # good EEG + finite sv
         keep = (bad == 0) & np.isfinite(sv)
         if keep.sum() < 5:
             print(f"  {pa}: <5 good trials after badtrial+sv filtering, skipping.")
             continue
-
-        data_good = data_match[keep, :, :, :]    # (n_good, n_chan, n_freq, n_time)
+    
+        data_good = data_good[keep, :, :, :]        # (n_good, n_chan, n_freq, n_time)
         sv_good = sv[keep]
-
-        # ----- 5) z-score sv within subject -----
+    
+        # 6) z-score sv within subject
         sv_z = (sv_good - sv_good.mean()) / sv_good.std()
         var_sv = sv_z.var()
         if var_sv == 0:
             print(f"  {pa}: sv_pain_para variance = 0 after filtering, skipping.")
             continue
-
+    
         n_trials, n_chan, n_freq, n_time = data_good.shape
         betas_sub = np.zeros((n_chan, n_freq, n_time), dtype=float)
-
-        # ----- 6) regression at each (chan, freq, time): power ~ sv_z -----
+    
+        # 7) regression at each (chan, freq, time): power ~ sv_z
         for ci in range(n_chan):
-            Pw_ci = data_good[:, ci, :, :]      # (n_trials, n_freq, n_time)
+            Pw_ci = data_good[:, ci, :, :]       # (n_trials, n_freq, n_time)
             Pw_flat = Pw_ci.reshape(n_trials, -1)
             cov_flat = (Pw_flat * sv_z[:, None]).mean(axis=0) \
                        - Pw_flat.mean(axis=0) * sv_z.mean()
             beta_flat = cov_flat / var_sv
             betas_sub[ci] = beta_flat.reshape(n_freq, n_time)
-
+    
         all_betas.append(betas_sub)
         used_subs.append(pa)
         print(f"  {pa}: beta map computed, n_good trials = {n_trials}")
-
-    # ----- 7) save group-level arrays -----
+    
+    # 8) save across subjects
     if len(all_betas) == 0:
         print("No subjects with valid beta maps; nothing saved.")
     else:
         all_betas = np.stack(all_betas)  # (n_subj, n_chan, n_freq, n_time)
-
+    
         np.save(group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy", all_betas)
         np.save(group_dir / "tfr_beta_sv_pain_para_subjects.npy",
                 np.array(used_subs, dtype=object))
@@ -2702,7 +2713,7 @@ if version == 9:
         np.save(group_dir / "tfr_beta_sv_pain_para_times.npy", tfr_epo.times)
         np.save(group_dir / "tfr_beta_sv_pain_para_ch_names.npy",
                 np.array(tfr_epo.ch_names, dtype=object))
-
+    
         print("Saved beta maps for sv_pain_para to:", group_dir)
         print("Shapes: all_betas:", all_betas.shape)
         print("Subjects:", used_subs)
