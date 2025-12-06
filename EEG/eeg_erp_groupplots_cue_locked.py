@@ -1527,7 +1527,15 @@ if version == 9:
     # ------------------------------------------------------------------
     dt = float(times[1] - times[0])   # seconds
     sfreq = 1.0 / dt                  # e.g. ~256 Hz
+
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
+
+    # >>> ADD THIS <<<
+    from mne.channels import make_standard_montage
+    montage = make_standard_montage('standard_1020')
+    info.set_montage(montage)
+    # <<< END ADD >>>
+
 
     # exclude mastoids (same as ERP code)
     chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
