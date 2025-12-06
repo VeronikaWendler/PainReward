@@ -83,7 +83,7 @@ elif version == 8:
         os.mkdir(outfigpath)
 elif version == 9:
     outpath = opj(outpathall, 'statistics_new/tfr_mod_9_v9_sv_pain_para')
-    outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para_2')
+    outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para_3')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 
@@ -1486,14 +1486,16 @@ if version == 8:
 
 
 # 9 
-# TFR beta maps for sv_pain_para (cue-locked) ----------------------------------------------------------------------
-# using fdr correction instead of bonferroni as it might be less conservative 
+# TFR beta maps for sv_pain_para (cue-locked), hypothesis-driven ROIs
+# theta (CPz/Pz/Cz) and frontal alpha (Fz/FCz)
+# ----------------------------------------------------------------------
 
 if version == 9:
     from scipy.stats import ttest_1samp
     from statsmodels.stats.multitest import fdrcorrection
+    from mne.channels import make_standard_montage
 
-    print("\n--- Version 9: TFR betas for sv_pain_para (band-limited, ERP-style) ---")
+    print("\n--- Version 9: TFR betas for sv_pain_para (ROI-based bands) ---")
 
     group_dir = Path(outpath)  # already tfr_mod_9_v9_sv_pain_para
     betas_file = group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy"
@@ -1524,8 +1526,6 @@ if version == 9:
     sfreq = 1.0 / dt                  # e.g. ~256 Hz
 
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
-
-    from mne.channels import make_standard_montage
     montage = make_standard_montage('standard_1020')
     info.set_montage(montage)
 
@@ -1533,26 +1533,39 @@ if version == 9:
     chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
 
     # ------------------------------------------------------------------
-    # Define frequency bands (you can tweak these)
+    # Define *only* the hypotheses we care about
     # ------------------------------------------------------------------
-    BANDS = {
-        "delta": (0.5, 4.),
-        "theta": (4., 7.),
-        "alpha": (8., 12.),
-        "beta":  (13., 30.),
-        "low_gamma": (31., 45.)
+    HYPOTHESES = {
+        "theta_CP": {
+            "band_name": "theta",
+            "freq_range": (4., 7.),
+            "roi": ["Cz", "CPz", "Pz"],
+            "time_window": (0.3, 0.8),
+        },
+        "alpha_frontal": {
+            "band_name": "alpha",
+            "freq_range": (8., 12.),
+            "roi": ["Fz", "FCz"],
+            "time_window": (0.3, 0.8),
+        },
     }
 
     # ------------------------------------------------------------------
-    # Loop over bands: average over freq, then do ERP-style stats & plots
+    # Loop over hypotheses: average over freq, then ERP-style stats & plots
     # ------------------------------------------------------------------
-    for band_name, (f_lo, f_hi) in BANDS.items():
-        print(f"\n--- Band: {band_name} ({f_lo}-{f_hi} Hz) ---")
+    for hyp_key, cfg in HYPOTHESES.items():
+        band_name = cfg["band_name"]
+        f_lo, f_hi = cfg["freq_range"]
+        roi = cfg["roi"]
+        t_lo_roi, t_hi_roi = cfg["time_window"]
+
+        print(f"\n--- Hypothesis: {hyp_key} | band {band_name} {f_lo}-{f_hi} Hz, "
+              f"ROI={roi}, t={t_lo_roi}-{t_hi_roi} s ---")
 
         # Frequency mask for this band
         f_mask = (freqs >= f_lo) & (freqs <= f_hi)
         if not np.any(f_mask):
-            print(f"  -> No frequencies in this range, skipping.")
+            print("  -> No frequencies in this range, skipping.")
             continue
 
         # 1) Collapse freq dimension within band
@@ -1563,7 +1576,6 @@ if version == 9:
         beta_mean_band = all_betas_band.mean(axis=0)
 
         # 3) Second-level t-test vs 0 at each (chan, time)
-        #    We'll store as (n_time, n_chan) to match your ERP pvals shape.
         tvals_band = np.zeros((n_time, n_chan))
         pvals_band = np.zeros((n_time, n_chan))
 
@@ -1579,22 +1591,18 @@ if version == 9:
             tvals_band[ti, :] = t_t
             pvals_band[ti, :] = p_t
 
-        # 4) FDR correction restricted to ROI × time window
-        # ------------------------------------------------
-        roi = ['Cz', 'CPz', 'Pz']
+        #
         roi_idx = [ch_names.index(c) for c in roi if c in ch_names]
 
         if len(roi_idx) == 0:
-            print("  -> ROI channels not found in ch_names, skipping FDR for this band.")
+            print("  -> ROI channels not found in ch_names, skipping FDR.")
             sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
             pvals_fdr_band = np.full_like(pvals_band, np.nan)
         else:
-            # time window (in seconds)
-            t_lo_roi, t_hi_roi = 0.3, 0.8
             time_mask = (times >= t_lo_roi) & (times <= t_hi_roi)
 
             if not np.any(time_mask):
-                print("  -> No time points in ROI window, skipping FDR for this band.")
+                print("  -> No time points in ROI window, skipping FDR.")
                 sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
                 pvals_fdr_band = np.full_like(pvals_band, np.nan)
             else:
@@ -1609,7 +1617,7 @@ if version == 9:
                 sig_roi = rej_flat.reshape(p_roi.shape)
                 p_fdr_roi = p_fdr_flat.reshape(p_roi.shape)
 
-                # now build full-size arrays and fill only ROI×window
+                # full-size arrays, fill only ROI×window
                 sig_mask_band = np.zeros_like(pvals_band, dtype=bool)
                 pvals_fdr_band = np.full_like(pvals_band, np.nan)
 
@@ -1622,9 +1630,7 @@ if version == 9:
         # 5) Wrap mean beta into Evoked for plotting (like beta_gavg in ERP)
         beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
 
-        # ------------------------------------------------------------------
-        # 5A. Topomaps at selected times (like ERP v7)
-        # ------------------------------------------------------------------
+    
         times_pos = [np.abs(beta_ev_band.times - t).argmin() for t in plot_times]
 
         for tidx, tpos in enumerate(times_pos):
@@ -1663,7 +1669,7 @@ if version == 9:
 
             fig.savefig(
                 opj(outfigpath,
-                    f'{fig_prefix}v9_{band_name}_topo_beta_t{int(plot_times[tidx]*1000)}.svg'),
+                    f'{fig_prefix}v9_{hyp_key}_{band_name}_topo_beta_t{int(plot_times[tidx]*1000)}.svg'),
                 dpi=600,
                 bbox_inches='tight'
             )
@@ -1679,15 +1685,12 @@ if version == 9:
                 cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
                 fig2.savefig(
                     opj(outfigpath,
-                        f'{fig_prefix}v9_{band_name}_topo_beta_cbar.svg'),
+                        f'{fig_prefix}v9_{hyp_key}_{band_name}_topo_beta_cbar.svg'),
                     dpi=600,
                     bbox_inches='tight'
                 )
 
-        # ------------------------------------------------------------------
-        # 5B. Timecourses at ROI channels with sig bar (like ERP v7)
-        # ------------------------------------------------------------------
-        for c in chan_to_plot:
+        for c in roi:   
             if c not in beta_ev_band.ch_names:
                 continue
 
@@ -1699,7 +1702,7 @@ if version == 9:
 
             ax.set_xlabel('Time (ms)',
                           fontdict={'size': param['labelfontsize']})
-            ax.set_ylabel(f'Beta ({band_name}, power ~ sv_pain_para)',
+            ax.set_ylabel(f'Beta ({band_name}, power ~ sv_pain_para) – {c}',
                           fontdict={'size': param['labelfontsize']})
             ax.axhline(0, linestyle='--', color='gray')
             ax.axvline(0, linestyle='--', color='gray')
@@ -1721,12 +1724,12 @@ if version == 9:
             fig.tight_layout()
             fig.savefig(
                 opj(outfigpath,
-                    f'{fig_prefix}v9_{band_name}_timecourse_{c}.svg'),
+                    f'{fig_prefix}v9_{hyp_key}_{band_name}_timecourse_{c}.svg'),
                 dpi=600,
                 bbox_inches='tight'
             )
 
-    print("\nVersion 9 band-wise TFR plotting done (ERP-style).\n")
+    print("\nVersion 9 ROI-based TFR plotting done.\n")
 
 # old ------------------------------------------------------------------------------------------------------------------------
 ##############################################################################################################################
