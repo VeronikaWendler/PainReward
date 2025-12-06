@@ -2568,6 +2568,9 @@ if version == 8:
 # trial-wise TFR betas for sv_pain_para
 
 
+# ----------------------------------------------------------------------------------------------------------------------------------------------
+# trial-wise TFR betas for sv_pain_para
+
 if version == 9:
     from mne.time_frequency import read_tfrs
 
@@ -2576,10 +2579,13 @@ if version == 9:
     # sanity checks on trial_map
     if "sv_pain_para" not in trial_map.columns:
         raise ValueError("sv_pain_para not found in trial_map columns.")
-    if "trialsnum" not in trial_map.columns:
-        raise ValueError("trial_map is missing 'trialsnum'. "
-                         "Current columns: "
-                         f"{[c for c in trial_map.columns if 'trialsnum' in c]}")
+
+    for col in ["sample", "badtrial", "participant_id"]:
+        if col not in trial_map.columns:
+            raise ValueError(
+                f"trial_map is missing required column '{col}'. "
+                f"Current columns: {trial_map.columns.tolist()}"
+            )
 
     group_dir = Path(outpath)
     group_dir.mkdir(parents=True, exist_ok=True)
@@ -2596,49 +2602,49 @@ if version == 9:
             print(f"  No rows in trial_map for {pa}, skipping.")
             continue
 
-        # we need ERP trials (trialsnum_x), sv_pain_para and badtrial
-        needed_cols = ["trialsnum", "sv_pain_para", "badtrial"]
+        # we need cue sample index, sv_pain_para and badtrial
+        needed_cols = ["sample", "sv_pain_para", "badtrial"]
         missing = [c for c in needed_cols if c not in sub_map.columns]
         if missing:
             raise ValueError(f"For {pa}, trial_map is missing columns: {missing}")
 
-        # make sure trialsnum_x is integer
-        sub_map["trialsnum"] = sub_map["trialsnum"].astype(int)
+        # make sure 'sample' is integer
+        sub_map["sample"] = sub_map["sample"].astype(int)
 
+        # ----- 2) TFR side -----
         tfr_fname = opj(
-            basepath,        
+            basepath,
             pa, "eeg", "tfr",
             f"{pa}_decision_cues_epochs-tfr.h5"
         )
         if not os.path.exists(tfr_fname):
             print(f"  No TFR file for {pa}, skipping.")
             continue
-        print("Looking for TFR:", tfr_fname)
-
+        print("  Looking for TFR:", tfr_fname)
 
         tfr_epo = read_tfrs(tfr_fname)[0]   # EpochsTFR
         data = tfr_epo.data                 # (n_trials, n_chan, n_freq, n_time)
         meta = tfr_epo.metadata.copy()
 
-        if "trialsnum" not in meta.columns:
+        if "sample" not in meta.columns:
             raise ValueError(
-                f"For {pa}, TFR metadata has no 'trialsnum'. "
+                f"For {pa}, TFR metadata has no 'sample' column. "
                 f"Columns are: {meta.columns.tolist()}"
             )
 
-        # make sure TFR trialsnum is integer
-        meta["trialsnum"] = meta["trialsnum"].astype(int)
+        # make sure TFR 'sample' is integer
+        meta["sample"] = meta["sample"].astype(int)
 
-        # ----- 3) merge on trialsnum (TFR) vs trialsnum_x (ERP/behaviour) -----
+        # ----- 3) merge on 'sample' (shared event index in raw) -----
         meta = meta.reset_index().rename(columns={"index": "row_id"})
         merged = meta.merge(
-            sub_map[["trialsnum", "sv_pain_para", "badtrial"]],
-            on="trialsnum",
+            sub_map[["sample", "sv_pain_para", "badtrial"]],
+            on="sample",
             how="inner"
-            )
+        )
 
         if merged.empty:
-            print(f"  {pa}: no overlapping trials by trialsnum, skipping.")
+            print(f"  {pa}: no overlapping trials by sample, skipping.")
             continue
 
         good_idx = merged["row_id"].to_numpy(dtype=int)
@@ -2703,7 +2709,6 @@ if version == 9:
         print("Saved beta maps for sv_pain_para to:", group_dir)
         print("Shapes: all_betas:", all_betas.shape)
         print("Subjects:", used_subs)
-
 
 ### old
 
