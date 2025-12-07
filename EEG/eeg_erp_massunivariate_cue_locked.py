@@ -1629,9 +1629,8 @@ elif version == 4:
 
 if version == 5:
     print("\n Between-subjects subj-level GLM ---")
-
-    # ------------------------------------------------------------------
-    # get group-level subject-averaged ERPs; contains 1 epoch per sub
+    lpp_roi_chs = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz' ]
+    lpp_tmin, lpp_tmax = 0.4, 0.8   # cue-locked LPP window (400–800 ms)
     
     group_dir = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives" / "group_level"
 
@@ -1836,102 +1835,7 @@ if version == 5:
         
         
         
-    # cluster test on v–a difference effect maps
-    # ------------------------------------------------------------------
-    def run_group_cluster_diff_va(subdir_name, zscore_reg=False, zscore_rt=False):
-        print(f"\n --- Running cluster-based v–a difference GLM: {subdir_name} ---")
-        variant_dir = Path(outpath) / (subdir_name + "_cluster")
-        variant_dir.mkdir(parents=True, exist_ok=True)
-
-        rt_vals = subj_reg["rt"].to_numpy(dtype=float)
-
-        # same v/a pairs as for beta_diff
-        diff_pairs_v_a = [
-            ('v_painlevel_subj',   'a_painlevel_subj',   'pain'),
-            ('v_moneylevel_subj',  'a_moneylevel_subj',  'money'),
-            ('v_interaction_subj', 'a_interaction_subj', 'interaction'),
-        ]
-
-        for v_name, a_name, label in diff_pairs_v_a:
-            print(f"v–a diff cluster: {label}")
-
-            # ---------------------- effect for v ----------------------
-            x_v = subj_reg[v_name].to_numpy(dtype=float)
-            x_rt = rt_vals.copy()
-
-            if zscore_reg:
-                x_v = stats.zscore(x_v)
-            if zscore_rt:
-                x_rt = stats.zscore(x_rt)
-
-            X_cov = np.column_stack([np.ones(n_subj), x_rt])
-            beta_cov, _, _, _ = np.linalg.lstsq(X_cov, x_v, rcond=None)
-            x_v_res = x_v - X_cov @ beta_cov
-
-            # ---------------------- effect for a ----------------------
-            x_a = subj_reg[a_name].to_numpy(dtype=float)
-            x_rt2 = rt_vals.copy()
-
-            if zscore_reg:
-                x_a = stats.zscore(x_a)
-            if zscore_rt:
-                x_rt2 = stats.zscore(x_rt2)
-
-            X_cov_a = np.column_stack([np.ones(n_subj), x_rt2])
-            beta_cov_a, _, _, _ = np.linalg.lstsq(X_cov_a, x_a, rcond=None)
-            x_a_res = x_a - X_cov_a @ beta_cov_a
-
-            # only keep subjects that are finite & have finite EEG
-            eeg_finite = np.all(np.isfinite(data.reshape(n_subj, -1)), axis=1)
-            keep = (
-                np.isfinite(x_v_res) &
-                np.isfinite(x_a_res) &
-                eeg_finite
-            )
-
-            if keep.sum() < 5:
-                print(f"  skipping {label} in {subdir_name}: only {keep.sum()} valid subjects")
-                continue
-
-            x_v_k = x_v_res[keep]
-            x_a_k = x_a_res[keep]
-            data_k = data[keep, :, :]   # (n_kept, n_chan, n_time)
-            n_kept = data_k.shape[0]
-
-            effect_v = np.empty_like(data_k)
-            effect_a = np.empty_like(data_k)
-            for i_sub in range(n_kept):
-                effect_v[i_sub] = x_v_k[i_sub] * data_k[i_sub]
-                effect_a[i_sub] = x_a_k[i_sub] * data_k[i_sub]
-
-            # v – a difference map per subject
-            effect_diff = effect_v - effect_a  # (n_kept, n_chan, n_time)
-
-            # cluster test: (subjects, times, channels)
-            testdata = np.swapaxes(effect_diff, 2, 1)
-
-            if not isinstance(param['cluster_threshold'], dict):
-                p_thresh = param['cluster_threshold'] / 2
-                thr = -stats.t.ppf(p_thresh, n_kept - 1)
-            else:
-                thr = param['cluster_threshold']
-
-            tval_diff, clusters, cluster_p_values, _ = st_clust_1s_ttest(
-                testdata,
-                n_jobs=param["njobs"],
-                threshold=thr,
-                adjacency=connect,
-                n_permutations=param['nperms'],
-                buffer_size=None
-            )
-
-            pvals_diff = np.ones_like(tval_diff)
-            for c, p_val in zip(clusters, cluster_p_values):
-                pvals_diff[c] = p_val
-
-            # save: shape (n_times, n_channels)
-            np.save(variant_dir / f'groupglm_v_minus_a_tval_{label}.npy', tval_diff)
-            np.save(variant_dir / f'groupglm_v_minus_a_pval_{label}.npy', pvals_diff)
+ 
 
     # ------------------------------------------------------------------
     # three variants: NO_Zscoring, Zscoring, PartZscoring
@@ -1977,117 +1881,166 @@ if version == 5:
     )
     
     
-    # v–a difference cluster tests for each variant
-    run_group_cluster_diff_va(
-        subdir_name="NO_Zscoring",
-        zscore_reg=False,
-        zscore_rt=False
-    )
-
-    run_group_cluster_diff_va(
-        subdir_name="Zscoring",
-        zscore_reg=True,
-        zscore_rt=True
-    )
-
-    run_group_cluster_diff_va(
-        subdir_name="PartZscoring",
-        zscore_reg=False,
-        zscore_rt=True
-    )
-
-    # ------------------------------------------------------------------
-    #difference maps v – a for each drift regressor (pain/money/interaction)
-    #Here done for the NO_Zscoring variant.
+    #----------------------------------------------------------------------------------
+    print("\n ROI-level between-subject correlations: each regressor vs LPP (cue-locked, version 5)")
     
-    diff_pairs_v_a = [
-        ('v_painlevel_subj',        'a_painlevel_subj',        'pain'),
-        ('v_moneylevel_subj',       'a_moneylevel_subj',       'money'),
-        ('v_interaction_subj',      'a_interaction_subj',      'interaction'),
-    ]
-
-    for v_name, a_name, label in diff_pairs_v_a:
-        if v_name not in betas_noz or a_name not in betas_noz:
-            print(f"Skipping v–a diff for {label}: missing {v_name} or {a_name} in NO_Zscoring betas.")
+    from scipy.stats import pearsonr
+    
+    # 1) Extract subject-level LPP amplitude from cue-locked group_epochs
+    roi_picks = mne.pick_channels(group_epochs.info['ch_names'], lpp_roi_chs)
+    if len(roi_picks) == 0:
+        raise RuntimeError(f"None of the LPP ROI channels found in data: {lpp_roi_chs}")
+    
+    tmask = (group_epochs.times >= lpp_tmin) & (group_epochs.times <= lpp_tmax)
+    if not np.any(tmask):
+        raise RuntimeError(f"No time points in LPP window {lpp_tmin}–{lpp_tmax} s for cue-locked epochs.")
+    
+    # data: (subjects, channels, times)
+    data_roi = data[:, roi_picks][:, :, tmask]   # subj × ROI-ch × time
+    y_LPP = data_roi.mean(axis=(1, 2))           # subj-level LPP amplitude
+    
+    # 2) For each regressor, correlate with LPP (raw and RT-controlled)
+    corr_rows = []
+    
+    rt_vals = subj_reg["rt"].to_numpy(dtype=float)
+    
+    for regvar in regvars_v5:
+        x = subj_reg[regvar].to_numpy(dtype=float)
+    
+        # valid subjects for this regressor
+        keep = np.isfinite(x) & np.isfinite(y_LPP) & np.isfinite(rt_vals)
+        n = keep.sum()
+        if n < 5:
+            print(f"Skipping ROI correlation for {regvar}: only {n} valid subjects")
             continue
-
-        beta_v = betas_noz[v_name].data   # (n_chan, n_time)
-        beta_a = betas_noz[a_name].data   # (n_chan, n_time)
-        beta_diff = beta_v - beta_a
-
-        np.save(noz_dir_v5 / f'groupglm_beta_v_minus_a_{label}.npy', beta_diff)
-
-    #----------------------------------------------------------------------------------------------------------
-    print("\n ROI-level R squared comparisons (v vs a)")
-
-    roi_chs = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']  # LPP
-    tmin, tmax = 0.4, 0.8
-
-    # subject × channels × times
-    roi_picks = mne.pick_channels(group_epochs.info['ch_names'], roi_chs)
-    tmask = (group_epochs.times >= tmin) & (group_epochs.times <= tmax)
-
-    data_roi = data[:, roi_picks][:, :, tmask]    # subj × ROIchan × timewin
-    y = data_roi.mean(axis=(1, 2))                # subj-level LPP amplitude
-
-    R2_rows = []
-    attr_labels = ['pain', 'money', 'interaction']
-
-    for v_col, a_col, attr_label in zip(v_subj_cols, a_subj_cols, attr_labels):
-
-        vals_v = subj_reg[v_col].to_numpy(dtype=float)
-        vals_a = subj_reg[a_col].to_numpy(dtype=float)
-        vals_rt = subj_reg["rt"].to_numpy(dtype=float)
-
-        keep = (
-            np.isfinite(vals_v) &
-            np.isfinite(vals_a) &
-            np.isfinite(vals_rt) &
-            np.isfinite(y)
-        )
-
-        if keep.sum() < 5:
-            print(f"Skipping ROI R² for {attr_label}: only {keep.sum()} valid subjects")
-            continue
-
-        yk = y[keep]
-        v_k = vals_v[keep]
-        a_k = vals_a[keep]
-        rt_k = vals_rt[keep]
-
-        # regression: y ~ Intercept + reg + RT
-        X_v = np.column_stack([np.ones(keep.sum()), v_k, rt_k])
-        X_a = np.column_stack([np.ones(keep.sum()), a_k, rt_k])
-
-        beta_v, _, _, _ = np.linalg.lstsq(X_v, yk, rcond=None)
-        pred_v = X_v @ beta_v
-
-        beta_a, _, _, _ = np.linalg.lstsq(X_a, yk, rcond=None)
-        pred_a = X_a @ beta_a
-
-        ss_tot = np.sum((yk - yk.mean())**2)
-        ss_res_v = np.sum((yk - pred_v)**2)
-        ss_res_a = np.sum((yk - pred_a)**2)
-
-        R2_v = 1.0 - ss_res_v / ss_tot if ss_tot > 0 else np.nan
-        R2_a = 1.0 - ss_res_a / ss_tot if ss_tot > 0 else np.nan
-
-        R2_rows.append(dict(
-            attribute=attr_label,   # 'pain','money','interaction'
-            R2_v=R2_v,
-            R2_a=R2_a,
-            delta_R2=R2_v - R2_a
+    
+        x_k = x[keep]
+        y_k = y_LPP[keep]
+        rt_k = rt_vals[keep]
+    
+        # --- simple Pearson correlation (no RT control) ---
+        r_raw, p_raw = pearsonr(x_k, y_k)
+    
+        # --- partial correlation controlling for RT ---
+        # regress y on RT -> residuals
+        X_rt = np.column_stack([np.ones(n), rt_k])
+        beta_y, _, _, _ = np.linalg.lstsq(X_rt, y_k, rcond=None)
+        y_res = y_k - X_rt @ beta_y
+    
+        # regress x on RT -> residuals
+        beta_x, _, _, _ = np.linalg.lstsq(X_rt, x_k, rcond=None)
+        x_res = x_k - X_rt @ beta_x
+    
+        r_par, p_par = pearsonr(x_res, y_res)
+    
+        print(f"{regvar}: r_raw = {r_raw:.3f} (p={p_raw:.3g}), r_partial_RT = {r_par:.3f} (p={p_par:.3g}), n={n}")
+    
+        corr_rows.append(dict(
+            regressor=regvar,
+            n=n,
+            r_raw=r_raw,
+            p_raw=p_raw,
+            r_partial_RT=r_par,
+            p_partial_RT=p_par
         ))
+    
+    # save summary table
+    if len(corr_rows) > 0:
+        corr_df = pd.DataFrame(corr_rows)
+        corr_df.to_csv(noz_dir_v5 / "ROI_LPP_vs_each_regressor.csv", index=False)
+        print("Saved ROI_LPP_vs_each_regressor.csv in", noz_dir_v5)
+        
+    #---------------------------------------------------------------------------------------------------------------------
+    from mne.stats import permutation_cluster_1samp_test
+    
+    print("\n LPP ROI time-resolved cluster regression (RT-controlled)")
+    
+    # ------------------------------------------------------------------
+    # LPP ROI + time window (cue-locked)
+    lpp_roi_chs = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz' ]
+    lpp_tmin, lpp_tmax = 0.4, 0.8
+    
+    # channel & time selection
+    roi_picks = mne.pick_channels(group_epochs.info['ch_names'], lpp_roi_chs)
+    if len(roi_picks) == 0:
+        raise RuntimeError(f"LPP ROI channels not found: {lpp_roi_chs}")
+    
+    times = group_epochs.times
+    tmask = (times >= lpp_tmin) & (times <= lpp_tmax)
+    if not np.any(tmask):
+        raise RuntimeError(f"No time points in {lpp_tmin}–{lpp_tmax}s window")
+    
+    # subj × ROIchan × time
+    data_roi = data[:, roi_picks][:, :, tmask]
+    
+    # mean across ROI channels → subj × time
+    data_roi_mean = data_roi.mean(axis=1)
+    
+    rt_vals = subj_reg["rt"].to_numpy(dtype=float)
+    
+    roi_cluster_dir = Path(outpath) / "LPP_ROI_cluster"
+    roi_cluster_dir.mkdir(parents=True, exist_ok=True)
+    
+    # ------------------------------------------------------------------
+    # Run one regressor at a time
+    for regvar in regvars_v5:
+        print(f"\nLPP ROI cluster test for regressor: {regvar}")
+    
+        x = subj_reg[regvar].to_numpy(dtype=float)
+    
+        keep = (
+            np.isfinite(x) &
+            np.isfinite(rt_vals) &
+            np.all(np.isfinite(data_roi_mean), axis=1)
+        )
+    
+        if keep.sum() < 5:
+            print(f"  Skipping {regvar}: only {keep.sum()} valid subjects")
+            continue
+    
+        x_k  = x[keep]
+        rt_k = rt_vals[keep]
+        y_k  = data_roi_mean[keep]    # subj × time
+        n_k  = y_k.shape[0]
+    
+        # --------------------------------------------------------------
+        # RT-controlled regressor (residualisation)
+        X_rt = np.column_stack([np.ones(n_k), rt_k])
+        beta_cov, _, _, _ = np.linalg.lstsq(X_rt, x_k, rcond=None)
+        x_res = x_k - X_rt @ beta_cov
+    
+        # --------------------------------------------------------------
+        # Subject-level effect maps: subj × time
+        effect = np.zeros_like(y_k)
+        for s in range(n_k):
+            effect[s] = x_res[s] * y_k[s]
+    
+        # --------------------------------------------------------------
+        # Cluster test over TIME ONLY
+        t_obs, clusters, cluster_p, _ = permutation_cluster_1samp_test(
+            effect,
+            n_permutations=5000,
+            threshold=None,
+            tail=0,
+            out_type='mask',
+            verbose=False
+        )
+    
+        # build time-resolved p-value vector
+        pvals = np.ones(effect.shape[1])
+        for clu, p in zip(clusters, cluster_p):
+            pvals[clu] = p
+    
+        # save
+        np.save(roi_cluster_dir / f"LPPROI_tval_{regvar}.npy", t_obs)
+        np.save(roi_cluster_dir / f"LPPROI_pval_{regvar}.npy", pvals)
+    
+        print(f"  Saved LPP ROI cluster results for {regvar}")
 
-    if len(R2_rows) > 0:
-        R2_df = pd.DataFrame(R2_rows)
-        R2_df.to_csv(noz_dir_v5 / 'ROI_R2_v_vs_a.csv', index=False)
-        print("Saved ROI_R2_v_vs_a.csv in", noz_dir_v5)
-
-    print(f"\nVersion 5 finished. Subject-level GLM results saved in:\n  {noz_dir_v5}\n  {z_dir_v5}\n  {partz_dir_v5}")
-
-
-
+    
+    print(f"\nVersion 5 finished. Subject-level GLM + ROI correlations saved in:\n  {noz_dir_v5}\n  {z_dir_v5}\n  {partz_dir_v5}")
+    
+    
 #----------------------------------------------------------------------------------------------------------------------------------------------
 # ======================================================================
 # Version 6 – second-level GLM: subject β maps (from v=3) ~ HDDM drift
