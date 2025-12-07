@@ -1635,8 +1635,8 @@ if version == 5:
     
     group_dir = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives" / "group_level"
 
-    name = "decision"   # can be changed to passive for comparison purposes later on
-    group_epochs_fname = group_dir / f"{name}_resp_subaveraged.fif"             #decision_resp_subaveraged
+    name = "decision_resp"
+    group_epochs_fname = group_dir / f"{name}_subaveraged-epo.fif"
 
     if not group_epochs_fname.exists():
         raise FileNotFoundError(f"Group-level epochs file not found: {group_epochs_fname}")
