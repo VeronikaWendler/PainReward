@@ -31,6 +31,7 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from statsmodels.distributions.empirical_distribution import ECDF
 from pathlib import Path
+from mne.stats import fdr_correction
 
 # Set bids directory
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
@@ -1673,6 +1674,7 @@ if version == 5:
         'v_moneylevel_subj',
         'v_interaction_subj',
         'v_mod_ndt',        
+        'k_pain_para',
     ]
     
     a_subj_cols = [
@@ -1960,6 +1962,11 @@ if version == 5:
     # save summary table
     if len(corr_rows) > 0:
         corr_df = pd.DataFrame(corr_rows)
+        pvals = corr_df["p_partial_RT"].to_numpy(dtype=float)
+        rej, pvals_fdr = fdr_correction(pvals, alpha=0.05, method='indep')
+
+        corr_df["p_partial_RT_FDR"] = pvals_fdr
+        corr_df["sig_partial_RT_FDR"] = rej  # True = survives FDR
         corr_df.to_csv(noz_dir_v5 / "ROI_LPP_vs_each_regressor.csv", index=False)
         print("Saved ROI_LPP_vs_each_regressor.csv in", noz_dir_v5)
     #---------------------------------------------------------------------------------------------------------------------
@@ -2023,6 +2030,11 @@ if version == 5:
     
     if len(corr_rows_N2) > 0:
         corr_df_N2 = pd.DataFrame(corr_rows_N2)
+        pvals_N2 = corr_df_N2["p_partial_RT"].to_numpy(dtype=float)
+        rej_N2, pvals_N2_fdr = fdr_correction(pvals_N2, alpha=0.05, method='indep')
+
+        corr_df_N2["p_partial_RT_FDR"] = pvals_N2_fdr
+        corr_df_N2["sig_partial_RT_FDR"] = rej_N2
         corr_df_N2.to_csv(noz_dir_v5 / "ROI_N2_vs_each_regressor.csv", index=False)
         print("Saved ROI_N2_vs_each_regressor.csv in", noz_dir_v5)
     
