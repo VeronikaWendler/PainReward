@@ -55,7 +55,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 9    # version 1 is for decision and version 2 is for passive phase 
+version = 5    # version 1 is for decision and version 2 is for passive phase 
 
 
 if version == 1:
