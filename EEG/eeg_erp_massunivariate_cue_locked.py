@@ -2301,8 +2301,7 @@ if version == 5:
     
         print(f"  Saved P3b ROI cluster results for {regvar}")
 
-    print(f"\nVersion 5 finished. Subject-level GLM + ROI correlations saved in:\n  {noz_dir_v5}\n  {z_dir_v5}\n  {partz_dir_v5}")----------------------------------------------------------------------------------------------------------------------
-
+    print(f"\nVersion 5 finished. Subject-level GLM + ROI correlations saved in:\n  {noz_dir_v5}\n  {z_dir_v5}\n  {partz_dir_v5}")
 
 # ======================================================================
 # Version 6 – second-level GLM: subject β maps (from v=3) ~ HDDM drift
