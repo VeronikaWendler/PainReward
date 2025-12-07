@@ -1633,13 +1633,11 @@ if version == 5:
     lpp_roi_chs = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz' ]
     lpp_tmin, lpp_tmax = 0.4, 0.8   
     
-    #frontal N2 ROI block
+    # frontal N2 ROI block
     n2_roi_chs = ['Fz', 'FCz', 'Cz']
     n2_tmin, n2_tmax = 0.20, 0.40
 
-    
     group_dir = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives" / "group_level"
-
     name = "decision"   # can be changed to passive for comparison purposes later on
     group_epochs_fname = group_dir / f"{name}_off+_subaveraged-epo.fif"
 
@@ -1660,7 +1658,6 @@ if version == 5:
     else:
         cluster_threshold = param['cluster_threshold']
 
-
     # subject IDs as in the ERP metadata
     subj_ids_epochs = group_epochs.metadata["participant_id"].tolist()
 
@@ -1668,26 +1665,17 @@ if version == 5:
     # subject-level regressors from HDDM outputs
     # rt for mod 9 and 10 (hddm model) is the same 
 
-
-    v_subj_cols = [
-        'v_painlevel_subj',
-        'v_moneylevel_subj',
-        'v_interaction_subj',
-        'v_mod_ndt',        
-        'k_pain_para',
-    ]
-    
+    # only boundary-separation (a) parameters
     a_subj_cols = [
         'a_painlevel_subj',
         'a_moneylevel_subj',
         'a_interaction_subj',
-        'a_mod_ndt',        
     ]
 
-    # subject-level v-betas + mean RT
-    subj_reg_v = (
+    # subject-level RT (from mod_data, model 9)
+    rt_df = (
         mod_data[mod_data["participant"].isin(subj_ids_epochs)]
-        .groupby("participant")[v_subj_cols + ["rt"]]
+        .groupby("participant")[["rt"]]
         .mean()
         .reset_index()
     )
@@ -1700,9 +1688,8 @@ if version == 5:
         .reset_index()
     )
 
-    # merge v + a on participant
-    subj_reg = subj_reg_v.merge(subj_reg_a, on="participant", how="inner")
-
+    # merge RT + a on participant
+    subj_reg = rt_df.merge(subj_reg_a, on="participant", how="inner")
 
     subj_ids_reg   = subj_reg["participant"].tolist()
     common_subj_ids = [s for s in subj_ids_epochs if s in subj_ids_reg]
@@ -1720,12 +1707,11 @@ if version == 5:
 
     assert data.shape[0] == n_subj == subj_reg.shape[0], "Subject mismatch after filtering!"
 
-
-    # final list of regressors, this contains both, the v ~ painlevel + moneylevel + interaction and the a ~ painlevel + moneylevel + interaction models betas
-    regvars_v5 = v_subj_cols + a_subj_cols
+    # final list of regressors: ONLY boundary separation terms
+    regvars_v5 = a_subj_cols
 
     # ------------------------------------------------------------------
-    #helper for cluster-based between-subject GLM (parallel to v1–3)
+    # helper for cluster-based between-subject GLM (parallel to v1–3)
     def run_group_cluster_variant(subdir_name, zscore_reg=False, zscore_rt=False):
         print(f"\n --- Running cluster-based group GLM: {subdir_name} ---")
         variant_dir = Path(outpath) / (subdir_name + "_cluster")
@@ -1744,11 +1730,7 @@ if version == 5:
             if zscore_rt:
                 x_rt = stats.zscore(x_rt)
 
-            # ----------------------------------------------------------
             # Orthogonalise regressor with respect to RT
-            # (equivalent to including RT in the design and taking
-            #  the effect of regvar while controlling for RT)
-
             X_cov = np.column_stack([np.ones(n_subj), x_rt])
             beta_cov, _, _, _ = np.linalg.lstsq(X_cov, x_reg, rcond=None)
             x_res = x_reg - X_cov @ beta_cov    # shape (n_subj,)
@@ -1762,10 +1744,7 @@ if version == 5:
             data_k  = data[keep, :, :]          # (n_subj_kept, n_chan, n_time)
             n_kept  = data_k.shape[0]
 
-            # ----------------------------------------------------------
-            # subject-level effect maps:
-            #   effect_s(chan, time) = x_res(s) * EEG_s(chan, time)
-
+            # subject-level effect maps: effect_s(chan, time) = x_res(s) * EEG_s(chan, time)
             effect_data = np.empty_like(data_k)
             for i_sub in range(n_kept):
                 effect_data[i_sub] = x_res_k[i_sub] * data_k[i_sub]
@@ -1796,7 +1775,6 @@ if version == 5:
         return variant_dir
 
     # helper to run one design variant (NO_Z, Z, PartZ) and save maps
-
     def run_group_glm_variant(subdir_name, zscore_reg=False, zscore_rt=False):
         print(f"\n--- Running group GLM variant: {subdir_name} ---")
 
@@ -1850,37 +1828,32 @@ if version == 5:
             np.save(variant_dir / f'groupglm_pval_{regvar}.npy', p_ev.data)
 
         return betas_variant, tvals_variant, pvals_variant, variant_dir
-        # ------------------------------------------------------------------
-        
-        
-        
- 
-
     # ------------------------------------------------------------------
+
     # three variants: NO_Zscoring, Zscoring, PartZscoring
     
-    # NO_Zscoring, using raw v/a betas, raw RT
+    # NO_Zscoring, using raw a betas, raw RT
     betas_noz, tvals_noz, pvals_noz, noz_dir_v5 = run_group_glm_variant(
         subdir_name="NO_Zscoring",
         zscore_reg=False,
         zscore_rt=False
     )
 
-    # Zscoring all predictors
+    # Zscoring all predictors (a, RT)
     betas_z, tvals_z, pvals_z, z_dir_v5 = run_group_glm_variant(
         subdir_name="Zscoring",
         zscore_reg=True,
         zscore_rt=True
     )
 
-    # PartZscoring, z-scored RT
+    # PartZscoring, z-scored RT only
     betas_partz, tvals_partz, pvals_partz, partz_dir_v5 = run_group_glm_variant(
         subdir_name="PartZscoring",
         zscore_reg=False,
         zscore_rt=True
     )
-    #----------------------------------------------------------------------------------
 
+    # cluster-based versions (optional – still loop over the 3 a-regressors)
     noz_cluster_dir_v5 = run_group_cluster_variant(
         subdir_name="NO_Zscoring",
         zscore_reg=False,
@@ -1917,7 +1890,6 @@ if version == 5:
     y_LPP = data_roi.mean(axis=(1, 2))           # subj-level LPP amplitude
     
     corr_rows = []
-    
     rt_vals = subj_reg["rt"].to_numpy(dtype=float)
     
     for regvar in regvars_v5:
@@ -1933,16 +1905,14 @@ if version == 5:
         y_k = y_LPP[keep]
         rt_k = rt_vals[keep]
     
-        # simple Pearson correlation (no RT control) ---
+        # simple Pearson correlation (no RT control)
         r_raw, p_raw = pearsonr(x_k, y_k)
     
-        # partial correlation controlling for RT ---
-        # regress y on RT -> residuals
+        # partial correlation controlling for RT
         X_rt = np.column_stack([np.ones(n), rt_k])
         beta_y, _, _, _ = np.linalg.lstsq(X_rt, y_k, rcond=None)
         y_res = y_k - X_rt @ beta_y
     
-        # regress x on RT -> residuals
         beta_x, _, _, _ = np.linalg.lstsq(X_rt, x_k, rcond=None)
         x_res = x_k - X_rt @ beta_x
     
@@ -1959,7 +1929,7 @@ if version == 5:
             p_partial_RT=p_par
         ))
     
-    # save summary table
+    # save summary table + FDR across the 3 a-hypotheses (LPP)
     if len(corr_rows) > 0:
         corr_df = pd.DataFrame(corr_rows)
         pvals = corr_df["p_partial_RT"].to_numpy(dtype=float)
@@ -1967,15 +1937,12 @@ if version == 5:
 
         corr_df["p_partial_RT_FDR"] = pvals_fdr
         corr_df["sig_partial_RT_FDR"] = rej  # True = survives FDR
-        corr_df.to_csv(noz_dir_v5 / "ROI_LPP_vs_each_regressor.csv", index=False)
-        print("Saved ROI_LPP_vs_each_regressor.csv in", noz_dir_v5)
+        corr_df.to_csv(noz_dir_v5 / "ROI_LPP_vs_a_regressors.csv", index=False)
+        print("Saved ROI_LPP_vs_a_regressors.csv in", noz_dir_v5)
+
     #---------------------------------------------------------------------------------------------------------------------
     print("\n ROI-level between-subject correlations: each regressor vs N2 (cue-locked, version 5)")
 
-    # N2 ROI definition
-    n2_roi_chs = ['Fz', 'FCz', 'Cz']
-    n2_tmin, n2_tmax = 0.20, 0.40
-    
     n2_picks = mne.pick_channels(group_epochs.info['ch_names'], n2_roi_chs)
     if len(n2_picks) == 0:
         raise RuntimeError(f"None of the N2 ROI channels found in data: {n2_roi_chs}")
@@ -2028,6 +1995,7 @@ if version == 5:
             p_partial_RT=p_par
         ))
     
+    # FDR across the 3 a-hypotheses (N2)
     if len(corr_rows_N2) > 0:
         corr_df_N2 = pd.DataFrame(corr_rows_N2)
         pvals_N2 = corr_df_N2["p_partial_RT"].to_numpy(dtype=float)
@@ -2035,26 +2003,89 @@ if version == 5:
 
         corr_df_N2["p_partial_RT_FDR"] = pvals_N2_fdr
         corr_df_N2["sig_partial_RT_FDR"] = rej_N2
-        corr_df_N2.to_csv(noz_dir_v5 / "ROI_N2_vs_each_regressor.csv", index=False)
-        print("Saved ROI_N2_vs_each_regressor.csv in", noz_dir_v5)
+        corr_df_N2.to_csv(noz_dir_v5 / "ROI_N2_vs_a_regressors.csv", index=False)
+        print("Saved ROI_N2_vs_a_regressors.csv in", noz_dir_v5)
     
+    #---------------------------------------------------------------------------------------------------------------------
+    print("\n ROI-level between-subject correlations: each regressor vs P3b (cue-locked, version 5)")
+    
+    # P3b ROI definition (cue-locked)
+    p3b_roi_chs = ['Pz', 'P3', 'P4']
+    p3b_tmin, p3b_tmax = 0.25, 0.55
+    
+    p3b_picks = mne.pick_channels(group_epochs.info['ch_names'], p3b_roi_chs)
+    if len(p3b_picks) == 0:
+        raise RuntimeError(f"None of the P3b ROI channels found in data: {p3b_roi_chs}")
+    
+    p3b_tmask = (group_epochs.times >= p3b_tmin) & (group_epochs.times <= p3b_tmax)
+    if not np.any(p3b_tmask):
+        raise RuntimeError(f"No time points in P3b window {p3b_tmin}–{p3b_tmax} s")
+    
+    # subj × ch × time → subj-level mean P3b
+    data_p3b = data[:, p3b_picks][:, :, p3b_tmask]
+    y_P3b = data_p3b.mean(axis=(1, 2))
+    
+    corr_rows_P3b = []
+    rt_vals = subj_reg["rt"].to_numpy(dtype=float)
+    
+    for regvar in regvars_v5:   # your 3 a-parameters
+        x = subj_reg[regvar].to_numpy(dtype=float)
+    
+        keep = np.isfinite(x) & np.isfinite(y_P3b) & np.isfinite(rt_vals)
+        n = keep.sum()
+        if n < 5:
+            print(f"Skipping P3b ROI correlation for {regvar}: only {n} valid subjects")
+            continue
+    
+        x_k = x[keep]
+        y_k = y_P3b[keep]
+        rt_k = rt_vals[keep]
+    
+        # raw correlation
+        r_raw, p_raw = pearsonr(x_k, y_k)
+    
+        # partial correlation controlling for RT
+        X_rt = np.column_stack([np.ones(n), rt_k])
+        beta_y, _, _, _ = np.linalg.lstsq(X_rt, y_k, rcond=None)
+        y_res = y_k - X_rt @ beta_y
+    
+        beta_x, _, _, _ = np.linalg.lstsq(X_rt, x_k, rcond=None)
+        x_res = x_k - X_rt @ beta_x
+    
+        r_par, p_par = pearsonr(x_res, y_res)
+    
+        print(
+            f"P3b {regvar}: r_raw = {r_raw:.3f} (p={p_raw:.3g}), "
+            f"r_partial_RT = {r_par:.3f} (p={p_par:.3g}), n={n}"
+        )
+    
+        corr_rows_P3b.append(dict(
+            regressor=regvar,
+            n=n,
+            r_raw=r_raw,
+            p_raw=p_raw,
+            r_partial_RT=r_par,
+            p_partial_RT=p_par
+        ))
+    
+    # FDR across the 3 a-hypotheses for P3b
+    if len(corr_rows_P3b) > 0:
+        corr_df_P3b = pd.DataFrame(corr_rows_P3b)
+        pvals_P3b = corr_df_P3b["p_partial_RT"].to_numpy(dtype=float)
+        rej_P3b, pvals_P3b_fdr = fdr_correction(pvals_P3b, alpha=0.05, method='indep')
+    
+        corr_df_P3b["p_partial_RT_FDR"] = pvals_P3b_fdr
+        corr_df_P3b["sig_partial_RT_FDR"] = rej_P3b
+    
+        corr_df_P3b.to_csv(noz_dir_v5 / "ROI_P3b_vs_a_regressors.csv", index=False)
+        print("Saved ROI_P3b_vs_a_regressors.csv in", noz_dir_v5)
     
     #---------------------------------------------------------------------------------------------------------------------
     from mne.stats import permutation_cluster_1samp_test
     
     print("\n LPP ROI time-resolved cluster regression (RT-controlled)")
-    
-    # ------------------------------------------------------------------
-    # LPP ROI + time window (cue-locked)
-    lpp_roi_chs = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz' ]
-    lpp_tmin, lpp_tmax = 0.4, 0.8
-    
-    #frontal N2 ROI block
-    n2_roi_chs = ['Fz', 'FCz', 'Cz']
-    n2_tmin, n2_tmax = 0.20, 0.40
 
-    
-    # channel & time selection
+    # channel & time selection for LPP
     roi_picks = mne.pick_channels(group_epochs.info['ch_names'], lpp_roi_chs)
     if len(roi_picks) == 0:
         raise RuntimeError(f"LPP ROI channels not found: {lpp_roi_chs}")
@@ -2064,18 +2095,14 @@ if version == 5:
     if not np.any(tmask):
         raise RuntimeError(f"No time points in {lpp_tmin}–{lpp_tmax}s window")
     
-    # subj × ROIchan × time
-    data_roi = data[:, roi_picks][:, :, tmask]
-    
-    # mean across ROI channels → subj × time
-    data_roi_mean = data_roi.mean(axis=1)
+    data_roi = data[:, roi_picks][:, :, tmask]      # subj × ROIchan × time
+    data_roi_mean = data_roi.mean(axis=1)           # subj × time
     
     rt_vals = subj_reg["rt"].to_numpy(dtype=float)
     
     roi_cluster_dir = Path(outpath) / "LPP_ROI_cluster"
     roi_cluster_dir.mkdir(parents=True, exist_ok=True)
     
-    # ------------------------------------------------------------------
     # Run one regressor at a time
     for regvar in regvars_v5:
         print(f"\nLPP ROI cluster test for regressor: {regvar}")
@@ -2097,19 +2124,16 @@ if version == 5:
         y_k  = data_roi_mean[keep]    # subj × time
         n_k  = y_k.shape[0]
     
-        # --------------------------------------------------------------
         # RT-controlled regressor (residualisation)
         X_rt = np.column_stack([np.ones(n_k), rt_k])
         beta_cov, _, _, _ = np.linalg.lstsq(X_rt, x_k, rcond=None)
         x_res = x_k - X_rt @ beta_cov
     
-        # --------------------------------------------------------------
         # Subject-level effect maps: subj × time
         effect = np.zeros_like(y_k)
         for s in range(n_k):
             effect[s] = x_res[s] * y_k[s]
     
-        # --------------------------------------------------------------
         # Cluster test over TIME ONLY
         t_obs, clusters, cluster_p, _ = permutation_cluster_1samp_test(
             effect,
@@ -2134,9 +2158,6 @@ if version == 5:
     #---------------------------------------------------------------------
     print("\n N2 ROI time-resolved cluster regression (RT-controlled)")
 
-    n2_roi_chs = ['Fz', 'FCz', 'Cz']
-    n2_tmin, n2_tmax = 0.20, 0.40
-    
     n2_picks = mne.pick_channels(group_epochs.info['ch_names'], n2_roi_chs)
     if len(n2_picks) == 0:
         raise RuntimeError(f"N2 ROI channels not found: {n2_roi_chs}")
@@ -2201,15 +2222,88 @@ if version == 5:
         np.save(n2_cluster_dir / f"N2ROI_pval_{regvar}.npy", pvals)
     
         print(f"  Saved N2 ROI cluster results for {regvar}")
-    
         
-        
+    #---------------------------------------------------------------------
+    print("\n P3b ROI time-resolved cluster regression (RT-controlled)")
     
+    # P3b ROI definition (cue-locked)
+    p3b_roi_chs = ['Pz', 'P3', 'P4']
+    p3b_tmin, p3b_tmax = 0.25, 0.55
     
-    print(f"\nVersion 5 finished. Subject-level GLM + ROI correlations saved in:\n  {noz_dir_v5}\n  {z_dir_v5}\n  {partz_dir_v5}")
+    # channel & time selection
+    p3b_picks = mne.pick_channels(group_epochs.info['ch_names'], p3b_roi_chs)
+    if len(p3b_picks) == 0:
+        raise RuntimeError(f"P3b ROI channels not found: {p3b_roi_chs}")
     
+    times = group_epochs.times
+    p3b_tmask = (times >= p3b_tmin) & (times <= p3b_tmax)
+    if not np.any(p3b_tmask):
+        raise RuntimeError(f"No time points in {p3b_tmin}–{p3b_tmax}s window")
     
-#----------------------------------------------------------------------------------------------------------------------------------------------
+    # subj × ROIchan × time
+    data_p3b_roi = data[:, p3b_picks][:, :, p3b_tmask]
+    # mean across ROI channels → subj × time
+    data_p3b_mean = data_p3b_roi.mean(axis=1)
+    
+    rt_vals = subj_reg["rt"].to_numpy(dtype=float)
+    
+    p3b_cluster_dir = Path(outpath) / "P3b_ROI_cluster"
+    p3b_cluster_dir.mkdir(parents=True, exist_ok=True)
+    
+    for regvar in regvars_v5:   # here regvars_v5 should be your 3 a_* columns
+        print(f"\nP3b ROI cluster test for regressor: {regvar}")
+    
+        x = subj_reg[regvar].to_numpy(dtype=float)
+    
+        keep = (
+            np.isfinite(x) &
+            np.isfinite(rt_vals) &
+            np.all(np.isfinite(data_p3b_mean), axis=1)
+        )
+    
+        if keep.sum() < 5:
+            print(f"  Skipping {regvar}: only {keep.sum()} valid subjects")
+            continue
+    
+        x_k  = x[keep]
+        rt_k = rt_vals[keep]
+        y_k  = data_p3b_mean[keep]   # subj × time
+        n_k  = y_k.shape[0]
+    
+        # residualise regressor wrt RT
+        X_rt = np.column_stack([np.ones(n_k), rt_k])
+        beta_cov, _, _, _ = np.linalg.lstsq(X_rt, x_k, rcond=None)
+        x_res = x_k - X_rt @ beta_cov
+    
+        # subject-level effect maps: subj × time
+        effect = np.zeros_like(y_k)
+        for s in range(n_k):
+            effect[s] = x_res[s] * y_k[s]
+    
+        # cluster test over TIME ONLY
+        t_obs, clusters, cluster_p, _ = permutation_cluster_1samp_test(
+            effect,
+            n_permutations=5000,
+            threshold=None,
+            tail=0,
+            out_type='mask',
+            verbose=False
+        )
+    
+        # build time-resolved p-value vector
+        pvals = np.ones(effect.shape[1])
+        for clu, p in zip(clusters, cluster_p):
+            pvals[clu] = p
+    
+        # save
+        np.save(p3b_cluster_dir / f"P3bROI_tval_{regvar}.npy", t_obs)
+        np.save(p3b_cluster_dir / f"P3bROI_pval_{regvar}.npy", pvals)
+    
+        print(f"  Saved P3b ROI cluster results for {regvar}")
+
+    print(f"\nVersion 5 finished. Subject-level GLM + ROI correlations saved in:\n  {noz_dir_v5}\n  {z_dir_v5}\n  {partz_dir_v5}")----------------------------------------------------------------------------------------------------------------------
+
+
 # ======================================================================
 # Version 6 – second-level GLM: subject β maps (from v=3) ~ HDDM drift
 # ======================================================================
