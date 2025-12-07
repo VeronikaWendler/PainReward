@@ -33,7 +33,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 9 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 5 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 # 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
@@ -110,7 +110,7 @@ outpath_glm = opj(outpath, stats_subdir)
 
 # 6 regressors total
 param = {
-    'alpha': 0.05,     # Bonferroni over 6 regressors for version 1-5 only
+    'alpha': 0.05,     
     'titlefontsize': 12,
     'labelfontsize': 12,
     'ticksfontsize': 11,
@@ -869,100 +869,86 @@ if version == 5:
 
     # ------------------------------------------------------------------
     # 
-    # v – a difference maps with cluster-corrected sig 
-    # 
-    diff_labels = ['pain', 'money', 'interaction']
-
-    # time indices which are the same as above
-    diff_times_pos = [np.abs(times - t).argmin() for t in plot_times]
-
-    # Bonferroni over 3 v–a contrasts
-    alpha_diff = 0.05 / 3
-
-    for label in diff_labels:
-        # load t and p for v–a difference 
-        tdiff_path = cluster_dir / f'groupglm_v_minus_a_tval_{label}.npy'
-        pdiff_path = cluster_dir / f'groupglm_v_minus_a_pval_{label}.npy'
-
-        if not (tdiff_path.exists() and pdiff_path.exists()):
-            print(f"No v–a cluster files for {label} in {cluster_dir}")
-            continue
-
-        tdiff = np.load(tdiff_path)   # (n_times, n_channels)
-        pdiff = np.load(pdiff_path)   # (n_times, n_channels)
-
-        for tidx, time_idx in enumerate(diff_times_pos):
-            t_time = plot_times[tidx]
-            t_ms = int(t_time * 1000)
-
-            p_row = pdiff[time_idx, :]  
-            mask = (p_row < alpha_diff) & chankeep
-
-            fig, ax = plt.subplots(figsize=(2, 2))
-            im, _ = plot_topomap(
-                tdiff[time_idx, :],
-                pos=info,
-                mask=mask,
-                mask_params=dict(marker='o',
-                                 markerfacecolor='w',
-                                 markeredgecolor='k',
-                                 linewidth=0,
-                                 markersize=3),
-                cmap='RdBu_r',
-                show=False,
-                ch_type='eeg',
-                outlines='head',
-                extrapolate='head',
-                axes=ax,
-                sensors=False,
-                contours=0,
-            )
-            ax.set_title(f'{label} (v - a), {t_ms} ms',
-                         fontdict={'size': param['labelfontsize']-1},
-                         pad=0.1)
-
-            # colourbar
-            fig2, cax = plt.subplots(figsize=(0.2, 1))
-            cbar = fig2.colorbar(im, cax=cax, orientation='vertical', aspect=1)
-            cbar.set_label('t (v - a)', rotation=270, labelpad=12,
-                           fontdict={'fontsize': param["labelfontsize"]-1})
-            cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
-            print("Saving Figures")
+    # ------------------------------------------------------------
+    # LPP ROI time-resolved cluster plots
+    # ------------------------------------------------------------
+    roi_cluster_dir = Path(outpath) / "LPP_ROI_cluster"
+    
+    if roi_cluster_dir.exists():
+    
+        print("\nPlotting LPP ROI time-cluster results (Version 5)")
+    
+        lpp_tmin, lpp_tmax = 0.4, 0.8
+        tmask = (times >= lpp_tmin) & (times <= lpp_tmax)
+        times_roi = times[tmask] * 1000  # ms
+    
+        for ridx, regvar in enumerate(regvars_v5):
+            regvarname = regvarsnames_v5[ridx]
+    
+            tfile = roi_cluster_dir / f"LPPROI_tval_{regvar}.npy"
+            pfile = roi_cluster_dir / f"LPPROI_pval_{regvar}.npy"
+    
+            if not (tfile.exists() and pfile.exists()):
+                continue
+    
+            tvals = np.load(tfile)   # (time,)
+            pvals = np.load(pfile)
+    
+            fig, ax = plt.subplots(figsize=(4, 2.5))
+    
+            ax.plot(times_roi, tvals, lw=2)
+            ax.axhline(0, linestyle='--', color='gray')
+    
+            # cluster significance bar
+            for i, t in enumerate(times_roi):
+                if pvals[i] < 0.05:
+                    ax.fill_between(
+                        [t, t + (times_roi[1] - times_roi[0])],
+                        tvals.min() - 0.1,
+                        tvals.min() - 0.05,
+                        color='red',
+                        alpha=0.4
+                    )
+    
+            ax.set_xlabel("Time (ms)")
+            ax.set_ylabel("Cluster t-value")
+            ax.set_title(f"LPP ROI – {regvarname}")
+            ax.tick_params(labelsize=param['ticksfontsize'])
+    
+            fig.tight_layout()
             fig.savefig(
-                opj(outfigpath,
-                    f'{fig_prefix}v5_topo_diff_{label}_{t_ms}ms.svg'),
+                opj(outfigpath, f"{fig_prefix}v5_LPPROI_timecluster_{regvar}.svg"),
                 dpi=600,
-                bbox_inches='tight'
+                bbox_inches="tight"
             )
-            fig2.savefig(
-                opj(outfigpath,
-                    f'{fig_prefix}v5_topo_diff_{label}_{t_ms}ms_cbar.svg'),
-                dpi=600,
-                bbox_inches='tight'
-            )
+    
+    else:
+        print("No LPP_ROI_cluster directory found — skipping ROI cluster plots.")
+        
+    roi_corr_file = Path(outpath) / "NO_Zscoring" / "ROI_LPP_vs_each_regressor.csv"
 
-
-    # ------------------------------------------------------------------
-    # ROI-level R² bar plot
-    roi_r2_file = Path(outpath) / "NO_Zscoring" / "ROI_R2_v_vs_a.csv"
-    if roi_r2_file.exists():
-        R2_df = pd.read_csv(roi_r2_file)
-        fig, ax = plt.subplots(figsize=(3, 3))
-        sns.barplot(data=R2_df, x="attribute", y="delta_R2", ax=ax)
-        ax.axhline(0, color='gray', linestyle='--')
-        ax.set_xlabel("Attribute")
-        ax.set_ylabel("Diff in Rsquared (v - a)")
-        ax.tick_params(labelsize=param['ticksfontsize'])
+    if roi_corr_file.exists():
+        df = pd.read_csv(roi_corr_file)
+    
+        fig, ax = plt.subplots(figsize=(4, 3))
+        sns.barplot(
+            data=df,
+            x="regressor",
+            y="r_partial_RT",
+            ax=ax
+        )
+        ax.axhline(0, linestyle='--', color='gray')
+        ax.set_ylabel("Partial r (LPP | RT)")
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
         fig.tight_layout()
         fig.savefig(
-            opj(outfigpath, f'{fig_prefix}v5_ROI_deltaR2_v_vs_a.svg'),
+            opj(outfigpath, f"{fig_prefix}v5_LPPROI_partialcorr.svg"),
             dpi=600,
-            bbox_inches='tight'
+            bbox_inches="tight"
         )
-        print("Saving Rsqured Figures")
-    else:
-        print("No ROI_R2_v_vs_a.csv found for version 5")
-        
+
+
+   
 
 
 

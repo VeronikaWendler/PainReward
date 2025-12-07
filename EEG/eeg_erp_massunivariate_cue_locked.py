@@ -1630,7 +1630,7 @@ elif version == 4:
 if version == 5:
     print("\n Between-subjects subj-level GLM ---")
     lpp_roi_chs = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz' ]
-    lpp_tmin, lpp_tmax = 0.4, 0.8   # cue-locked LPP window (400–800 ms)
+    lpp_tmin, lpp_tmax = 0.4, 0.8   
     
     group_dir = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives" / "group_level"
 
