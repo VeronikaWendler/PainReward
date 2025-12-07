@@ -63,7 +63,7 @@ elif version == 4:
         os.mkdir(outfigpath)
 elif version == 5:
     outpath = opj(outpathall, 'statistics_response/erps_massuni_drift_mod_9_subjectGLM')
-    outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_subjectGLM')
+    outfigpath = opj(outpathall, 'figures_response/erps_massuni_drift_mod_9_subjectGLM')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 elif version == 6:        
