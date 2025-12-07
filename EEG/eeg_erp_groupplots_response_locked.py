@@ -33,7 +33,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 7 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 5 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 # 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
@@ -62,7 +62,7 @@ elif version == 4:
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 elif version == 5:
-    outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_subjectGLM')
+    outpath = opj(outpathall, 'statistics_response/erps_massuni_drift_mod_9_subjectGLM')
     outfigpath = opj(outpathall, 'figures/erps_massuni_drift_mod_9_subjectGLM')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
@@ -736,11 +736,11 @@ if version == 5:
 
     stats_dir = Path(outpath) / stats_subdir
     cluster_dir = Path(outpath) / f"{stats_subdir}_cluster"
-
-    # Load group-level epochs for info / time axis
+    
+    
     group_dir = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives" / "group_level"
-    name = "decision"
-    group_epochs_fname = group_dir / f"{name}_off+_subaveraged-epo.fif"
+    name = "decision_resp"
+    group_epochs_fname = group_dir / f"{name}_subaveraged-epo.fif"
     group_epochs = mne.read_epochs(group_epochs_fname)
 
     info = group_epochs.info
@@ -757,7 +757,7 @@ if version == 5:
     ]
 
     # Time indices for topomaps (same as before)
-    plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
+    plot_times = [-0.4, -0.3, -0.2, -0.1, 0.0]
     times_pos = [np.abs(times - t).argmin() for t in plot_times]
 
     # Exclude mastoids
@@ -856,8 +856,10 @@ if version == 5:
                         alpha=0.4
                     )
 
-            ax.set_xticks(np.arange(-200, 1200, 200))
-            ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
+            #ax.set_xticks(np.arange(-200, 1200, 200))
+            #ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
+            ax.set_xticks(np.arange(-500, 101, 100))
+            ax.set_xticklabels([str(i) for i in np.arange(-500, 101, 100)])
             ax.tick_params(labelsize=param['ticksfontsize'])
             fig.tight_layout()
             fig.savefig(
