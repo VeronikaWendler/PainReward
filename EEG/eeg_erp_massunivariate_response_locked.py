@@ -55,7 +55,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 7    # version 1 is for decision and version 2 is for passive phase 
+version = 5    # version 1 is for decision and version 2 is for passive phase 
 
 
 if version == 1:
@@ -1636,7 +1636,7 @@ if version == 5:
     group_dir = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives" / "group_level"
 
     name = "decision"   # can be changed to passive for comparison purposes later on
-    group_epochs_fname = group_dir / f"{name}_off+_subaveraged-epo.fif"
+    group_epochs_fname = group_dir / f"{name}_resp_subaveraged.fif"             #decision_resp_subaveraged
 
     if not group_epochs_fname.exists():
         raise FileNotFoundError(f"Group-level epochs file not found: {group_epochs_fname}")
@@ -2021,7 +2021,7 @@ if version == 5:
     print("\n ROI-level R squared comparisons (v vs a)")
 
     roi_chs = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']  # LPP
-    tmin, tmax = 0.4, 0.8
+    tmin, tmax = -0.5, -0.05
 
     # subject × channels × times
     roi_picks = mne.pick_channels(group_epochs.info['ch_names'], roi_chs)
