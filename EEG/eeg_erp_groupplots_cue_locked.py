@@ -707,10 +707,12 @@ elif version == 4:
 # -------------------------------------------------------------------------------------
 # Between-subject subject-level GLM 
 
+
 if version == 5:
     from pathlib import Path
 
-    stats_dir = Path(outpath) / stats_subdir
+    # Use the same glm_version / stats_subdir / fig_prefix as defined above
+    stats_dir   = Path(outpath) / stats_subdir
     cluster_dir = Path(outpath) / f"{stats_subdir}_cluster"
 
     # Load group-level epochs for info / time axis
@@ -719,35 +721,48 @@ if version == 5:
     group_epochs_fname = group_dir / f"{name}_off+_subaveraged-epo.fif"
     group_epochs = mne.read_epochs(group_epochs_fname)
 
-    info = group_epochs.info
+    info  = group_epochs.info
     times = group_epochs.times
 
-    # Regressors (must match massunivariate v5)
+    # Regressors: MUST match version-5 mass-univariate (only a_* terms)
     regvars_v5 = [
-        'v_painlevel_subj', 'v_moneylevel_subj', 'v_interaction_subj',
-        'a_painlevel_subj', 'a_moneylevel_subj', 'a_interaction_subj'
+        'a_painlevel_subj',
+        'a_moneylevel_subj',
+        'a_interaction_subj'
     ]
     regvarsnames_v5 = [
-        'V_pain_subj', 'V_money_subj', 'V_interaction_subj',
-        'A_pain_subj', 'A_money_subj', 'A_interaction_subj'
+        'A_pain_subj',
+        'A_money_subj',
+        'A_interaction_subj'
     ]
 
-    # Time indices for topomaps (same as before)
+    # Time indices for topomaps (same windows as other versions)
     plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
     times_pos = [np.abs(times - t).argmin() for t in plot_times]
 
     # Exclude mastoids
     chankeep = np.array([c not in ['M1', 'M2'] for c in info['ch_names']])
 
+    # For version 5 we rely ONLY on the cluster correction (space × time) per regressor.
+    # No extra Bonferroni across regressors here.
+    alpha_clust = 0.05
+
     # ------------------------------------------------------------------
     # Topomaps of subject-level betas with cluster-corrected mask
-    # 
+    # ------------------------------------------------------------------
     for ridx, regvar in enumerate(regvars_v5):
         regvarname = regvarsnames_v5[ridx]
 
+        beta_file   = stats_dir   / f'groupglm_beta_{regvar}.npy'
+        pfile_clust = cluster_dir / f'groupglm_cluster_pval_{regvar}.npy'
+
+        if not (beta_file.exists() and pfile_clust.exists()):
+            print(f"Skipping {regvar}: files not found in {stats_dir} / {cluster_dir}")
+            continue
+
         # load beta and cluster-corrected p-values
-        beta_data = np.load(stats_dir / f'groupglm_beta_{regvar}.npy')          # (n_chan, n_time)
-        pvals_clust = np.load(cluster_dir / f'groupglm_cluster_pval_{regvar}.npy')  # (n_time, n_chan)
+        beta_data   = np.load(beta_file)        # (n_chan, n_time)
+        pvals_clust = np.load(pfile_clust)      # (n_time, n_chan)
 
         # Wrap beta into an Evoked for convenience
         beta_ev = mne.EvokedArray(beta_data, info, tmin=times[0])
@@ -757,8 +772,8 @@ if version == 5:
             fig, topo_axis = plt.subplots(figsize=(1.5, 1.5))
 
             p_row = pvals_clust[tpos, :]   # (n_chan,)
-            mask = np.zeros_like(p_row, dtype=bool)
-            sig_non_mastoid = (p_row < param['alpha']) & chankeep
+            mask  = np.zeros_like(p_row, dtype=bool)
+            sig_non_mastoid = (p_row < alpha_clust) & chankeep
             mask[sig_non_mastoid] = True
 
             im, _ = plot_topomap(
@@ -780,9 +795,11 @@ if version == 5:
                 sensors=False,
                 contours=0,
             )
-            topo_axis.set_title(f"{regvarname}\n{int(plot_times[tidx]*1000)} ms",
-                                fontdict={'size': param['labelfontsize']-1},
-                                pad=0.1)
+            topo_axis.set_title(
+                f"{regvarname}\n{int(plot_times[tidx]*1000)} ms",
+                fontdict={'size': param['labelfontsize']-1},
+                pad=0.1
+            )
 
             fig.savefig(
                 opj(outfigpath,
@@ -801,11 +818,13 @@ if version == 5:
                 fig2.savefig(
                     opj(outfigpath,
                         f'{fig_prefix}v5_topo_beta_cbar_{regvar}.svg'),
-                    dpi=600, bbox_inches='tight'
+                    dpi=600,
+                    bbox_inches='tight'
                 )
 
         # ------------------------------------------------------------------
         # Time-course at ROI channels with significance bar
+        # ------------------------------------------------------------------
         for c in chan_to_plot:
             if c not in beta_ev.ch_names:
                 continue
@@ -821,14 +840,15 @@ if version == 5:
             ax.axhline(0, linestyle='--', color='gray')
             ax.axvline(0, linestyle='--', color='gray')
 
-            # mark cluster-corrected significant samples
+            # mark cluster-corrected significant samples (per regressor, α = 0.05)
             timestep = 1000.0 / param['testresampfreq']   # ms
+            ymin = y.min()
             for tidx2, t in enumerate(times * 1000):
-                if pvals_clust[tidx2, pick] < param['alpha']:
+                if pvals_clust[tidx2, pick] < alpha_clust:
                     ax.fill_between(
                         [t, t + timestep],
-                        y.min() - 0.02,
-                        y.min() - 0.005,
+                        ymin - 0.02,
+                        ymin - 0.005,
                         alpha=0.4
                     )
 
@@ -843,89 +863,181 @@ if version == 5:
                 bbox_inches='tight'
             )
 
-    # ------------------------------------------------------------------
-    # 
     # ------------------------------------------------------------
-    # LPP ROI time-resolved cluster plots
-    # ------------------------------------------------------------
+    # LPP ROI time-cluster plot
+    # -----------------------------------------------------------
     roi_cluster_dir = Path(outpath) / "LPP_ROI_cluster"
     
     if roi_cluster_dir.exists():
-    
         print("\nPlotting LPP ROI time-cluster results (Version 5)")
-    
+
         lpp_tmin, lpp_tmax = 0.4, 0.8
         tmask = (times >= lpp_tmin) & (times <= lpp_tmax)
         times_roi = times[tmask] * 1000  # ms
-    
+
         for ridx, regvar in enumerate(regvars_v5):
             regvarname = regvarsnames_v5[ridx]
-    
+
             tfile = roi_cluster_dir / f"LPPROI_tval_{regvar}.npy"
             pfile = roi_cluster_dir / f"LPPROI_pval_{regvar}.npy"
-    
+
             if not (tfile.exists() and pfile.exists()):
                 continue
-    
+
             tvals = np.load(tfile)   # (time,)
             pvals = np.load(pfile)
-    
+
             fig, ax = plt.subplots(figsize=(4, 2.5))
-    
+
             ax.plot(times_roi, tvals, lw=2)
             ax.axhline(0, linestyle='--', color='gray')
-    
-            # cluster significance bar
+
+            # cluster significance bar over time (cluster-corrected p < 0.05)
+            dt = times_roi[1] - times_roi[0]
             for i, t in enumerate(times_roi):
                 if pvals[i] < 0.05:
                     ax.fill_between(
-                        [t, t + (times_roi[1] - times_roi[0])],
+                        [t, t + dt],
                         tvals.min() - 0.1,
                         tvals.min() - 0.05,
                         color='red',
                         alpha=0.4
                     )
-    
+
             ax.set_xlabel("Time (ms)")
             ax.set_ylabel("Cluster t-value")
             ax.set_title(f"LPP ROI – {regvarname}")
             ax.tick_params(labelsize=param['ticksfontsize'])
-    
+
             fig.tight_layout()
             fig.savefig(
                 opj(outfigpath, f"{fig_prefix}v5_LPPROI_timecluster_{regvar}.svg"),
                 dpi=600,
                 bbox_inches="tight"
             )
-    
     else:
-        print("No LPP_ROI_cluster directory found — skipping ROI cluster plots.")
-        
-    roi_corr_file = Path(outpath) / "NO_Zscoring" / "ROI_LPP_vs_each_regressor.csv"
+        print("No LPP_ROI_cluster directory found — skipping LPP ROI cluster plots.")
 
-    if roi_corr_file.exists():
-        df = pd.read_csv(roi_corr_file)
+        # ------------------------------------------------------------
+    # N2 ROI time-cluster plots
+    # ------------------------------------------------------------
+    n2_cluster_dir = Path(outpath) / "N2_ROI_cluster"
     
-        fig, ax = plt.subplots(figsize=(4, 3))
-        sns.barplot(
-            data=df,
-            x="regressor",
-            y="r_partial_RT",
-            ax=ax
-        )
-        ax.axhline(0, linestyle='--', color='gray')
-        ax.set_ylabel("Partial r (LPP | RT)")
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-        fig.tight_layout()
-        fig.savefig(
-            opj(outfigpath, f"{fig_prefix}v5_LPPROI_partialcorr.svg"),
-            dpi=600,
-            bbox_inches="tight"
-        )
+    if n2_cluster_dir.exists():
+        print("\nPlotting N2 ROI time-cluster results (Version 5)")
+
+        # must match the analysis window used in version-5 massuni
+        n2_tmin, n2_tmax = 0.20, 0.40
+        n2_tmask = (times >= n2_tmin) & (times <= n2_tmax)
+        times_n2 = times[n2_tmask] * 1000  # ms
+
+        for ridx, regvar in enumerate(regvars_v5):
+            regvarname = regvarsnames_v5[ridx]
+
+            tfile = n2_cluster_dir / f"N2ROI_tval_{regvar}.npy"
+            pfile = n2_cluster_dir / f"N2ROI_pval_{regvar}.npy"
+
+            if not (tfile.exists() and pfile.exists()):
+                continue
+
+            tvals = np.load(tfile)   # (time,)
+            pvals = np.load(pfile)   # (time,)
+
+            fig, ax = plt.subplots(figsize=(4, 2.5))
+
+            ax.plot(times_n2, tvals, lw=2)
+            ax.axhline(0, linestyle='--', color='gray')
+
+            # cluster significance bar (cluster-corrected p < 0.05)
+            if len(times_n2) > 1:
+                dt = times_n2[1] - times_n2[0]
+            else:
+                dt = 1.0  # fallback, shouldn't really happen
+
+            for i, t in enumerate(times_n2):
+                if pvals[i] < 0.05:
+                    ax.fill_between(
+                        [t, t + dt],
+                        tvals.min() - 0.1,
+                        tvals.min() - 0.05,
+                        color='red',
+                        alpha=0.4
+                    )
+
+            ax.set_xlabel("Time (ms)")
+            ax.set_ylabel("Cluster t-value")
+            ax.set_title(f"N2 ROI – {regvarname}")
+            ax.tick_params(labelsize=param['ticksfontsize'])
+
+            fig.tight_layout()
+            fig.savefig(
+                opj(outfigpath, f"{fig_prefix}v5_N2ROI_timecluster_{regvar}.svg"),
+                dpi=600,
+                bbox_inches="tight"
+            )
+    else:
+        print("No N2_ROI_cluster directory found — skipping N2 ROI cluster plots.")
 
 
-   
+    # ------------------------------------------------------------
+    # P3b ROI time-cluster plots
+    # ------------------------------------------------------------
+    p3b_cluster_dir = Path(outpath) / "P3b_ROI_cluster"
+    
+    if p3b_cluster_dir.exists():
+        print("\nPlotting P3b ROI time-cluster results (Version 5)")
 
+        # must match the analysis window used in version-5 massuni
+        p3b_tmin, p3b_tmax = 0.25, 0.55
+        p3b_tmask = (times >= p3b_tmin) & (times <= p3b_tmax)
+        times_p3b = times[p3b_tmask] * 1000  # ms
+
+        for ridx, regvar in enumerate(regvars_v5):
+            regvarname = regvarsnames_v5[ridx]
+
+            tfile = p3b_cluster_dir / f"P3bROI_tval_{regvar}.npy"
+            pfile = p3b_cluster_dir / f"P3bROI_pval_{regvar}.npy"
+
+            if not (tfile.exists() and pfile.exists()):
+                continue
+
+            tvals = np.load(tfile)   # (time,)
+            pvals = np.load(pfile)   # (time,)
+
+            fig, ax = plt.subplots(figsize=(4, 2.5))
+
+            ax.plot(times_p3b, tvals, lw=2)
+            ax.axhline(0, linestyle='--', color='gray')
+
+            # cluster significance bar (cluster-corrected p < 0.05)
+            if len(times_p3b) > 1:
+                dt = times_p3b[1] - times_p3b[0]
+            else:
+                dt = 1.0
+
+            for i, t in enumerate(times_p3b):
+                if pvals[i] < 0.05:
+                    ax.fill_between(
+                        [t, t + dt],
+                        tvals.min() - 0.1,
+                        tvals.min() - 0.05,
+                        color='red',
+                        alpha=0.4
+                    )
+
+            ax.set_xlabel("Time (ms)")
+            ax.set_ylabel("Cluster t-value")
+            ax.set_title(f"P3b ROI – {regvarname}")
+            ax.tick_params(labelsize=param['ticksfontsize'])
+
+            fig.tight_layout()
+            fig.savefig(
+                opj(outfigpath, f"{fig_prefix}v5_P3bROI_timecluster_{regvar}.svg"),
+                dpi=600,
+                bbox_inches="tight"
+            )
+    else:
+        print("No P3b_ROI_cluster directory found — skipping P3b ROI cluster plots.")
 
 
 
@@ -948,11 +1060,7 @@ elif version == 6:
     times = beta_gavg[0].times
 
     reg_labels = ["pain", "money", "interaction"]
-    pretty_names = {
-        "pain": "β_pain ~ v_pain",
-        "money": "β_money ~ v_money",
-        "interaction": "β_interaction ~ v_interaction"
-    }
+    names = ["pain", "money", "interaction"]
 
     plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
     times_pos = [np.abs(times - t).argmin() for t in plot_times]
@@ -1003,7 +1111,7 @@ elif version == 6:
                 sensors=False,
                 contours=0,
             )
-            ax.set_title(f"{pretty_names[label]}\n{int(plot_times[tidx]*1000)} ms",
+            ax.set_title(f"{names[label]}\n{int(plot_times[tidx]*1000)} ms",
                          fontdict={'size': param['labelfontsize']-1},
                          pad=0.1)
 
@@ -1044,14 +1152,14 @@ elif version == 6:
 
             ax.set_xlabel('Time (ms)',
                           fontdict={'size': param['labelfontsize']})
-            ax.set_ylabel(f'Slope γ₁ ({pretty_names[label]})',
+            ax.set_ylabel(f'Slope γ₁ ({names[label]})',
                           fontdict={'size': param['labelfontsize']})
             ax.axhline(0, linestyle='--', color='gray')
             ax.axvline(0, linestyle='--', color='gray')
 
             timestep = 1000.0 * (times[1] - times[0])
             for ti, tt in enumerate(times * 1000):
-                if sig_fdr[ti, pick]:   # <--- HERE is your line
+                if sig_fdr[ti, pick]:   
                     ax.fill_between(
                         [tt, tt + timestep],
                         ax.get_ylim()[0],
