@@ -33,13 +33,13 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 5 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 3 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 # 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
 # partz   - PartZscoring     (raw regressors + z-scored RT)
-glm_version = 'noz'   
+glm_version = 'z'   
 
 if version == 1:
     outpath = opj(outpathall, 'statistics_new/erps_massuni_drift_mod_9_passive')
@@ -110,7 +110,7 @@ outpath_glm = opj(outpath, stats_subdir)
 
 # 6 regressors total
 param = {
-    'alpha': 0.05,     
+    'alpha': 0.05 / 3,     
     'titlefontsize': 12,
     'labelfontsize': 12,
     'ticksfontsize': 11,
@@ -124,25 +124,29 @@ plt.rcParams['font.family'] = 'DejaVu Sans'
 # -----------------------------------------------------------------------------------------------------------------
 # Regressor bookkeeping – MUST MATCH massunivariate script
 # -----------------------------------------------------------------------------------------------------------------
-full_regvars = [
-    'painlevel', 'moneylevel', 'interaction',
-    'v_pain_contrib', 'v_money_contrib', 'v_interaction_contrib'
-]
 
-regvarsnames = [
-    'pain_raw', 'money_raw', 'interaction_raw',
-    'V_pain_contrib', 'V_money_contrib', 'V_interaction_contrib'
-]
+regvars = ['painlevel', 'moneylevel', 'interaction']
+regvarsnames = ['Pain', 'Money', 'Interaction']
 
-regvars_v5 = [
-    'v_painlevel_subj', 'v_moneylevel_subj', 'v_interaction_subj',
-    'a_painlevel_subj', 'a_moneylevel_subj', 'a_interaction_subj'
-]
+# full_regvars = [
+#     'painlevel', 'moneylevel', 'interaction',
+#     'v_pain_contrib', 'v_money_contrib', 'v_interaction_contrib'
+# ]
 
-regvarsnames_v5 = [
-    'V_pain_subj', 'V_money_subj', 'V_interaction_subj',
-    'A_pain_subj', 'A_money_subj', 'A_interaction_subj'
-]
+# regvarsnames = [
+#     'pain_raw', 'money_raw', 'interaction_raw',
+#     'V_pain_contrib', 'V_money_contrib', 'V_interaction_contrib'
+# ]
+
+# regvars_v5 = [
+#     'v_painlevel_subj', 'v_moneylevel_subj', 'v_interaction_subj',
+#     'a_painlevel_subj', 'a_moneylevel_subj', 'a_interaction_subj'
+# ]
+
+# regvarsnames_v5 = [
+#     'V_pain_subj', 'V_money_subj', 'V_interaction_subj',
+#     'A_pain_subj', 'A_money_subj', 'A_interaction_subj'
+# ]
 
 if version == 7:
     regvars = ['sv_pain_para']
@@ -155,50 +159,45 @@ chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
 
 # Version 1, 2, 3 ---------------------------------------------------------------------------------------------------
 
+# Version 1, 2, 3 ---------------------------------------------------------------------------------------------------
+
 if version in [1, 2, 3]:
 
-    tvals = np.load(opj(outpath_glm, f'ols_2ndlevel_tvals{suffix}.npy'))
-    pvals = np.load(opj(outpath_glm, f'ols_2ndlevel_pvals{suffix}.npy'))
+    # Load second-level stats and betas from the new (z-scored) mass-univariate GLM
+    tvals = np.load(opj(outpath_glm, 'ols_2ndlevel_tvals.npy'))     # shape: (n_reg, n_times, n_chans)
+    pvals = np.load(opj(outpath_glm, 'ols_2ndlevel_pvals.npy'))     # shape: (n_reg, n_times, n_chans)
 
-    beta_gavg = np.load(opj(outpath_glm, f'ols_2ndlevel_betasavg{suffix}.npy'),
-                        allow_pickle=True)
-    allbetas = np.load(opj(outpath_glm, f'ols_2ndlevel_betas{suffix}.npy'),
-                       allow_pickle=True)
+    beta_gavg = np.load(opj(outpath_glm, 'ols_2ndlevel_betasavg.npy'),
+                        allow_pickle=True)                          # list-like of Evoked
+    allbetas = np.load(opj(outpath_glm, 'ols_2ndlevel_betas.npy'),
+                       allow_pickle=True)                           # shape: (n_subj, n_reg, n_chans, n_times)
 
-    times_pos = [np.abs(beta_gavg[0].times - 0.2 - t).argmin() for t in plot_times]
+    # Time points for topomaps (in seconds → indices)
+    times_pos = [np.abs(beta_gavg[0].times - t).argmin() for t in plot_times]
 
-    # Loop over 6 regressors (raw + drift)
-    for ridx, regvar in enumerate(full_regvars):
+    # Loop over the 3 regressors: pain, money, interaction
+    for ridx, regvar in enumerate(regvars):
 
         regvarname = regvarsnames[ridx]
 
-        if ridx == 0:   # pain_raw
+        # Nice but simple colour choice per regressor
+        if regvar == 'painlevel':
             vminmax = 6
             cmap = 'Blues'
-        elif ridx == 1: # money_raw
+        elif regvar == 'moneylevel':
             vminmax = 6
             cmap = 'Greens'
-        elif ridx == 2: # interaction_raw
+        elif regvar == 'interaction':
             vminmax = 6
             cmap = 'Purples'
-        elif ridx == 3: # V_pain
-            vminmax = 6
-            cmap = 'viridis'
-        elif ridx == 4: # V_money
-            vminmax = 6
-            cmap = 'cividis'
-        elif ridx == 5: # V_interaction
-            vminmax = 6
-            cmap = 'plasma'
         else:
             vminmax = 6
             cmap = 'viridis'
 
         # Epochs that were used for this regressor GLM
         all_epos = mne.read_epochs(
-            opj(outpath_glm, f'ols_2ndlevel_allepochs-epo{suffix}_{regvar}.fif')
-            )
-
+            opj(outpath_glm, f'ols_2ndlevel_allepochs-epo_{regvar}.fif')
+        )
 
         beta_gavg_nomast = beta_gavg[ridx].copy()
         # boolean mask for "keep" channels (exclude mastoids)
@@ -238,7 +237,7 @@ if version in [1, 2, 3]:
                 sensors=False,
                 contours=0,
             )
-            topo_axis.set_title(str(int(plot_times[tidx] * 1000)) + ' ms',
+            topo_axis.set_title(f"{int(plot_times[tidx] * 1000)} ms",
                                 fontdict={'size': param['labelfontsize']-1},
                                 pad=0.1)
 
@@ -246,7 +245,7 @@ if version in [1, 2, 3]:
                 fig2, ax = plt.subplots(figsize=(0.2, 1))
                 cbar1 = fig2.colorbar(im, cax=ax,
                                       orientation='vertical', aspect=1)
-                cbar1.set_label('Beta', rotation=270,
+                cbar1.set_label('Beta (z)', rotation=270,
                                 labelpad=12,
                                 fontdict={'fontsize': param["labelfontsize"]-1})
                 cbar1.ax.tick_params(labelsize=param['ticksfontsize']-2)
@@ -260,7 +259,6 @@ if version in [1, 2, 3]:
                 dpi=600,
                 bbox_inches='tight'
             )
-            
 
         # -----------------------------------------------------------------
         # Binned-by-regressor line plots and topomaps 
@@ -269,7 +267,7 @@ if version in [1, 2, 3]:
             fig, line_axis = plt.subplots(1, 1, figsize=(4, 2.5))
             all_epos.metadata.reset_index()
 
-            # Binning on regressor
+            # Binning on regressor (trial-wise Z-scored regressor still has continuous spread)
             nbins = 5
             all_epos.metadata['bin'] = 0
             unique_vals = all_epos.metadata[regvar].nunique()
@@ -284,13 +282,11 @@ if version in [1, 2, 3]:
             )
             all_epos.metadata['bin' + '_' + regvar] = all_epos.metadata['bin']
 
-            # Bin labels
+            # Bin labels (for sanity / debugging, not heavily used)
             bin_labels = []
             for bidx, b in enumerate(bins):
-                if b < 0:
-                    b = 0
-                if bidx < len(bins)-1:
-                    lab = str(round(b, 10)) + '-' + str(round(bins[bidx+1], 10))
+                if bidx < len(bins) - 1:
+                    lab = f"{round(b, 3)}–{round(bins[bidx+1], 3)}"
                     bin_labels.append(lab)
 
             # Average within participants
@@ -298,72 +294,64 @@ if version in [1, 2, 3]:
             for p_id in all_epos.metadata['participant_id'].unique():
                 sub_dat = all_epos[all_epos.metadata['participant_id'] == p_id]
                 sub_evoked = {}
-                for val in range(nbins):
+                for val in range(nbins_eff):
                     if np.sum(sub_dat.metadata['bin'] == val) != 0:
-                        sub_evoked[val] = sub_dat[sub_dat.metadata['bin']
-                                                  == val].average()
+                        sub_evoked[val] = sub_dat[sub_dat.metadata['bin'] == val].average()
                     else:
                         sub_evoked[val] = 0
                 sub_evokeds.append(sub_evoked)
 
             # Grand average over subjects
-            # evokeds = dict()
-            # for i in range(len(bin_labels)):
-            #     evoked = [sub_evoked[i] for sub_evoked in sub_evokeds
-            #               if sub_evoked[i] != 0]
-            #     evokeds[str(i+1)] = mne.grand_average(evoked)
-            
-            
             evokeds = dict()
-            for i in range(len(bin_labels)):
+            for i in range(nbins_eff):
                 evoked_list = [sub_evoked[i] for sub_evoked in sub_evokeds
                                if sub_evoked[i] != 0]
-            
                 if len(evoked_list) == 0:
                     print(f"Skipping bin {i+1}: no valid epochs in this bin for any sub")
                     continue
-            
                 evokeds[str(i+1)] = mne.grand_average(evoked_list)
-
 
             pick = beta_gavg[ridx].ch_names.index(c)
 
-            line_axis.set_ylabel('Beta (' + regvarname + ')',
+            line_axis.set_ylabel(f'ERP (binned by {regvarname})',
                                  fontdict={'size': param['labelfontsize']})
 
-            # Colourbar (separate figure)
-            _, axis = plt.subplots(figsize=(4, 2.5))
-            cbarout = mne.viz.plot_compare_evokeds(
-                evokeds,
-                picks=pick,
-                cmap=(regvarname + "\n(Decile)", cmap),
-                show_sensors=False,
-                show=False,
-                axes=axis
-            )
-            cbarout[0].axes[-1].yaxis.label.set_size(param['labelfontsize'])
-            cbarout[0].axes[-1].tick_params(labelsize=param['ticksfontsize'])
-            cbarout[0].axes[0].remove()
-            cbarout[0].savefig(opj(outfigpath,
-                                   f'{fig_prefix}fig_ols_erps_betas_line_cbar_{regvar}_{c}.svg'),dpi=800,
-                               bbox_inches='tight')
-
+            # Colourbar (separate figure, using mne convenience)
+            if len(evokeds) > 0:
+                _, axis = plt.subplots(figsize=(4, 2.5))
+                cbarout = mne.viz.plot_compare_evokeds(
+                    evokeds,
+                    picks=pick,
+                    cmap=(regvarname + "\n(Bin)", cmap),
+                    show_sensors=False,
+                    show=False,
+                    axes=axis
+                )
+                cbarout[0].axes[-1].yaxis.label.set_size(param['labelfontsize'])
+                cbarout[0].axes[-1].tick_params(labelsize=param['ticksfontsize'])
+                cbarout[0].axes[0].remove()
+                cbarout[0].savefig(
+                    opj(outfigpath,
+                        f'{fig_prefix}fig_ols_erps_betas_line_cbar_{regvar}_{c}.svg'),
+                    dpi=800,
+                    bbox_inches='tight'
+                )
 
             bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
 
             for idx2, bin_id in enumerate(bin_ids):
                 line_axis.plot(
                     all_epos[0].times * 1000,
-                    evokeds[bin_id].data[pick, :] * 1000000,
+                    evokeds[bin_id].data[pick, :] * 1e6,
                     label=str(idx2 + 1),
                     linewidth=2,
-                    color=plt.get_cmap(cmap)(idx2 / len(bin_ids))
+                    color=plt.get_cmap(cmap)(idx2 / max(1, len(bin_ids)-1))
                 )
 
             line_axis.tick_params(labelsize=12)
             line_axis.set_xlabel('Time (ms)',
                                  fontdict={'size': param['labelfontsize']})
-            line_axis.set_ylabel('Amplitude (uV)',
+            line_axis.set_ylabel('Amplitude (µV)',
                                  fontdict={'size': param['labelfontsize']})
             line_axis.axhline(0, linestyle='--', color='gray')
             line_axis.axvline(0, ymin=-0.2, ymax=0.2,
@@ -383,7 +371,6 @@ if version in [1, 2, 3]:
                 bbox_inches='tight'
             )
 
-
         # Topo of binned amplitude at 0.6 s
         bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
 
@@ -391,7 +378,7 @@ if version in [1, 2, 3]:
             fig, topo_axis = plt.subplots(figsize=(1, 1))
 
             tidx = np.argmin(np.abs(evokeds[binnum].times - 0.6))
-            dat = evokeds[binnum].data[:, tidx] * 1000000
+            dat = evokeds[binnum].data[:, tidx] * 1e6
 
             im, _ = plot_topomap(
                 dat,
@@ -406,7 +393,7 @@ if version in [1, 2, 3]:
                 sensors=False,
                 contours=0,
             )
-            topo_axis.set_title('Ventile ' + binnum,
+            topo_axis.set_title('Bin ' + binnum,
                                 fontdict={'size': param['labelfontsize']-1},
                                 pad=0.1)
 
@@ -415,14 +402,13 @@ if version in [1, 2, 3]:
                     f'{fig_prefix}fig_binsamp_topo_{regvar}_bin{binnum}.svg'),
                 dpi=600, bbox_inches='tight'
             )
-            
 
             if idx2 + 1 == len(bin_ids):
                 fig2, ax = plt.subplots(figsize=(0.2, 1))
                 cbar1 = fig2.colorbar(im, cax=ax,
                                       orientation='vertical', aspect=1)
                 cbar1.set_label(
-                    'Amplitude (uV)',
+                    'Amplitude (µV)',
                     rotation=270,
                     labelpad=12,
                     fontdict={'fontsize': param["labelfontsize"]-1}
@@ -433,7 +419,6 @@ if version in [1, 2, 3]:
                         f'{fig_prefix}fig_topo_bins_cbar_{regvar}.svg'),
                     dpi=600, bbox_inches='tight'
                 )
-
 
         # -----------------------------------------------------------------
         # Mean beta and SEM over participants
@@ -452,9 +437,7 @@ if version in [1, 2, 3]:
             sem = scipy.stats.sem(sub_avg, axis=0)
             mean = beta_gavg[ridx].data[pick, :]
 
-            clrs = sns.color_palette("deep", 5)
-
-            line_axis.set_ylabel('Beta (' + regvarname + ')',
+            line_axis.set_ylabel(f'β ({regvarname}, z)',
                                  fontdict={'size': param['labelfontsize']})
             line_axis.set_xlabel('Time (ms)',
                                  fontdict={'size': param['labelfontsize']})
@@ -465,8 +448,7 @@ if version in [1, 2, 3]:
             line_axis.fill_between(all_epos[0].times * 1000,
                                    mean - sem,
                                    mean + sem,
-                                   alpha=0.3,
-                                   facecolor=clrs[0])
+                                   alpha=0.3)
 
             line_axis.set_ylim((-0.25, 0.25))
             line_axis.axhline(0, linestyle='--', color='gray')
@@ -477,7 +459,7 @@ if version in [1, 2, 3]:
             line_axis.tick_params(axis='both',
                                   labelsize=param['ticksfontsize'])
 
-            timestep = 1024 / param['testresampfreq']
+            timestep = 1000.0 / param['testresampfreq']  # ms step
             for tidx2, t2 in enumerate(all_epos[0].times * 1000):
                 if pvals[ridx][tidx2, pick] < param['alpha']:
                     line_axis.fill_between(
@@ -500,79 +482,73 @@ if version in [1, 2, 3]:
 
 
 # ---------------------------------------------------------------------------------------------------
-# beta-difference cluster tests (v – raw) at all time points
+# beta-difference cluster test: pain vs interaction
 # ---------------------------------------------------------------------------------------------------
 
 if version in [1, 2, 3]:
-    diff_labels = ['pain', 'money', 'interaction']
+    diff_label = 'pain_minus_interaction'  
 
-    # Take time axis & channel 
     times = beta_gavg[0].times
     info = beta_gavg[0].info
-
-    # plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
-    # Convert to indices  - check with MP
     diff_times_pos = [np.abs(times - t).argmin() for t in plot_times]
 
     # Exclude mastoids in masks
     chankeep = np.array([c not in ['M1', 'M2'] for c in info['ch_names']])
 
-    for label in diff_labels:
+    tdiff = np.load(opj(outpath_glm, f'ols_2ndlevel_tval_diff_{diff_label}.npy'))
+    pdiff = np.load(opj(outpath_glm, f'ols_2ndlevel_pval_diff_{diff_label}.npy'))
+
+    for tidx, time_idx in enumerate(diff_times_pos):
+        t_time = plot_times[tidx]
+        t_ms = int(t_time * 1000)
+
+        # p-values at this time
+        p_row = pdiff[time_idx, :]
+
+        alpha_diff = param['alpha']   # = 0.05/3
+        mask = (p_row < alpha_diff) & chankeep
         
-        tdiff = np.load(opj(outpath_glm, f'ols_2ndlevel_tval_diff_{label}{suffix}.npy'))
-        pdiff = np.load(opj(outpath_glm, f'ols_2ndlevel_pval_diff_{label}{suffix}.npy'))
+        fig, ax = plt.subplots(figsize=(2, 2))
+        im, _ = plot_topomap(
+            tdiff[time_idx, :],
+            pos=info,
+            mask=mask,
+            mask_params=dict(marker='o',
+                             markerfacecolor='w',
+                             markeredgecolor='k',
+                             linewidth=0,
+                             markersize=3),
+            cmap='RdBu_r',
+            show=False,
+            ch_type='eeg',
+            outlines='head',
+            extrapolate='head',
+            axes=ax,
+            sensors=False,
+            contours=0,
+        )
+        ax.set_title(f'pain − interaction, {t_ms} ms',
+                     fontdict={'size': param['labelfontsize']-1},
+                     pad=0.1)
 
+        # Colourbar
+        fig2, cax = plt.subplots(figsize=(0.2, 1))
+        cbar = fig2.colorbar(im, cax=cax, orientation='vertical', aspect=1)
+        cbar.set_label('t (pain − interaction)', rotation=270, labelpad=12,
+                       fontdict={'fontsize': param["labelfontsize"]-1})
+        cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
 
-        for tidx, time_idx in enumerate(diff_times_pos):
-            t_time = plot_times[tidx]
-            t_ms = int(t_time * 1000)
+        fig.savefig(
+            opj(outfigpath,
+                f'{fig_prefix}fig_topo_diff_{diff_label}_{t_ms}ms.svg'),
+            dpi=600, bbox_inches='tight'
+        )
+        fig2.savefig(
+            opj(outfigpath,
+                f'{fig_prefix}fig_topo_diff_{diff_label}_{t_ms}ms_cbar.svg'),
+            dpi=600, bbox_inches='tight'
+        )
 
-            # p-values at this time
-            p_row = pdiff[time_idx, :]
-            
-            alpha_diff = 0.05 / 3            # for the 3 difference levels
-            mask = (p_row < alpha_diff) & chankeep 
-
-            fig, ax = plt.subplots(figsize=(2, 2))
-            im, _ = plot_topomap(
-                tdiff[time_idx, :],
-                pos=info,
-                mask=mask,
-                mask_params=dict(marker='o',
-                                 markerfacecolor='w',
-                                 markeredgecolor='k',
-                                 linewidth=0,
-                                 markersize=3),
-                cmap='RdBu_r',
-                show=False,
-                ch_type='eeg',
-                outlines='head',
-                extrapolate='head',
-                axes=ax,
-                sensors=False,
-                contours=0,
-            )
-            ax.set_title(f'{label} (v - raw), {t_ms} ms',
-                         fontdict={'size': param['labelfontsize']-1},
-                         pad=0.1)
-
-            # Colourbar
-            fig2, cax = plt.subplots(figsize=(0.2, 1))
-            cbar = fig2.colorbar(im, cax=cax, orientation='vertical', aspect=1)
-            cbar.set_label('t (v - raw)', rotation=270, labelpad=12,
-                           fontdict={'fontsize': param["labelfontsize"]-1})
-            cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
-
-            fig.savefig(
-                opj(outfigpath,
-                    f'{fig_prefix}fig_topo_diff_{label}_{t_ms}ms.svg'),
-                dpi=600, bbox_inches='tight'
-            )
-            fig2.savefig(
-                opj(outfigpath,
-                    f'{fig_prefix}fig_topo_diff_{label}_{t_ms}ms_cbar.svg'),
-                dpi=600, bbox_inches='tight'
-            )
 
 
 # Version 4 --------------------------------------------------------------------------------
