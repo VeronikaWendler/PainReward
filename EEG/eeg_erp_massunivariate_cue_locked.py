@@ -157,15 +157,19 @@ part_1 = part
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate Regression with 3 GLMs
 #
-raw_regcols = ['painlevel', 'moneylevel', 'interaction']
-v_regcols   = ['v_pain_contrib', 'v_money_contrib', 'v_interaction_contrib']
+# raw_regcols = ['painlevel', 'moneylevel', 'interaction']
+# v_regcols   = ['v_pain_contrib', 'v_money_contrib', 'v_interaction_contrib']
 
-# full list of regressors to run GLMs on (each gets its own EEG GLM)
-regvars = raw_regcols + v_regcols
-regvarsnames = [
-    'pain_raw', 'money_raw', 'interaction_raw',
-    'V_pain_contrib', 'V_money_contrib', 'V_interaction_contrib'
-]
+# # full list of regressors to run GLMs on (each gets its own EEG GLM)
+# regvars = raw_regcols + v_regcols
+# regvarsnames = [
+#     'pain_raw', 'money_raw', 'interaction_raw',
+#     'V_pain_contrib', 'V_money_contrib', 'V_interaction_contrib'
+# ]
+
+raw_regcols = ['painlevel', 'moneylevel', 'interaction']
+regvars = raw_regcols  
+
 
 if version == 7:
     regvars = ['sv_pain_para']
@@ -256,10 +260,6 @@ if version in [1, 2, 3, 4, 7]:
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate 
-
-raw_regcols = ['painlevel', 'moneylevel', 'interaction']
-regvars = raw_regcols  # we only care about these three now
-
 
 if version in [1, 2, 3]:
 
