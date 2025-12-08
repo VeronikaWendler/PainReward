@@ -33,7 +33,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 3 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 5 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 # 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
