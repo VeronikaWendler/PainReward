@@ -21,6 +21,9 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from statsmodels.distributions.empirical_distribution import ECDF
 from pathlib import Path
+from mne.stats import spatio_temporal_cluster_1samp_test, combine_adjacency
+from mne.channels import find_ch_adjacency
+import scipy.stats as stats
 
 #-----------------------------------------------------------------------------------------------------
 #
@@ -2144,12 +2147,28 @@ elif version == 10:
             tvals[ci] = t_ci.reshape(n_freq, n_time)
             pvals[ci] = p_ci.reshape(n_freq, n_time)
 
-        # FDR across entire cube
-        p_flat = pvals.reshape(-1)
-        rej_flat, p_fdr_flat = fdrcorrection(p_flat, alpha=alpha)
-        sig_mask = rej_flat.reshape(n_chan, n_freq, n_time)
+            ch_adj, _ = find_ch_adjacency(info, ch_type="eeg")
+            adj = combine_adjacency(ch_adj, n_freq, n_time)
+            
+            t_thresh = stats.distributions.t.ppf(1 - 0.001/2, df=n_subj - 1)
+            
+            T_obs, clusters, cluster_pvals, _ = spatio_temporal_cluster_1samp_test(
+                betas,                      # shape (subj, ch, f, t)
+                adjacency=adj,
+                threshold=t_thresh,
+                tail=0,
+                n_permutations=2000,        
+                out_type="mask",
+                n_jobs=param.get("njobs", 8),
+            )
+            
+            sig_mask = np.zeros((n_chan, n_freq, n_time), dtype=bool)
+            for clu, p_clu in zip(clusters, cluster_pvals):
+                if p_clu < alpha:
+                    sig_mask |= clu
+            
+            print(f"  Significant samples (CLUSTER, alpha={alpha:.3g}): {sig_mask.sum()} / {sig_mask.size}")
 
-        print(f"  Significant samples (FDR, alpha={alpha:.3g}): {sig_mask.sum()} / {sig_mask.size}")
 
         # band-collapsed plots
         for band_name, (f_lo, f_hi) in BANDS.items():
@@ -2162,7 +2181,6 @@ elif version == 10:
             # ch, t
             mean_band = betas_band.mean(axis=0)
 
-            # significance collapsed across freq in band: (ch, t)
             sig_band = sig_mask[:, fmask, :].any(axis=1)
 
             # Topomaps

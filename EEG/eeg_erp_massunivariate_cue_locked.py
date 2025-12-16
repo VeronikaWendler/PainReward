@@ -32,6 +32,8 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 from statsmodels.distributions.empirical_distribution import ECDF
 from pathlib import Path
 from mne.stats import fdr_correction
+from mne.time_frequency import tfr_morlet
+from mne.stats import permutation_cluster_1samp_test, combine_adjacency
 
 # Set bids directory
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
@@ -2346,10 +2348,12 @@ if version == 9:
 
 
 elif version == 10:
-    from mne.time_frequency import tfr_morlet
-    print("\n--- Version 10: TFR trial-wise betas for sv_pain_para AND painlevel (cue-locked; sv|pain+RT and pain|sv+RT) ---")
+    print("\n Version 10: TFR trial-wise betas for sv_pain_para AND painlevel "
+          "(cue-locked; sv|pain+RT and pain|sv+RT) ")
 
-    # sanity checks on mod_data
+    # ---------------------------------------------------------------------
+    # 0) sanity checks
+    # ---------------------------------------------------------------------
     required_cols = ["sv_pain_para", "painlevel", "trialsnum", "rt", "participant"]
     missing = [c for c in required_cols if c not in mod_data.columns]
     if missing:
@@ -2365,16 +2369,16 @@ elif version == 10:
     tmin_crop = -0.50
     tmax_crop = 1.00
 
-    # outputs
-    all_betas_sv = []     # (subj, ch, f, t)  sv slope controlling pain+RT
-    all_betas_pain = []   # (subj, ch, f, t)  pain slope controlling sv+RT
-    # optional:
-    # all_betas_rt = []
-
+    # outputs (subject-level beta maps)
+    all_betas_sv = []       # (subj, ch, f, t)  sv slope controlling pain+rt
+    all_betas_pain = []     # (subj, ch, f, t)  pain slope controlling sv+rt
     used_subs = []
+
     freqs_out = None
     times_out = None
     ch_names_out = None
+    info_out = None
+
 
     for pa in part:
         print(f"\nSubject {pa}...")
@@ -2388,7 +2392,7 @@ elif version == 10:
         beh_sub = beh_sub[["trialsnum", "painlevel", "sv_pain_para", "rt"]].copy()
         beh_sub["trialsnum"] = beh_sub["trialsnum"].astype(int)
 
-        # load ERP epochs (for trial alignment + badtrial)
+        # ERP epochs (trial alignment + badtrial)
         epo_fname = opj(basepath, pa, "eeg", "erps", f"{pa}_decision_cues_singletrials-epo.fif")
         if not os.path.exists(epo_fname):
             print(f"  No ERP single-trials file for {pa}, skipping.")
@@ -2405,7 +2409,7 @@ elif version == 10:
             print(f"  {pa}: <5 ERP trials, skipping.")
             continue
 
-        # resample to target sfreq (keeps metadata aligned)
+        # resample to target sfreq
         if epo.info["sfreq"] != target_sfreq:
             epo = epo.copy().resample(target_sfreq)
 
@@ -2449,7 +2453,7 @@ elif version == 10:
             print(f"  {pa}: zero variance in sv/pain/rt after filtering, skipping.")
             continue
 
-        # compute TFR
+        # compute single-trial TFR
         tfr = tfr_morlet(
             epo_good,
             freqs=freqs,
@@ -2466,15 +2470,19 @@ elif version == 10:
         n_trials, n_chan, n_freq, n_time = data.shape
         print(f"  TFR shape: {data.shape}")
 
-        # store grids
+        # store grids & info from first valid subject
         if freqs_out is None:
             freqs_out = tfr.freqs.copy()
             times_out = tfr.times.copy()
             ch_names_out = np.array(tfr.ch_names, dtype=object)
+            info_out = tfr.info.copy()
         else:
-            if not np.array_equal(freqs_out, tfr.freqs): raise ValueError(f"{pa}: freq grid mismatch")
-            if not np.array_equal(times_out, tfr.times): raise ValueError(f"{pa}: time grid mismatch")
-            if list(ch_names_out) != tfr.ch_names:       raise ValueError(f"{pa}: channel list mismatch")
+            if not np.array_equal(freqs_out, tfr.freqs):
+                raise ValueError(f"{pa}: freq grid mismatch")
+            if not np.array_equal(times_out, tfr.times):
+                raise ValueError(f"{pa}: time grid mismatch")
+            if list(ch_names_out) != tfr.ch_names:
+                raise ValueError(f"{pa}: channel list mismatch")
 
         # z-score predictors within subject
         sv_z   = stats.zscore(sv_good.astype(float))
@@ -2483,34 +2491,30 @@ elif version == 10:
 
         # design matrix: [sv, pain, rt, intercept]
         X = np.column_stack([sv_z, pain_z, rt_z, np.ones_like(sv_z)])
-        n_cols = X.shape[1]
-        if np.linalg.matrix_rank(X) < n_cols:
+        if np.linalg.matrix_rank(X) < X.shape[1]:
             print(f"  {pa}: design matrix not full rank (collinearity), skipping.")
             continue
 
         # fit regression at each (chan, freq, time)
         betas_sv_sub   = np.zeros((n_chan, n_freq, n_time), dtype=float)
         betas_pain_sub = np.zeros((n_chan, n_freq, n_time), dtype=float)
-        # betas_rt_sub   = np.zeros((n_chan, n_freq, n_time), dtype=float)
 
         for ci in range(n_chan):
-            Pw_flat = data[:, ci, :, :].reshape(n_trials, -1)  # (trials, f*t)
+            Pw_flat = data[:, ci, :, :].reshape(n_trials, -1)   # (trials, f*t)
             B, _, _, _ = np.linalg.lstsq(X, Pw_flat, rcond=None)  # (4, f*t)
-
-            betas_sv_sub[ci]   = B[0, :].reshape(n_freq, n_time)
-            betas_pain_sub[ci] = B[1, :].reshape(n_freq, n_time)
-            # betas_rt_sub[ci] = B[2, :].reshape(n_freq, n_time)
+            betas_sv_sub[ci]   = B[0, :].reshape(n_freq, n_time)  # sv | pain+rt
+            betas_pain_sub[ci] = B[1, :].reshape(n_freq, n_time)  # pain | sv+rt
 
         all_betas_sv.append(betas_sv_sub)
         all_betas_pain.append(betas_pain_sub)
-        # all_betas_rt.append(betas_rt_sub)
-
         used_subs.append(pa)
         print(f"  {pa}: saved betas (sv|pain+rt) and (pain|sv+rt), n_good={n_trials}")
 
-    # save group-level arrays
+    # ---------------------------------------------------------------------
+    # 2) save subject-level beta arrays (like you do in other versions)
+    # ---------------------------------------------------------------------
     if len(all_betas_sv) == 0:
-        print("No subjects with valid beta maps; nothing saved.")
+        print("No subjects with valid beta maps; nothing saved; no stats run.")
     else:
         all_betas_sv   = np.stack(all_betas_sv)     # (subj, ch, f, t)
         all_betas_pain = np.stack(all_betas_pain)
@@ -2528,7 +2532,94 @@ elif version == 10:
         print("  pain betas shape:", all_betas_pain.shape)
         print("  subjects:", used_subs)
 
+        # -----------------------------------------------------------------
+        # 3) v1–3 style GROUP STATS (cluster test) on the beta maps
+        # -----------------------------------------------------------------
+        stats_dir = group_dir / "Zscoring"
+        stats_dir.mkdir(parents=True, exist_ok=True)
 
+        n_subj, n_chan, n_freq, n_time = all_betas_sv.shape
+
+        # channel adjacency (same idea as v1–3)
+        connect_ch, _ = mne.channels.find_ch_adjacency(info_out, ch_type="eeg")
+
+        # adjacency for (chan, freq, time)
+        adjacency = combine_adjacency(n_chan, n_freq, n_time, connect_ch)
+
+        # cluster-forming threshold (same logic as v1–3)
+        if not isinstance(param['cluster_threshold'], dict):
+            p_thresh = param['cluster_threshold'] / 2
+            cluster_threshold = -stats.t.ppf(p_thresh, n_subj - 1)
+        else:
+            cluster_threshold = param['cluster_threshold']
+
+        def run_tfr_cluster(beta_maps, label):
+            """
+            beta_maps: (n_subj, n_chan, n_freq, n_time)
+            Saves:
+              - v10_tval_{label}.npy (chan, freq, time)
+              - v10_pval_{label}.npy (chan, freq, time) cluster p-values painted in
+            Returns min cluster p (for across-map FDR).
+            """
+            print(f"\nSecond-level cluster test for map: {label}")
+
+            X = beta_maps.reshape(n_subj, -1)  # (subj, tests)
+
+            t_obs, clusters, cluster_p_values, _ = permutation_cluster_1samp_test(
+                X,
+                n_permutations=param['nperms'],
+                threshold=cluster_threshold,
+                adjacency=adjacency,
+                tail=0,
+                out_type="mask",
+                n_jobs=param["njobs"],
+                verbose=True
+            )
+
+            # paint cluster p-values into full p-map (exactly your v1–3 pattern)
+            pvals = np.ones_like(t_obs, dtype=float)
+            for clu_mask, p_val in zip(clusters, cluster_p_values):
+                pvals[clu_mask] = p_val
+
+            t_map = t_obs.reshape(n_chan, n_freq, n_time)
+            p_map = pvals.reshape(n_chan, n_freq, n_time)
+
+            np.save(stats_dir / f"v10_tval_{label}.npy", t_map)
+            np.save(stats_dir / f"v10_pval_{label}.npy", p_map)
+
+            # for “across regressor/map FDR” (same as your min_cluster_ps logic)
+            min_p = cluster_p_values.min() if len(cluster_p_values) > 0 else 1.0
+            return min_p
+
+        # run tests for the two maps + optional difference
+        labels = []
+        min_cluster_ps = []
+
+        min_cluster_ps.append(run_tfr_cluster(all_betas_sv, "sv_cov_pain_rt"))
+        labels.append("sv_cov_pain_rt")
+
+        min_cluster_ps.append(run_tfr_cluster(all_betas_pain, "pain_cov_sv_rt"))
+        labels.append("pain_cov_sv_rt")
+
+        # optional: difference map (like your pain–interaction difference idea)
+        beta_diff = all_betas_sv - all_betas_pain
+        min_cluster_ps.append(run_tfr_cluster(beta_diff, "sv_minus_pain"))
+        labels.append("sv_minus_pain")
+
+        # FDR across maps (same “across regressors” idea as v1–3)
+        min_cluster_ps = np.asarray(min_cluster_ps, dtype=float)
+        rej_fdr, p_fdr = fdr_correction(min_cluster_ps, alpha=0.05, method='indep')
+
+        fdr_df = pd.DataFrame({
+            "map": labels,
+            "min_cluster_p": min_cluster_ps,
+            "min_cluster_p_FDR": p_fdr,
+            "sig_FDR": rej_fdr
+        })
+        fdr_df.to_csv(stats_dir / "v10_cluster_FDR_across_maps.csv", index=False)
+        print(f"\nFDR summary across maps saved in {stats_dir}")
+
+        print("\nVersion 10 finished: subject-level beta maps + v1–3-style cluster stats saved.")
 
 
 ### old
