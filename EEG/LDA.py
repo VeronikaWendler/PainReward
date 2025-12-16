@@ -9,10 +9,13 @@ bin_width_ms = 10
 sfreq = epochs_func_loc.info[‘sfreq’]
 samples_per_bin = int((bin_width_ms / 1000) * sfreq)
 print(f”\nFor {sub}, using bin width of {bin_width_ms}ms ({samples_per_bin} samples).“)
+
 epochs_for_training = epochs_func_loc.copy().pick(‘eeg’)
 print(f”Channels selected for training: {len(epochs_for_training.ch_names)}“)
+
 X = epochs_for_training.get_data()
 y = epochs_for_training.metadata[‘image_file’]
+
 model_ch_names = epochs_for_training.ch_names
 n_times = X.shape[2]
 pipeline = make_pipeline(Vectorizer(), StandardScaler(), LogisticRegression(solver=‘liblinear’, random_state=42, max_iter=1000))

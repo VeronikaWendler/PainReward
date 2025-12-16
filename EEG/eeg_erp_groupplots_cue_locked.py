@@ -2074,6 +2074,165 @@ if version == 9:
             )
 
     print("\nVersion 9 ROI-based TFR plotting done.\n")
+    
+    
+if version == 10:
+    print("\nVersion 10: Massuni whole-brain TFR cluster plottig (ch * freq * time)")
+
+    group_dir = Path(outpath)
+
+    # ----------------------------
+    # Choose which beta-map to plot
+    # ----------------------------
+    # If you saved both, just switch this filename.
+    # Example options:
+    # beta_fname = "tfr_beta_sv_pain_para_subxchxfxt.npy"
+    # beta_fname = "tfr_beta_painlevel_subxchxfxt.npy"
+    beta_fname = "tfr_beta_sv_pain_para_subxchxfxt.npy"
+
+    betas_file = group_dir / beta_fname
+    freqs_file = group_dir / "tfr_beta_sv_pain_para_freqs.npy"
+    times_file = group_dir / "tfr_beta_sv_pain_para_times.npy"
+    ch_file    = group_dir / "tfr_beta_sv_pain_para_ch_names.npy"
+
+    if not (betas_file.exists() and freqs_file.exists() and times_file.exists() and ch_file.exists()):
+        raise FileNotFoundError(f"Missing TFR beta files in {group_dir}")
+
+    # shape: (n_subj, n_chan, n_freq, n_time)
+    all_betas = np.load(betas_file)
+    freqs     = np.load(freqs_file)
+    times     = np.load(times_file)
+    ch_names  = np.load(ch_file, allow_pickle=True).tolist()
+
+    n_subj, n_chan, n_freq, n_time = all_betas.shape
+    print("Loaded:", betas_file.name, "shape:", all_betas.shape)
+
+    # ----------------------------
+    # Build MNE info (topos)
+    # ----------------------------
+    dt = float(times[1] - times[0])
+    sfreq = 1.0 / dt
+    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
+    info.set_montage(make_standard_montage("standard_1020"))
+
+    # Drop mastoids for plotting + stats (optional but consistent with your ERP code)
+    chankeep = np.array([c not in ["M1", "M2"] for c in ch_names], dtype=bool)
+    all_betas = all_betas[:, chankeep, :, :]
+    ch_names_kept = [c for c, k in zip(ch_names, chankeep) if k]
+    info = mne.create_info(ch_names=ch_names_kept, sfreq=sfreq, ch_types="eeg")
+    info.set_montage(make_standard_montage("standard_1020"))
+
+    n_subj, n_chan, n_freq, n_time = all_betas.shape
+    print("After dropping M1/M2:", all_betas.shape)
+
+    # ----------------------------
+    # WHOLE-BRAIN CLUSTER TEST
+    # time × (freq×chan)
+    # ----------------------------
+    chan_adj, _ = mne.channels.find_ch_adjacency(info, ch_type="eeg")
+
+    # adjacency in "space" dimension where space = freq × channels
+    space_adj = combine_adjacency(n_freq, chan_adj)
+
+    # cluster test expects: (n_samples, n_times, n_space)
+    # build space vector by flattening (freq, chan) for each time
+    X = np.transpose(all_betas, (0, 3, 2, 1))          # subj, time, freq, chan
+    X = X.reshape(n_subj, n_time, n_freq * n_chan)     # subj, time, space
+
+    # threshold like your ERP logic
+    p_thresh = 0.01 / 2
+    cluster_threshold = -stats.t.ppf(p_thresh, n_subj - 1)
+
+    t_obs, clusters, cluster_p, _ = spatio_temporal_cluster_1samp_test(
+        X,
+        adjacency=space_adj,
+        n_permutations=5000,
+        threshold=cluster_threshold,
+        n_jobs=20,
+        buffer_size=None,
+        out_type="mask"
+    )
+
+    # build a full p-map (time × space)
+    p_map = np.ones_like(t_obs)
+    for clu, pval in zip(clusters, cluster_p):
+        p_map[clu] = pval
+
+    # reshape p-map back to (time, freq, chan) then (chan, freq, time)
+    p_tfc = p_map.reshape(n_time, n_freq, n_chan)
+    p_cft = np.transpose(p_tfc, (2, 1, 0))  # chan, freq, time
+
+    # save for later reuse (so you don’t re-permute every time you plot)
+    np.save(group_dir / f"v10_tvals_{betas_file.stem}.npy", t_obs)
+    np.save(group_dir / f"v10_pmap_{betas_file.stem}.npy", p_map)
+    print("Saved cluster maps (time×space) to group_dir")
+
+    # ----------------------------
+    # Plotting: band topomaps using cluster mask
+    # ----------------------------
+    BANDS = {
+        "theta": (4., 7.),
+        "alpha": (8., 12.),
+        "beta":  (13., 30.)
+    }
+
+    plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
+
+    beta_mean = all_betas.mean(axis=0)  # chan, freq, time
+
+    for band_name, (f_lo, f_hi) in BANDS.items():
+        f_mask = (freqs >= f_lo) & (freqs <= f_hi)
+        if not np.any(f_mask):
+            continue
+
+        beta_band = beta_mean[:, f_mask, :].mean(axis=1)   # chan, time
+        p_band    = p_cft[:, f_mask, :].min(axis=1)        # chan, time (min p across freqs in band)
+
+        ev = mne.EvokedArray(beta_band, info, tmin=times[0])
+
+        for t in plot_times:
+            tidx = np.argmin(np.abs(times - t))
+
+            # mask channels where ANY freq in band is significant at this time
+            mask = (p_band[:, tidx] < 0.05)
+
+            fig, ax = plt.subplots(figsize=(1.8, 1.8))
+            vmax = np.max(np.abs(ev.data))
+            im, _ = plot_topomap(
+                ev.data[:, tidx],
+                pos=ev.info,
+                mask=mask,
+                mask_params=dict(marker='o', markerfacecolor='w', markeredgecolor='k',
+                                 linewidth=0, markersize=3),
+                cmap='RdBu_r',
+                show=False,
+                ch_type='eeg',
+                outlines='head',
+                extrapolate='head',
+                vlim=(-vmax, vmax),
+                axes=ax,
+                sensors=False,
+                contours=0
+            )
+            ax.set_title(f"{band_name} {int(t*1000)} ms", pad=0.1)
+            fig.savefig(
+                opj(outfigpath, f"{fig_prefix}v10_{betas_file.stem}_{band_name}_topo_{int(t*1000)}ms.svg"),
+                dpi=600, bbox_inches="tight"
+            )
+            plt.close(fig)
+
+        # optional: save one colorbar per band
+        fig2, ax2 = plt.subplots(figsize=(0.35, 1.4))
+        cb = fig2.colorbar(im, cax=ax2, orientation="vertical")
+        cb.set_label(f"Beta ({betas_file.stem})\n{band_name}", rotation=270, labelpad=12)
+        fig2.savefig(
+            opj(outfigpath, f"{fig_prefix}v10_{betas_file.stem}_{band_name}_cbar.svg"),
+            dpi=600, bbox_inches="tight"
+        )
+        plt.close(fig2)
+
+    print("\nVersion 10 whole-brain TFR cluster plotting done.\n")
+
 
 # old ------------------------------------------------------------------------------------------------------------------------
 ##############################################################################################################################
