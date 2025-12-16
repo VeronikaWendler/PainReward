@@ -33,12 +33,12 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 5 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 10 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
-# 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
 # partz   - PartZscoring     (raw regressors + z-scored RT)
+
 glm_version = 'z'   
 
 if version == 1:
@@ -86,7 +86,11 @@ elif version == 9:
     outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para_RT_control')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
-
+elif version == 10:
+    outpath = opj(outpathall, 'statistics_new/tfr_mod_9_v10_sv_vs_pain_RT')
+    outfigpath = opj(outpathall, 'figures/tfr_mod_9_v10_sv_vs_pain_RT')
+    if not os.path.exists(outfigpath):
+        os.mkdir(outfigpath)
 else:
     print("No Version")
 
@@ -122,7 +126,7 @@ plt.rc("axes.spines", top=False, right=False)
 plt.rcParams['font.family'] = 'DejaVu Sans'
 
 # -----------------------------------------------------------------------------------------------------------------
-# Regressor bookkeeping – MUST MATCH massunivariate script
+# Regressor bookkeeping – must match massunivariate script
 # -----------------------------------------------------------------------------------------------------------------
 
 regvars = ['painlevel', 'moneylevel', 'interaction']
@@ -2075,163 +2079,177 @@ if version == 9:
 
     print("\nVersion 9 ROI-based TFR plotting done.\n")
     
-    
-if version == 10:
-    print("\nVersion 10: Massuni whole-brain TFR cluster plottig (ch * freq * time)")
+#-------------------------------------------------------------------------------------------------------------------------------------------    
 
-    group_dir = Path(outpath)
+elif version == 10:
+    from scipy.stats import ttest_1samp
+    from statsmodels.stats.multitest import fdrcorrection
+    from mne.channels import make_standard_montage
+    from mne.viz import plot_topomap
 
-    # ----------------------------
-    # Choose which beta-map to plot
-    # ----------------------------
-    # If you saved both, just switch this filename.
-    # Example options:
-    # beta_fname = "tfr_beta_sv_pain_para_subxchxfxt.npy"
-    # beta_fname = "tfr_beta_painlevel_subxchxfxt.npy"
-    beta_fname = "tfr_beta_sv_pain_para_subxchxfxt.npy"
+    print("\n Version 10 plots: Tfr betas for SV, Pain, and SV_pain (cue-locked)")
 
-    betas_file = group_dir / beta_fname
-    freqs_file = group_dir / "tfr_beta_sv_pain_para_freqs.npy"
-    times_file = group_dir / "tfr_beta_sv_pain_para_times.npy"
-    ch_file    = group_dir / "tfr_beta_sv_pain_para_ch_names.npy"
+    # Load arrays
+    betas_sv = np.load(group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy")      # (subj, ch, f, t)
+    betas_pain = np.load(group_dir / "tfr_beta_painlevel_subxchxfxt.npy")      # (subj, ch, f, t)
+    freqs = np.load(group_dir / "tfr_beta_freqs.npy")
+    times = np.load(group_dir / "tfr_beta_times.npy")
+    ch_names = np.load(group_dir / "tfr_beta_ch_names.npy", allow_pickle=True).tolist()
 
-    if not (betas_file.exists() and freqs_file.exists() and times_file.exists() and ch_file.exists()):
-        raise FileNotFoundError(f"Missing TFR beta files in {group_dir}")
+    betas_diff = betas_sv - betas_pain  # SV - Pain per subject
 
-    # shape: (n_subj, n_chan, n_freq, n_time)
-    all_betas = np.load(betas_file)
-    freqs     = np.load(freqs_file)
-    times     = np.load(times_file)
-    ch_names  = np.load(ch_file, allow_pickle=True).tolist()
+    n_subj, n_chan, n_freq, n_time = betas_sv.shape
+    print("Shapes:", betas_sv.shape, betas_pain.shape, betas_diff.shape)
 
-    n_subj, n_chan, n_freq, n_time = all_betas.shape
-    print("Loaded:", betas_file.name, "shape:", all_betas.shape)
-
-    # ----------------------------
-    # Build MNE info (topos)
-    # ----------------------------
+    # MNE info for topomaps
     dt = float(times[1] - times[0])
     sfreq = 1.0 / dt
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
-    info.set_montage(make_standard_montage("standard_1020"))
+    montage = make_standard_montage("standard_1020")
+    info.set_montage(montage)
 
-    # Drop mastoids for plotting + stats (optional but consistent with your ERP code)
-    chankeep = np.array([c not in ["M1", "M2"] for c in ch_names], dtype=bool)
-    all_betas = all_betas[:, chankeep, :, :]
-    ch_names_kept = [c for c, k in zip(ch_names, chankeep) if k]
-    info = mne.create_info(ch_names=ch_names_kept, sfreq=sfreq, ch_types="eeg")
-    info.set_montage(make_standard_montage("standard_1020"))
+    chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
 
-    n_subj, n_chan, n_freq, n_time = all_betas.shape
-    print("After dropping M1/M2:", all_betas.shape)
+    # Plot config
+    plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
+    chan_to_plot = ['Fz', 'FCz', 'Cz', 'CPz', 'Pz', 'POz', 'Oz']
 
-    # ----------------------------
-    # WHOLE-BRAIN CLUSTER TEST
-    # time × (freq×chan)
-    # ----------------------------
-    chan_adj, _ = mne.channels.find_ch_adjacency(info, ch_type="eeg")
-
-    # adjacency in "space" dimension where space = freq × channels
-    space_adj = combine_adjacency(n_freq, chan_adj)
-
-    # cluster test expects: (n_samples, n_times, n_space)
-    # build space vector by flattening (freq, chan) for each time
-    X = np.transpose(all_betas, (0, 3, 2, 1))          # subj, time, freq, chan
-    X = X.reshape(n_subj, n_time, n_freq * n_chan)     # subj, time, space
-
-    # threshold like your ERP logic
-    p_thresh = 0.01 / 2
-    cluster_threshold = -stats.t.ppf(p_thresh, n_subj - 1)
-
-    t_obs, clusters, cluster_p, _ = spatio_temporal_cluster_1samp_test(
-        X,
-        adjacency=space_adj,
-        n_permutations=5000,
-        threshold=cluster_threshold,
-        n_jobs=20,
-        buffer_size=None,
-        out_type="mask"
-    )
-
-    # build a full p-map (time × space)
-    p_map = np.ones_like(t_obs)
-    for clu, pval in zip(clusters, cluster_p):
-        p_map[clu] = pval
-
-    # reshape p-map back to (time, freq, chan) then (chan, freq, time)
-    p_tfc = p_map.reshape(n_time, n_freq, n_chan)
-    p_cft = np.transpose(p_tfc, (2, 1, 0))  # chan, freq, time
-
-    # save for later reuse (so you don’t re-permute every time you plot)
-    np.save(group_dir / f"v10_tvals_{betas_file.stem}.npy", t_obs)
-    np.save(group_dir / f"v10_pmap_{betas_file.stem}.npy", p_map)
-    print("Saved cluster maps (time×space) to group_dir")
-
-    # ----------------------------
-    # Plotting: band topomaps using cluster mask
-    # ----------------------------
     BANDS = {
         "theta": (4., 7.),
         "alpha": (8., 12.),
-        "beta":  (13., 30.)
+        "beta":  (13., 30.),
     }
 
-    plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
+    # Family-wise across 3 maps: SV, Pain, SV-Pain
+    alpha_fam = 0.05
+    alpha = alpha_fam / 3.0
 
-    beta_mean = all_betas.mean(axis=0)  # chan, freq, time
+    def freq_mask(freqs, lo, hi):
+        return (freqs >= lo) & (freqs <= hi)
 
-    for band_name, (f_lo, f_hi) in BANDS.items():
-        f_mask = (freqs >= f_lo) & (freqs <= f_hi)
-        if not np.any(f_mask):
-            continue
+    MAPS = {
+        "sv_pain_para": betas_sv,
+        "painlevel": betas_pain,
+        "sv_minus_pain": betas_diff,
+    }
 
-        beta_band = beta_mean[:, f_mask, :].mean(axis=1)   # chan, time
-        p_band    = p_cft[:, f_mask, :].min(axis=1)        # chan, time (min p across freqs in band)
+    for map_name, betas in MAPS.items():
+        print(f"\n Map: {map_name}")
 
-        ev = mne.EvokedArray(beta_band, info, tmin=times[0])
+        # second-level t-test at each ch,f,t across subjects
+        tvals = np.zeros((n_chan, n_freq, n_time))
+        pvals = np.ones((n_chan, n_freq, n_time))
 
-        for t in plot_times:
-            tidx = np.argmin(np.abs(times - t))
+        for ci in range(n_chan):
+            Y = betas[:, ci, :, :].reshape(n_subj, -1)  # (subj, f*t)
+            t_ci, p_ci = ttest_1samp(Y, popmean=0.0, axis=0, nan_policy="omit")
+            tvals[ci] = t_ci.reshape(n_freq, n_time)
+            pvals[ci] = p_ci.reshape(n_freq, n_time)
 
-            # mask channels where ANY freq in band is significant at this time
-            mask = (p_band[:, tidx] < 0.05)
+        # FDR across entire cube
+        p_flat = pvals.reshape(-1)
+        rej_flat, p_fdr_flat = fdrcorrection(p_flat, alpha=alpha)
+        sig_mask = rej_flat.reshape(n_chan, n_freq, n_time)
 
-            fig, ax = plt.subplots(figsize=(1.8, 1.8))
-            vmax = np.max(np.abs(ev.data))
-            im, _ = plot_topomap(
-                ev.data[:, tidx],
-                pos=ev.info,
-                mask=mask,
-                mask_params=dict(marker='o', markerfacecolor='w', markeredgecolor='k',
-                                 linewidth=0, markersize=3),
-                cmap='RdBu_r',
-                show=False,
-                ch_type='eeg',
-                outlines='head',
-                extrapolate='head',
-                vlim=(-vmax, vmax),
-                axes=ax,
-                sensors=False,
-                contours=0
-            )
-            ax.set_title(f"{band_name} {int(t*1000)} ms", pad=0.1)
-            fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v10_{betas_file.stem}_{band_name}_topo_{int(t*1000)}ms.svg"),
-                dpi=600, bbox_inches="tight"
-            )
-            plt.close(fig)
+        print(f"  Significant samples (FDR, alpha={alpha:.3g}): {sig_mask.sum()} / {sig_mask.size}")
 
-        # optional: save one colorbar per band
-        fig2, ax2 = plt.subplots(figsize=(0.35, 1.4))
-        cb = fig2.colorbar(im, cax=ax2, orientation="vertical")
-        cb.set_label(f"Beta ({betas_file.stem})\n{band_name}", rotation=270, labelpad=12)
-        fig2.savefig(
-            opj(outfigpath, f"{fig_prefix}v10_{betas_file.stem}_{band_name}_cbar.svg"),
-            dpi=600, bbox_inches="tight"
-        )
-        plt.close(fig2)
+        # band-collapsed plots
+        for band_name, (f_lo, f_hi) in BANDS.items():
+            fmask = freq_mask(freqs, f_lo, f_hi)
+            if not np.any(fmask):
+                continue
 
-    print("\nVersion 10 whole-brain TFR cluster plotting done.\n")
+            # subj, ch, t
+            betas_band = betas[:, :, fmask, :].mean(axis=2)
+            # ch, t
+            mean_band = betas_band.mean(axis=0)
+
+            # significance collapsed across freq in band: (ch, t)
+            sig_band = sig_mask[:, fmask, :].any(axis=1)
+
+            # Topomaps
+            times_pos = [np.abs(times - t).argmin() for t in plot_times]
+            vmax = np.max(np.abs(mean_band)) if np.max(np.abs(mean_band)) > 0 else 1e-12
+
+            for tidx, tpos in enumerate(times_pos):
+                fig, ax = plt.subplots(figsize=(1.6, 1.6))
+
+                mask = np.zeros(n_chan, dtype=bool)
+                mask[chankeep] = sig_band[chankeep, tpos]
+
+                im, _ = plot_topomap(
+                    mean_band[:, tpos],
+                    pos=info,
+                    mask=mask,
+                    mask_params=dict(marker='o',
+                                     markerfacecolor='w',
+                                     markeredgecolor='k',
+                                     linewidth=0,
+                                     markersize=3),
+                    cmap='RdBu_r',
+                    show=False,
+                    ch_type='eeg',
+                    outlines='head',
+                    extrapolate='head',
+                    vlim=(-vmax, vmax),
+                    axes=ax,
+                    sensors=False,
+                    contours=0,
+                )
+                ax.set_title(f"{map_name} | {band_name} | {int(plot_times[tidx]*1000)} ms",
+                             fontsize=10, pad=2)
+
+                fig.savefig(
+                    opj(outfigpath, f"v10_{map_name}_{band_name}_topo_t{int(plot_times[tidx]*1000)}.svg"),
+                    dpi=600, bbox_inches='tight'
+                )
+
+                if tidx == len(times_pos) - 1:
+                    fig2, cax = plt.subplots(figsize=(0.35, 1.4))
+                    cbar = fig2.colorbar(im, cax=cax, orientation='vertical', aspect=1)
+                    cbar.set_label(f"Beta (power ~ {map_name})\n{band_name}",
+                                   rotation=270, labelpad=12, fontsize=9)
+                    cbar.ax.tick_params(labelsize=8)
+                    fig2.savefig(
+                        opj(outfigpath, f"v10_{map_name}_{band_name}_topo_cbar.svg"),
+                        dpi=600, bbox_inches='tight'
+                    )
+
+            # Timecourses
+            for ch in chan_to_plot:
+                if ch not in ch_names:
+                    continue
+                pick = ch_names.index(ch)
+
+                fig, ax = plt.subplots(figsize=(4.2, 2.6))
+                y = mean_band[pick, :]
+                ax.plot(times * 1000, y, linewidth=2)
+
+                ax.axhline(0, linestyle='--', color='gray')
+                ax.axvline(0, linestyle='--', color='gray')
+                ax.set_xlabel("Time (ms)")
+                ax.set_ylabel(f"Beta ({band_name}) @ {ch}")
+                ax.set_title(f"{map_name} | {band_name} | {ch}", fontsize=10)
+
+                sig_t = sig_band[pick, :]
+                timestep_ms = (times[1] - times[0]) * 1000.0
+                y0 = np.min(y) - 0.05 * (np.max(y) - np.min(y) + 1e-12)
+
+                for ti, tms in enumerate(times * 1000):
+                    if sig_t[ti]:
+                        ax.fill_between([tms, tms + timestep_ms],
+                                        y0, y0 + 0.02 * (np.max(y) - np.min(y) + 1e-12),
+                                        alpha=0.4, facecolor='red')
+
+                ax.set_xticks(np.arange(-200, 1200, 200))
+                ax.tick_params(labelsize=10)
+                fig.tight_layout()
+                fig.savefig(
+                    opj(outfigpath, f"v10_{map_name}_{band_name}_timecourse_{ch}.svg"),
+                    dpi=600, bbox_inches='tight'
+                )
+
+    print("\nVersion 10 plotting (SV, Pain, SV–Pain) done.\n")
 
 
 # old ------------------------------------------------------------------------------------------------------------------------
