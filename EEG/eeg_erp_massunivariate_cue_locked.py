@@ -2543,8 +2543,7 @@ elif version == 10:
         # channel adjacency (same idea as v1–3)
         connect_ch, _ = mne.channels.find_ch_adjacency(info_out, ch_type="eeg")
 
-        # adjacency for (chan, freq, time)
-        adjacency = combine_adjacency(n_chan, n_freq, n_time, connect_ch)
+        adjacency = combine_adjacency(connect_ch, n_freq, n_time)
 
         # cluster-forming threshold (same logic as v1–3)
         if not isinstance(param['cluster_threshold'], dict):
