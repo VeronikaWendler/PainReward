@@ -2301,7 +2301,7 @@ if version == 9:
             continue
 
         betas_sv_sub = np.zeros((n_chan, n_freq, n_time), dtype=float)
-        # betas_rt_sub = np.zeros_like(betas_sv_sub)  # if you want RT betas too
+        # betas_rt_sub = np.zeros_like(betas_sv_sub)  
 
         # regression at each (chan, freq, time): power ~ sv_z + rt_z + intercept
         for ci in range(n_chan):
@@ -2331,7 +2331,6 @@ if version == 9:
         all_betas_sv = np.stack(all_betas_sv)  # (n_subj, n_chan, n_freq, n_time)
 
         np.save(group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy", all_betas_sv)
-        # If you also want RT betas:
         # all_betas_rt = np.stack(all_betas_rt)
         # np.save(group_dir / "tfr_beta_rt_subxchxfxt.npy", all_betas_rt)
 
@@ -2347,7 +2346,7 @@ if version == 9:
 
 
 elif version == 10:
-
+    from mne.time_frequency import tfr_morlet
     print("\n--- Version 10: TFR trial-wise betas for sv_pain_para AND painlevel (cue-locked; sv|pain+RT and pain|sv+RT) ---")
 
     # sanity checks on mod_data
