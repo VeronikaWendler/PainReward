@@ -159,7 +159,6 @@ chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
 
 # Version 1, 2, 3 ---------------------------------------------------------------------------------------------------
 
-# Version 1, 2, 3 ---------------------------------------------------------------------------------------------------
 
 if version in [1, 2, 3]:
 
@@ -180,7 +179,7 @@ if version in [1, 2, 3]:
 
         regvarname = regvarsnames[ridx]
 
-        # Nice but simple colour choice per regressor
+        #simple colour choice per regressor
         if regvar == 'painlevel':
             vminmax = 6
             cmap = 'Blues'
