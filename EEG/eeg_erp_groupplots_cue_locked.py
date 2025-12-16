@@ -2085,16 +2085,35 @@ if version == 9:
 #-------------------------------------------------------------------------------------------------------------------------------------------    
 
 elif version == 10:
+    """
+    Plotting for Version 10:
+    - loads v10_tval_*.npy and v10_pval_*.npy (cluster p-values painted in)
+    - makes:
+        1) time×freq heatmap (ROI-averaged t-values; sig overlay)
+        2) topomaps for selected (freq band, time window) with sig mask
+        3) ROI band-limited timecourse with sig bar
+    """
+
+    from pathlib import Path
     from mne.channels import make_standard_montage
 
-    print("\n--- Plotting Version 10: TFR cluster-permutation results (band-collapsed) ---")
+    print("\n--- Plotting Version 10: full TFR mass-univariate cluster results ---")
 
-    stats_dir = Path(outpath) 
+    group_dir = Path(outpath)  # .../tfr_mod_9_v10_sv_vs_pain_RT
+    stats_dir = group_dir / "Zscoring"
+    if not stats_dir.exists():
+        raise FileNotFoundError(f"Stats dir not found: {stats_dir}")
 
-    # --- load grids ---
-    freqs = np.load(Path(outpath) / "tfr_beta_freqs.npy")
-    times = np.load(Path(outpath) / "tfr_beta_times.npy")
-    ch_names = np.load(Path(outpath) / "tfr_beta_ch_names.npy", allow_pickle=True).tolist()
+    # ----------------------------
+    # Load grids saved by v10
+    # ----------------------------
+    freqs = np.load(group_dir / "tfr_beta_freqs.npy")              # (n_freq,)
+    times = np.load(group_dir / "tfr_beta_times.npy")              # (n_time,)
+    ch_names = np.load(group_dir / "tfr_beta_ch_names.npy", allow_pickle=True).tolist()
+
+    n_chan = len(ch_names)
+    n_freq = len(freqs)
+    n_time = len(times)
 
     # Build Info for topomaps
     dt = float(times[1] - times[0])
@@ -2102,54 +2121,116 @@ elif version == 10:
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
     info.set_montage(make_standard_montage("standard_1020"))
 
-    chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
+    # exclude mastoids like elsewhere
+    chankeep = np.array([c not in ["M1", "M2"] for c in ch_names], dtype=bool)
 
-    # --- choose maps to plot (match your v10 save labels) ---
-    maps = [
-        ("sv_cov_pain_rt", "SV | pain+RT", "RdBu_r"),
-        ("pain_cov_sv_rt", "Pain | sv+RT", "RdBu_r"),
-        ("sv_minus_pain", "SV − Pain", "RdBu_r"),
+    # ----------------------------
+    # What to plot (edit here)
+    # ----------------------------
+    MAPS = [
+        ("sv_cov_pain_rt",  "SV | pain + RT"),
+        ("pain_cov_sv_rt",  "Pain | SV + RT"),
+        ("sv_minus_pain",   "SV − Pain"),
     ]
 
-    # --- choose frequency bands (you can add more) ---
+    # Choose ROIs and bands (edit as you like)
+    ROI_CP = ["Cz", "CPz", "Pz", "POz", "P1", "P2"]
+    ROI_F  = ["Fz", "FCz", "F1", "F2", "F4"]
+
     BANDS = {
         "theta": (4., 7.),
         "alpha": (8., 12.),
         "beta":  (13., 30.),
     }
 
-    alpha_plot = 0.05  
+    # plotting times for topomaps (seconds)
+    plot_times = [0.2, 0.4, 0.6, 0.8, 1.0]
 
-    # time points for topomaps
-    times_pos = [np.abs(times - t).argmin() for t in plot_times]
+    # utility
+    def _idx_from_list(chlist):
+        return [ch_names.index(c) for c in chlist if c in ch_names]
 
-    for label, pretty, cmap in maps:
-        tfile = stats_dir / f"v10_tval_{label}.npy"  # (chan, freq, time)
-        pfile = stats_dir / f"v10_pval_{label}.npy"
+    def _nearest_time_idx(t):
+        return int(np.argmin(np.abs(times - t)))
 
+    def _mask_band(band):
+        f_lo, f_hi = BANDS[band]
+        return (freqs >= f_lo) & (freqs <= f_hi)
+
+    def _savefig(fig, fname):
+        fig.tight_layout()
+        fig.savefig(opj(outfigpath, fname), dpi=600, bbox_inches="tight")
+        plt.close(fig)
+
+
+    for map_key, map_title in MAPS:
+        tfile = stats_dir / f"v10_tval_{map_key}.npy"
+        pfile = stats_dir / f"v10_pval_{map_key}.npy"
         if not (tfile.exists() and pfile.exists()):
-            print(f"Missing {label} files, skipping.")
+            print(f"  Missing files for {map_key}, skipping.")
             continue
 
-        tvals = np.load(tfile)   # (chan, freq, time)
-        pvals = np.load(pfile)
+        t_map = np.load(tfile)   # (chan, freq, time)
+        p_map = np.load(pfile)   # (chan, freq, time) painted cluster p-values
 
-        for band_name, (f_lo, f_hi) in BANDS.items():
-            fmask = (freqs >= f_lo) & (freqs <= f_hi)
+        assert t_map.shape == (n_chan, n_freq, n_time), f"t_map shape mismatch: {t_map.shape}"
+        assert p_map.shape == (n_chan, n_freq, n_time), f"p_map shape mismatch: {p_map.shape}"
+
+
+        for roi_name, roi_list in [("CP", ROI_CP), ("F", ROI_F)]:
+            roi_idx = _idx_from_list(roi_list)
+            if len(roi_idx) == 0:
+                continue
+
+            t_roi = t_map[roi_idx].mean(axis=0)          # (freq, time)
+            p_roi = p_map[roi_idx].min(axis=0)           # (freq, time) conservative "any channel sig"
+
+            fig, ax = plt.subplots(figsize=(6.0, 3.2))
+            im = ax.imshow(
+                t_roi,
+                aspect="auto",
+                origin="lower",
+                extent=[times[0]*1000, times[-1]*1000, freqs[0], freqs[-1]],
+            )
+            ax.set_title(f"{map_title} – ROI {roi_name} (mean t)")
+            ax.set_xlabel("Time (ms)")
+            ax.set_ylabel("Frequency (Hz)")
+            fig.colorbar(im, ax=ax, shrink=0.9, label="t-value")
+
+            # overlay significance contour (cluster p<0.05)
+            sig = (p_roi < 0.05)
+            if np.any(sig):
+                # contour needs x/y grid
+                xx = np.linspace(times[0]*1000, times[-1]*1000, n_time)
+                yy = np.linspace(freqs[0], freqs[-1], n_freq)
+                ax.contour(xx, yy, sig.astype(int), levels=[0.5], linewidths=1)
+
+            _savefig(fig, f"{fig_prefix}v10_{map_key}_heatmap_t_ROI{roi_name}.svg")
+
+
+        # ----------------------------------------
+        for band_name in ["theta", "alpha", "beta"]:
+            fmask = _mask_band(band_name)
             if not np.any(fmask):
                 continue
 
-            t_band = tvals[:, fmask, :].mean(axis=1)
-            p_band = np.min(pvals[:, fmask, :], axis=1)
+            t_band = t_map[:, fmask, :].mean(axis=1)  # (chan, time)
 
-            # topomaps at plot_times ----------------
+            sig_band = (p_map[:, fmask, :] < 0.05).any(axis=1)  # (chan, time)
+
+            times_pos = [_nearest_time_idx(t) for t in plot_times]
+
+            # vmax symmetric
+            vmax = np.nanmax(np.abs(t_band[chankeep, :]))
+            if not np.isfinite(vmax) or vmax == 0:
+                vmax = 1.0
+
             for tidx, tpos in enumerate(times_pos):
-                fig, ax = plt.subplots(figsize=(1.6, 1.6))
+                fig, ax = plt.subplots(figsize=(1.8, 1.8))
 
-                p_row = p_band[:, tpos]
-                mask = (p_row < alpha_plot) & chankeep
+                mask = np.zeros(n_chan, dtype=bool)
+                mask[chankeep] = sig_band[chankeep, tpos]
 
-                vmax = np.max(np.abs(t_band[:, tpos]))
                 im, _ = plot_topomap(
                     t_band[:, tpos],
                     pos=info,
@@ -2158,66 +2239,70 @@ elif version == 10:
                                      markerfacecolor='w',
                                      markeredgecolor='k',
                                      linewidth=0,
-                                     markersize=3),
-                    cmap=cmap,
+                                     markersize=2),
+                    cmap="RdBu_r",
                     show=False,
-                    ch_type='eeg',
-                    outlines='head',
-                    extrapolate='head',
+                    outlines="head",
+                    extrapolate="head",
                     vlim=(-vmax, vmax),
                     axes=ax,
                     sensors=False,
                     contours=0,
                 )
+                ax.set_title(f"{map_title}\n{band_name} @ {int(plot_times[tidx]*1000)} ms",
+                             fontsize=param["labelfontsize"]-1)
 
-                ax.set_title(f"{pretty}\n{band_name} {int(plot_times[tidx]*1000)} ms",
-                             fontdict={'size': param['labelfontsize']-1},
-                             pad=0.1)
+                _savefig(fig, f"{fig_prefix}v10_{map_key}_topo_t_{band_name}_{int(plot_times[tidx]*1000)}ms.svg")
 
-                fig.savefig(
-                    opj(outfigpath,
-                        f"{fig_prefix}v10_topo_{label}_{band_name}_{int(plot_times[tidx]*1000)}ms.svg"),
-                    dpi=600, bbox_inches="tight"
-                )
+                if tidx + 1 == len(times_pos):
+                    fig2, cax = plt.subplots(figsize=(0.25, 1.6))
+                    cb = fig2.colorbar(im, cax=cax, orientation="vertical")
+                    cb.set_label("t-value", rotation=270, labelpad=12,
+                                 fontdict={"fontsize": param["labelfontsize"]-1})
+                    cb.ax.tick_params(labelsize=param["ticksfontsize"]-2)
+                    _savefig(fig2, f"{fig_prefix}v10_{map_key}_topo_t_{band_name}_cbar.svg")
 
-            # timecourses at selected channels ----------------
-            for c in chan_to_plot:
-                if c not in ch_names:
+        # ----------------------------------------
+        for roi_name, roi_list in [("CP", ROI_CP), ("F", ROI_F)]:
+            roi_idx = _idx_from_list(roi_list)
+            if len(roi_idx) == 0:
+                continue
+
+            for band_name in ["theta", "alpha", "beta"]:
+                fmask = _mask_band(band_name)
+                if not np.any(fmask):
                     continue
-                pick = ch_names.index(c)
 
-                fig, ax = plt.subplots(figsize=(4, 2.5))
-                y = t_band[pick, :]  s
+                # ROI mean t(time) after averaging over chan and freq
+                t_tc = t_map[roi_idx][:, fmask, :].mean(axis=(0, 1))  # (time,)
 
-                ax.plot(times * 1000, y, lw=2)
-                ax.axhline(0, ls="--", color="gray")
-                ax.axvline(0, ls="--", color="gray")
+                # significance at time if ANY point in ROI×band is in a significant cluster
+                sig_tc = (p_map[roi_idx][:, fmask, :] < 0.05).any(axis=(0, 1))  # (time,)
 
-                ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
-                ax.set_ylabel(f"t ({pretty}, {band_name})", fontsize=param["labelfontsize"])
+                fig, ax = plt.subplots(figsize=(4.8, 2.8))
+                ax.plot(times * 1000, t_tc, lw=2)
+                ax.axhline(0, linestyle="--", color="gray")
+                ax.axvline(0, linestyle="--", color="gray")
+                ax.set_xlabel("Time (ms)")
+                ax.set_ylabel("Mean t-value")
+                ax.set_title(f"{map_title} – ROI {roi_name} – {band_name}")
+
+                # sig bar
+                if len(times) > 1:
+                    dt_ms = (times[1] - times[0]) * 1000
+                else:
+                    dt_ms = 1.0
+
+                y0 = np.nanmin(t_tc) - 0.2
+                y1 = y0 + 0.15
+                for i, tt in enumerate(times * 1000):
+                    if sig_tc[i]:
+                        ax.fill_between([tt, tt + dt_ms], y0, y1, alpha=0.3)
+
                 ax.tick_params(labelsize=param["ticksfontsize"])
-
-                dt_ms = 1000.0 * (times[1] - times[0])
-                sig = (p_band[pick, :] < alpha_plot)
-                ymin = ax.get_ylim()[0]
-                for ti, tt in enumerate(times * 1000):
-                    if sig[ti]:
-                        ax.fill_between([tt, tt + dt_ms],
-                                        ymin, ymin + 0.12*(ax.get_ylim()[1]-ymin),
-                                        alpha=0.3)
-
-                ax.set_xticks(np.arange(-200, 1200, 200))
-                ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
-
-                fig.tight_layout()
-                fig.savefig(
-                    opj(outfigpath,
-                        f"{fig_prefix}v10_timecourse_{label}_{band_name}_{c}.svg"),
-                    dpi=600, bbox_inches="tight"
-                )
+                _savefig(fig, f"{fig_prefix}v10_{map_key}_timecourse_t_ROI{roi_name}_{band_name}.svg")
 
     print("\nVersion 10 plotting done.\n")
-
 
 # old ------------------------------------------------------------------------------------------------------------------------
 ##############################################################################################################################
