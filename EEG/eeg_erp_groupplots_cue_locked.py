@@ -2120,11 +2120,8 @@ elif version == 10:
         "alpha": (8., 12.),
         "beta":  (13., 30.),
     }
-
-    # Family-wise across 3 maps: SV, Pain, SV-Pain
-    alpha_fam = 0.05
-    alpha = alpha_fam / 3.0
-
+    alpha = 0.05
+   
     def freq_mask(freqs, lo, hi):
         return (freqs >= lo) & (freqs <= hi)
 
