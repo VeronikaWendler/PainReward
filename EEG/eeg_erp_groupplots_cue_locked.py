@@ -2088,6 +2088,7 @@ elif version == 10:
     from mne.viz import plot_topomap
 
     print("\n Version 10 plots: Tfr betas for SV, Pain, and SV_pain (cue-locked)")
+    group_dir = Path(outpath)
 
     # Load arrays
     betas_sv = np.load(group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy")      # (subj, ch, f, t)
