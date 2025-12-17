@@ -36,7 +36,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 11 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 9 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -1867,7 +1867,7 @@ if version == 9:
     sfreq = 1.0 / dt                  # e.g. ~256 Hz
 
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
-    montage = make_standard_montage('standard_1020')
+    montage = make_standard_montage('easycap-M1')
     info.set_montage(montage)
 
     # exclude mastoids (same as ERP code)
