@@ -2313,6 +2313,8 @@ elif version == 10:
 if version == 11:
     from scipy.stats import ttest_1samp
     from statsmodels.stats.multitest import fdrcorrection
+    from mne.channels import make_standard_montage
+
 
     print("\n--- Version 9: TFR betas for sv_pain_para (band-limited, ERP-style) ---")
 
