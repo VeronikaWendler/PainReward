@@ -2620,7 +2620,14 @@ elif version == 10:
 
         print("\nVersion 10 finished: subject-level beta maps + v1–3-style cluster stats saved.")
 
+elif version == 11:
+    # 9 
+# TFR beta maps for sv_pain_para (cue-locked), ERP-like per band
+# using FDR correction over chan x time within each band
+# ----------------------------------------------------------------------
 
+
+    
 ### old
 
 ### old

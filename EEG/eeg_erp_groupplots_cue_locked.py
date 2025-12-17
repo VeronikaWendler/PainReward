@@ -36,7 +36,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 10 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 11 # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -92,6 +92,11 @@ elif version == 9:
 elif version == 10:
     outpath = opj(outpathall, 'statistics_new/tfr_mod_9_v10_sv_vs_pain_RT')
     outfigpath = opj(outpathall, 'figures/tfr_mod_9_v10_sv_vs_pain_RT')
+    if not os.path.exists(outfigpath):
+        os.mkdir(outfigpath)
+elif version == 11:
+    outpath = opj(outpathall, 'statistics_new/tfr_mod_9_v9_sv_pain_para')
+    outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para_wholebrain')
     if not os.path.exists(outfigpath):
         os.mkdir(outfigpath)
 else:
@@ -1561,7 +1566,6 @@ if version == 8:
 
 
 # # 9 
-# # TFR beta maps for sv_pain_para (cue-locked)
 # if version == 9: 
 #     from scipy.stats import ttest_1samp
 #     from statsmodels.stats.multitest import fdrcorrection
@@ -2303,6 +2307,216 @@ elif version == 10:
                 _savefig(fig, f"{fig_prefix}v10_{map_key}_timecourse_t_ROI{roi_name}_{band_name}.svg")
 
     print("\nVersion 10 plotting done.\n")
+    
+    
+    
+if version == 11:
+    from scipy.stats import ttest_1samp
+    from statsmodels.stats.multitest import fdrcorrection
+
+    print("\n--- Version 9: TFR betas for sv_pain_para (band-limited, ERP-style) ---")
+
+    group_dir = Path(outpath)  # already tfr_mod_9_v9_sv_pain_para
+    betas_file = group_dir / "tfr_beta_sv_pain_para_subxchxfxt.npy"
+    freqs_file = group_dir / "tfr_beta_sv_pain_para_freqs.npy"
+    times_file = group_dir / "tfr_beta_sv_pain_para_times.npy"
+    ch_file    = group_dir / "tfr_beta_sv_pain_para_ch_names.npy"
+
+    if not (betas_file.exists() and freqs_file.exists()
+            and times_file.exists() and ch_file.exists()):
+        raise FileNotFoundError("One or more TFR beta files are missing in "
+                                f"{group_dir}")
+
+    # shape: (n_subj, n_chan, n_freq, n_time)
+    all_betas = np.load(betas_file)
+    freqs     = np.load(freqs_file)                    # (n_freq,)
+    times     = np.load(times_file)                    # (n_time,)
+    ch_names  = np.load(ch_file, allow_pickle=True).tolist()
+
+    n_subj, n_chan, n_freq, n_time = all_betas.shape
+
+    print("all_betas shape:", all_betas.shape)
+    print("n_freq:", len(freqs), "n_time:", len(times), "n_chan:", len(ch_names))
+
+    # ------------------------------------------------------------------
+    # Build MNE Info (needed for topomaps & timecourses)
+    # ------------------------------------------------------------------
+    dt = float(times[1] - times[0])   # seconds
+    sfreq = 1.0 / dt                  # e.g. ~256 Hz
+    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
+
+    # exclude mastoids (same as ERP code)
+    chankeep = np.array([c not in ['M1', 'M2'] for c in ch_names])
+
+    # ------------------------------------------------------------------
+    # Define frequency bands (you can tweak these)
+    # ------------------------------------------------------------------
+    BANDS = {
+        "delta": (0.5, 4.),
+        "theta": (4., 7.),
+        "alpha": (8., 12.),
+        "beta":  (13., 30.),
+        "low_gamma": (31., 45.)
+    }
+
+    # ------------------------------------------------------------------
+    # Loop over bands: average over freq, then do ERP-style stats & plots
+    # ------------------------------------------------------------------
+    for band_name, (f_lo, f_hi) in BANDS.items():
+        print(f"\n--- Band: {band_name} ({f_lo}-{f_hi} Hz) ---")
+
+        # Frequency mask for this band
+        f_mask = (freqs >= f_lo) & (freqs <= f_hi)
+        if not np.any(f_mask):
+            print(f"  -> No frequencies in this range, skipping.")
+            continue
+
+        # 1) Collapse freq dimension within band
+        #    all_betas_band: (n_subj, n_chan, n_time)
+        all_betas_band = all_betas[:, :, f_mask, :].mean(axis=2)
+
+        # 2) Grand-average betas across subjects: (n_chan, n_time)
+        beta_mean_band = all_betas_band.mean(axis=0)
+
+        # 3) Second-level t-test vs 0 at each (chan, time)
+        #    We'll store as (n_time, n_chan) to match your ERP pvals shape.
+        tvals_band = np.zeros((n_time, n_chan))
+        pvals_band = np.zeros((n_time, n_chan))
+
+        for ti in range(n_time):
+            # betas at this time across subjects: shape (n_subj, n_chan)
+            b_t = all_betas_band[:, :, ti]
+            t_t, p_t = ttest_1samp(
+                b_t,
+                popmean=0.0,
+                axis=0,
+                nan_policy="omit"
+            )
+            tvals_band[ti, :] = t_t
+            pvals_band[ti, :] = p_t
+
+        # 4) FDR correction over chan x time (within this band)
+        p_flat = pvals_band.reshape(-1)
+        rej_flat, p_fdr_flat = fdrcorrection(p_flat, alpha=0.05)
+        sig_mask_band = rej_flat.reshape(pvals_band.shape)      # (time, chan)
+        pvals_fdr_band = p_fdr_flat.reshape(pvals_band.shape)   # same shape
+
+        print(f"  -> Significant samples (FDR, p<0.05): {sig_mask_band.sum()}")
+
+        # 5) Wrap mean beta into Evoked for plotting (like beta_gavg in ERP)
+        beta_ev_band = mne.EvokedArray(beta_mean_band, info, tmin=times[0])
+
+        # ------------------------------------------------------------------
+        # 5A. Topomaps at selected times (like ERP v7)
+        # ------------------------------------------------------------------
+        # here we use the same plot_times defined earlier in your script
+        times_pos = [np.abs(beta_ev_band.times - t).argmin() for t in plot_times]
+
+        for tidx, tpos in enumerate(times_pos):
+            fig, topo_axis = plt.subplots(figsize=(1.5, 1.5))
+
+            # FDR-corrected p-values at this time point
+            p_row = pvals_fdr_band[tpos, :]     # (n_chan,)
+
+            # Sig mask for non-mastoid channels
+            sig_non_mastoid = (p_row < 0.05) & chankeep
+            mask = sig_non_mastoid
+
+            vmax = np.max(np.abs(beta_ev_band.data))
+            im, _ = plot_topomap(
+                beta_ev_band.data[:, tpos],
+                pos=beta_ev_band.info,
+                mask=mask,
+                mask_params=dict(marker='o',
+                                 markerfacecolor='w',
+                                 markeredgecolor='k',
+                                 linewidth=0,
+                                 markersize=3),
+                cmap='RdBu_r',
+                show=False,
+                ch_type='eeg',
+                outlines='head',
+                extrapolate='head',
+                vlim=(-vmax, vmax),
+                axes=topo_axis,
+                sensors=False,
+                contours=0,
+            )
+            topo_axis.set_title(
+                f"{band_name} {int(plot_times[tidx]*1000)} ms",
+                fontdict={'size': param['labelfontsize']-1},
+                pad=0.1
+            )
+
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}v9_{band_name}_topo_beta_t{int(plot_times[tidx]*1000)}.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+
+            # save colourbar on last time point
+            if tidx + 1 == len(times_pos):
+                fig2, ax = plt.subplots(figsize=(0.3, 1.2))
+                cbar = fig2.colorbar(im, cax=ax, orientation='vertical', aspect=1)
+                cbar.set_label(
+                    f'Beta (power ~ sv_pain_para)\n{band_name}',
+                    rotation=270, labelpad=12,
+                    fontdict={'fontsize': param['labelfontsize']-1}
+                )
+                cbar.ax.tick_params(labelsize=param['ticksfontsize']-2)
+                fig2.savefig(
+                    opj(outfigpath,
+                        f'{fig_prefix}v9_{band_name}_topo_beta_cbar.svg'),
+                    dpi=600,
+                    bbox_inches='tight'
+                )
+
+        # ------------------------------------------------------------------
+        # 5B. Timecourses at ROI channels with sig bar (like ERP v7)
+        # ------------------------------------------------------------------
+        for c in chan_to_plot:
+            if c not in beta_ev_band.ch_names:
+                continue
+
+            pick = beta_ev_band.ch_names.index(c)
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2.5))
+
+            y = beta_ev_band.data[pick, :]      # beta over time
+            ax.plot(times * 1000, y, linewidth=2)
+
+            ax.set_xlabel('Time (ms)',
+                          fontdict={'size': param['labelfontsize']})
+            ax.set_ylabel(f'Beta ({band_name}, power ~ sv_pain_para)',
+                          fontdict={'size': param['labelfontsize']})
+            ax.axhline(0, linestyle='--', color='gray')
+            ax.axvline(0, linestyle='--', color='gray')
+
+            # significance shading at the bottom (FDR-corrected)
+            timestep = 1000.0 / param['testresampfreq']   # ms
+            for tidx2, t_ms in enumerate(times * 1000):
+                if sig_mask_band[tidx2, pick]:
+                    ax.fill_between(
+                        [t_ms, t_ms + timestep],
+                        y.min() - 0.02,
+                        y.min() - 0.005,
+                        alpha=0.4,
+                        facecolor='red'
+                    )
+
+            ax.set_xticks(np.arange(-200, 1200, 200))
+            ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
+            ax.tick_params(labelsize=param['ticksfontsize'])
+            fig.tight_layout()
+            fig.savefig(
+                opj(outfigpath,
+                    f'{fig_prefix}v9_{band_name}_timecourse_{c}.svg'),
+                dpi=600,
+                bbox_inches='tight'
+            )
+
+    print("\nVersion 11 band-wise TFR plotting done (ERP-style).\n")
+
 
 # old ------------------------------------------------------------------------------------------------------------------------
 ##############################################################################################################################
