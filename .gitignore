@@ -9,6 +9,8 @@ EEG/EEG_models_dir/
 Hddm_Docker_August_24/derivatives/
 EEG/eeg_mvpa_decode_timecourse.py
 EEG/correlation.py
-
-
+EEG/eeg_erp_massunivariate_resp_locked.py
+EEG/eeg_erp_massunivariate_cue.py
+EEG/eeg_erp_groupplots_resp_locked.py
+EEG/eeg_erp_groupplots_cue.py
 
