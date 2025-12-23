@@ -38,7 +38,7 @@ layout = BIDSLayout(outpathall)
 
 version = 11# 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
-v11_mode = "separate"   # "separate" or "joint"
+v11_mode = "joint"   # "separate" or "joint"
 
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
