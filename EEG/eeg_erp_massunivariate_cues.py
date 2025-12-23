@@ -241,7 +241,7 @@ if version in [1, 2, 3, 4, 7, 11, 12]:
             epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_passive',                   
                                   p + '_passive_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
-        elif version in [2, 3, 4, 7, 11]:
+        elif version in [2, 3, 4, 7, 11, 12]:
             epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
                                   p + '_decision_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
