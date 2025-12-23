@@ -100,8 +100,8 @@ elif version == 10:
 elif version == 11:
     base_v11 = opj(outpathall, 'statistics_new/erps_massuni_drift_sv_subsetOV')
     if v11_mode == "separate":
-        outpath = opj(base_v11, "v11_separateGLMs_like_v123")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v11_separateGLMs_like_v123")
+        outpath = opj(base_v11, "v11_separateGLMs")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v11_separateGLMs")
     elif v11_mode == "joint":
         outpath = opj(base_v11, "v11_jointGLM_pain_money_RT")
         outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v11_jointGLM_pain_money_RT")
