@@ -217,7 +217,8 @@ if version == 7:
     regvarsnames = ['SV_pain_para']
 if version == 11:
     regvars = ['sv_pain_para', 'sv_money']
-
+if version == 12:
+    regvars = ['sv_pain_para', 'sv_money']
 #all_epos = [[] for i in range(len(regvars))]
 #allbetasnp = []
 #betas = [[] for i in range(len(regvars))]
@@ -229,7 +230,7 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1, 2, 3, 4, 7, 11]:
+if version in [1, 2, 3, 4, 7, 11, 12]:
     filtered_data = []
     for p in part:
         # data for this participant
