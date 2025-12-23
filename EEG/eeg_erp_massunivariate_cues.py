@@ -2637,6 +2637,7 @@ elif version == 10:
 
         print("\nVersion 10 finished: subject-level beta maps + v1–3-style cluster stats saved.")
         
+        
 elif version == 11:
 
     z_dir = Path(outpath) / "Zscoring"
@@ -2791,7 +2792,7 @@ elif version == 11:
     mne.grand_average(betas[1]).save(z_dir / "beta_gavg_SV_money-ave.fif", overwrite=True)
 
 
-elif version == 12:
+#elif version == 12:
     # 9 
 # TFR beta maps for sv_pain_para (cue-locked), ERP-like per band
 # using FDR correction over chan x time within each band
