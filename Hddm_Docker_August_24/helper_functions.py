@@ -53,8 +53,10 @@ def prepare_data(file_path):
         pain = row['painlevel']
         if money + pain <= 5:
             OV = 'low_OV'
-        else:
+        elif money + pain > 6:
             OV = 'high_OV'
+        else:
+            OV = 'mid_OV'
         OV_cat.append(OV)
     data['OV_value'] = OV_cat
     
