@@ -59,9 +59,9 @@ if not os.path.exists(outpath):
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
 version = 13    # version 1 is for decision and version 2 is for passive phase 
-v11_mode = "separate"   # or "joint"s
+v11_mode = "joint"   # or "joint"s
 
-v13_mode = "separate"   # or "joint"s
+v13_mode = "joint"   # or "joint"s
 
 
 if version == 1:
