@@ -228,6 +228,8 @@ if version == 13:
 if version == 14:
     regvars = ["painlevel", "moneylevel"]
     regvarsnames = ["Painlevel", "Moneylevel"]
+    
+    
 plot_times = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2]
 chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
 

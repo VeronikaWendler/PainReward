@@ -138,7 +138,7 @@ elif version == 13:
     os.makedirs(outpath, exist_ok=True)
 
 elif version == 14:
-    outpath = opj(outpath, 'erps_massuni_drift_sv_subsetVD')
+    outpath = opj(outpath, 'erps_massuni_drift_sv_subsetOV')
     os.makedirs(outpath, exist_ok=True)
     if v14_mode == "separate":
         outpath = opj(outpath, "v14_separateGLMs")
@@ -205,9 +205,9 @@ if version == 13:
     print("After low_VD filter, unique participants:", mod_data['participant'].nunique())
 
 if version == 14:
-    mod_data = mod_data[mod_data['Abs_value'] == 'high_abs'].copy()
-    print("After high_VD filter, mod_data rows:", len(mod_data))
-    print("After high_VD filter, unique participants:", mod_data['participant'].nunique())
+    mod_data = mod_data[mod_data['OV_value'] == 'high_OV'].copy()
+    print("After high_OV filter, mod_data rows:", len(mod_data))
+    print("After high_OV filter, unique participants:", mod_data['participant'].nunique())
 
 
 # Subjects in EEG
