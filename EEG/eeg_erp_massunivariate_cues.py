@@ -58,7 +58,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 15    # version 1 is for decision and version 2 is for passive phase 
+version = 14    # version 1 is for decision and version 2 is for passive phase 
 v11_mode = "joint"   # or "joint"s
 
 v13_mode = "joint"   # or "joint"s
@@ -139,12 +139,12 @@ elif version == 13:
     os.makedirs(outpath, exist_ok=True)
 
 elif version == 14:
-    outpath = opj(outpath, 'erps_massuni_drift_sv_subsetOV')
+    outpath = opj(outpath, 'erps_massuni_drift_sv_subsetAcceptPairP')
     os.makedirs(outpath, exist_ok=True)
     if v14_mode == "separate":
-        outpath = opj(outpath, "v14_separateGLMs")
+        outpath = opj(outpath, "v17_separateGLMs_raw")
     elif v14_mode == "joint":
-        outpath = opj(outpath, "v14_jointGLM_pain_money_RT")
+        outpath = opj(outpath, "v17_jointGLM_pain_money_RT_raw")
     else:
         raise ValueError("v14_mode must be 'separate' or 'joint'")
     os.makedirs(outpath, exist_ok=True)
@@ -219,9 +219,9 @@ if version == 13:
     print("After low_VD filter, unique participants:", mod_data['participant'].nunique())
 
 if version == 14:
-    mod_data = mod_data[mod_data['OV_value'] == 'high_OV'].copy()
-    print("After high_OV filter, mod_data rows:", len(mod_data))
-    print("After high_OV filter, unique participants:", mod_data['participant'].nunique())
+    mod_data = mod_data[mod_data['acceptance_pair'] == 'P'].copy()
+    print("After acceptance_pair filter, mod_data rows:", len(mod_data))
+    print("After acceptance_pair filter, unique participants:", mod_data['participant'].nunique())
     
 if version == 15:
     mod_data = mod_data[mod_data['acceptance_pair'] == 'M'].copy()
