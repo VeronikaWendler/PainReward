@@ -36,7 +36,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 15   # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 14   # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
@@ -135,13 +135,13 @@ elif version == 13:
     os.makedirs(outfigpath, exist_ok=True)
     
 elif version == 14:
-    base_v11 = opj(outpathall, 'statistics_new/erps_massuni_drift_sv_subsetOV')
+    base_v14 = opj(outpathall, 'statistics_new/erps_massuni_drift_sv_subsetAcceptPairP')
     if v14_mode == "separate":
-        outpath = opj(base_v11, "v14_separateGLMs")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v14_separateGLMsOV")
+        outpath = opj(base_v14, "v17_separateGLMs_raw")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v17_separateGLMsOV")
     elif v14_mode == "joint":
-        outpath = opj(base_v11, "v14_jointGLM_pain_money_RT")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v14_jointGLM_pain_money_RTOV")
+        outpath = opj(base_v14, "v17_jointGLM_pain_money_RT_raw")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v17_jointGLM_pain_money_RTOV")
     else:
         raise ValueError("v14_mode must be 'separate' or 'joint'")
     os.makedirs(outfigpath, exist_ok=True)
