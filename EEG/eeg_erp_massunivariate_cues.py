@@ -63,7 +63,7 @@ v11_mode = "joint"   # or "joint"s
 
 v13_mode = "joint"   # or "joint"s
 v14_mode = "separate"
-v15_mode = "separate"
+v15_mode = "joint"
 
 if version == 1:
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_passive')
