@@ -62,7 +62,7 @@ version = 14    # version 1 is for decision and version 2 is for passive phase
 v11_mode = "joint"   # or "joint"s
 
 v13_mode = "joint"   # or "joint"s
-v14_mode = "joint"
+v14_mode = "separate"
 v15_mode = "joint"
 
 if version == 1:
