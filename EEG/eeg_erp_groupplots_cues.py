@@ -135,13 +135,13 @@ elif version == 13:
     os.makedirs(outfigpath, exist_ok=True)
     
 elif version == 14:
-    base_v14 = opj(outpathall, 'statistics_new/erps_massuni_drift_sv_subsetAcceptPairP')
+    base_v14 = opj(outpathall, 'statistics_new/erps_massuni_drift_sv_subsetAcceptPairM')
     if v14_mode == "separate":
-        outpath = opj(base_v14, "v17_separateGLMs_raw")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v17_separateGLMsOV")
+        outpath = opj(base_v14, "v18_separateGLMs_raw")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v18_separateGLMsOV")
     elif v14_mode == "joint":
-        outpath = opj(base_v14, "v17_jointGLM_pain_money_RT_raw")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v17_jointGLM_pain_money_RTOV")
+        outpath = opj(base_v14, "v18_jointGLM_pain_money_RT_raw")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v18_jointGLM_pain_money_RTOV")
     else:
         raise ValueError("v14_mode must be 'separate' or 'joint'")
     os.makedirs(outfigpath, exist_ok=True)
