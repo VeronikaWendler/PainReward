@@ -63,7 +63,7 @@ v11_mode = "joint"   # or "joint"s
 
 v13_mode = "joint"   # or "joint"s
 v14_mode = "separate"
-v15_mode = "joint"
+v15_mode = "separate"
 
 if version == 1:
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_passive')
@@ -150,7 +150,7 @@ elif version == 14:
     os.makedirs(outpath, exist_ok=True)
 
 elif version == 15:
-    outpath = opj(outpath, 'erps_massuni_drift_sv_subsetAcceptPair')
+    outpath = opj(outpath, 'erps_massuni_drift_sv_subsetAcceptPairM')
     os.makedirs(outpath, exist_ok=True)
     if v15_mode == "separate":
         outpath = opj(outpath, "v15_separateGLMs")
@@ -224,7 +224,7 @@ if version == 14:
     print("After high_OV filter, unique participants:", mod_data['participant'].nunique())
     
 if version == 15:
-    mod_data = mod_data[mod_data['acceptance_pair'] == 'P'].copy()
+    mod_data = mod_data[mod_data['acceptance_pair'] == 'M'].copy()
     print("After acceptance_pair filter, mod_data rows:", len(mod_data))
     print("After acceptance_pair filter, unique participants:", mod_data['participant'].nunique())
 
