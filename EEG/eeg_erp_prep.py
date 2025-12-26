@@ -274,7 +274,7 @@ for p in part:
     # )
     
     if lock_type == "response":
-        baseline = (-0.8, -0.6)
+        baseline = (-0.8, -0.7)
     else:
         baseline = (param["erpbaseline"], 0)
     
