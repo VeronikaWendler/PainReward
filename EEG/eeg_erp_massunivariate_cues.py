@@ -309,7 +309,7 @@ if version == 13:
 if version == 14:
     regvars = ['painlevel', 'moneylevel']
 if version == 17:
-    regvars = ['sv_pain_para', 'sv_money']
+    regvars = ['painlevel', 'moneylevel']
 if version == 16:
     regvars = ['painlevel', 'moneylevel']
 #all_epos = [[] for i in range(len(regvars))]
@@ -3876,8 +3876,8 @@ elif version == 17:
     z_dir = Path(outpath) / "Zscoring"
     z_dir.mkdir(parents=True, exist_ok=True)
 
-    pvar, mvar, rt_col = "sv_pain_para", "sv_money", "rt"
-    regnames = ["SV_pain_para_unique", "SV_money_unique"]
+    pvar, mvar, rt_col = "painlevel", "moneylevel", "rt"
+    regnames = ["Painlevel", "Moneylevel"]
 
     all_epos = [[] for _ in range(2)]
     betas = [[] for _ in range(2)]
