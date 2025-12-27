@@ -62,7 +62,7 @@ version = 17    # version 1 is for decision and version 2 is for passive phase
 v11_mode = "joint"   # or "joint"s
 
 v13_mode = "joint"   # or "joint"s
-v17_mode = "separate"
+v17_mode="resid_joint"
 v15_mode = "joint"
 
 if version == 1:
@@ -174,6 +174,8 @@ elif version == 16:
 elif version == 17:
     outpath = opj(outpath, "erps_massuni_drift_sv_response_classic_rp")
     os.makedirs(outpath, exist_ok=True)
+    if v17_mode == "resid_joint":
+        outpath = opj(outpath, "v17_resid_joint_SVmoney_RT")
     if v17_mode == "separate":
         outpath = opj(outpath, "v17_separateGLMs_SVmoney_RT")
     elif v17_mode == "joint":
@@ -270,6 +272,12 @@ part = common_participants
 
 part_1_dat = mod_data[mod_data["participant"].isin(part)]
 part_1 = part
+
+
+
+def residualize(y, X):
+    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    return y - X @ beta
 
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
@@ -3865,22 +3873,22 @@ elif version == 16:
     
     
 elif version == 17:
-
     z_dir = Path(outpath) / "Zscoring"
     z_dir.mkdir(parents=True, exist_ok=True)
 
     pvar, mvar, rt_col = "sv_pain_para", "sv_money", "rt"
-    regvars = [pvar, mvar]
-    regnames = ["SV_pain_para", "SV_money"]
+    regnames = ["SV_pain_para_unique", "SV_money_unique"]
 
     all_epos = [[] for _ in range(2)]
     betas = [[] for _ in range(2)]
     allbetasnp = []
     included_subjects, skipped_subjects = [], []
 
-    for pa in part_1:
-        print(f"\n--- v17 ({v17_mode}) Processing {pa} ---")
+    def residualize(y, X):
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        return y - X @ beta
 
+    for pa in part_1:
         mod2 = part_1_dat[part_1_dat["participant"] == pa].reset_index(drop=True)
 
         epo = mne.read_epochs(
@@ -3888,75 +3896,80 @@ elif version == 17:
             preload=True
         )
 
-        # IMPORTANT: match trials robustly (choose ONE strategy)
-        matching = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
-        epo_filt = epo[matching]
-        mod2 = mod2[mod2["trialsnum"].isin(epo_filt.metadata["trialsnum"])].reset_index(drop=True)
+        # align by trialsnum
+        keep_epo = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
+        epo_filt = epo[keep_epo]
+        mod2 = mod2[mod2["trialsnum"].isin(epo_filt.metadata["trialsnum"])].copy()
 
+        # sort both by trialsnum to guarantee row alignment
+        epo_order = np.argsort(epo_filt.metadata["trialsnum"].to_numpy())
+        epo_filt = epo_filt[epo_order]
+        mod2 = mod2.sort_values("trialsnum").reset_index(drop=True)
+
+        # resample
         if epo_filt.info["sfreq"] != param["testresampfreq"]:
             epo_filt = epo_filt.resample(param["testresampfreq"])
 
-        goodtrials = np.where(epo_filt.metadata["badtrial"] == 0)[0]
-        epo_filt = epo_filt[goodtrials]
-        mod2 = mod2.iloc[goodtrials].reset_index(drop=True)
+        # drop badtrials
+        good = np.where(epo_filt.metadata["badtrial"] == 0)[0]
+        epo_filt = epo_filt[good]
+        mod2 = mod2.iloc[good].reset_index(drop=True)
 
-        if len(mod2) < 5:
+        # finite mask
+        vals = mod2[[pvar, mvar, rt_col]].to_numpy(float)
+        ok = np.all(np.isfinite(vals), axis=1)
+        if ok.sum() < 5:
             skipped_subjects.append(pa)
             continue
 
-        # EEG scaling
+        epo_filt = epo_filt[ok]
+        mod2k = mod2.iloc[ok].reset_index(drop=True)
+        epo_keep_for_meta = epo_filt.copy()
+
+        # z-score predictors
+        pain_z  = stats.zscore(mod2k[pvar].to_numpy(float))
+        money_z = stats.zscore(mod2k[mvar].to_numpy(float))
+        rt_z    = stats.zscore(mod2k[rt_col].to_numpy(float))
+
+        # residualize unique variance (controlling RT + the other SV)
+        X_money = np.column_stack([np.ones(len(rt_z)), pain_z, rt_z])
+        X_pain  = np.column_stack([np.ones(len(rt_z)), money_z, rt_z])
+
+        money_u = stats.zscore(residualize(money_z, X_money))
+        pain_u  = stats.zscore(residualize(pain_z,  X_pain))
+
+        design = pd.DataFrame({
+            "Intercept": 1.0,
+            "pain_u": pain_u,
+            "money_u": money_u,
+            "RT_z": rt_z,
+        })
+
+        # z-score EEG across trials
         scale = Scaler(scalings="mean")
         epo_z = mne.EpochsArray(scale.fit_transform(epo_filt.get_data()), epo_filt.info)
 
-        # finite checks
-        vals = mod2[[pvar, mvar, rt_col]].to_numpy(dtype=float)
-        keep = np.all(np.isfinite(vals), axis=1)
-        mod2k = mod2.iloc[keep].copy().reset_index(drop=True)
-        epo_zk = epo_z[keep]
-        epo_keep_for_meta = epo_filt.copy()[keep]
+        res = mne.stats.linear_regression(epo_z, design, names=list(design.columns))
+        beta_pain  = res["pain_u"].beta
+        beta_money = res["money_u"].beta
 
-        if keep.sum() < 5:
-            skipped_subjects.append(pa)
-            continue
-
-        # zscore predictors
-        mod2k["Intercept"] = 1.0
-        mod2k["pain_z"]  = stats.zscore(mod2k[pvar].to_numpy(float))
-        mod2k["money_z"] = stats.zscore(mod2k[mvar].to_numpy(float))
-        mod2k["RT_z"]    = stats.zscore(mod2k[rt_col].to_numpy(float))
-
-        # store for binning plots later
+        # metadata for plotting later
         md = epo_keep_for_meta.metadata.reset_index(drop=True).copy()
         md[pvar] = mod2k[pvar].values
         md[mvar] = mod2k[mvar].values
         md[rt_col] = mod2k[rt_col].values
         epo_keep_for_meta.metadata = md
+
         all_epos[0].append(epo_keep_for_meta.copy())
         all_epos[1].append(epo_keep_for_meta.copy())
-
-        # GLM
-        if v17_mode == "separate":
-            design_p = mod2k[["Intercept", "pain_z", "RT_z"]]
-            res_p = mne.stats.linear_regression(epo_zk, design_p, names=["Intercept", "pain_z", "RT_z"])
-            beta_pain = res_p["pain_z"].beta
-
-            design_m = mod2k[["Intercept", "money_z", "RT_z"]]
-            res_m = mne.stats.linear_regression(epo_zk, design_m, names=["Intercept", "money_z", "RT_z"])
-            beta_money = res_m["money_z"].beta
-
-        elif v17_mode == "joint":
-            design = mod2k[["Intercept", "pain_z", "money_z", "RT_z"]]
-            res = mne.stats.linear_regression(epo_zk, design, names=["Intercept", "pain_z", "money_z", "RT_z"])
-            beta_pain = res["pain_z"].beta
-            beta_money = res["money_z"].beta
-
-        else:
-            raise ValueError("v17_mode must be 'separate' or 'joint'")
 
         betas[0].append(beta_pain)
         betas[1].append(beta_money)
         allbetasnp.append(np.stack([beta_pain.data, beta_money.data]))
         included_subjects.append(pa)
+
+    if len(allbetasnp) == 0:
+        raise RuntimeError("v17: no subjects included after filtering/alignment.")
 
     allbetas = np.stack(allbetasnp)
     np.save(z_dir / "ols_2ndlevel_betas.npy", allbetas)
@@ -3965,7 +3978,7 @@ elif version == 17:
     beta_gavg = [mne.grand_average(betas[0]), mne.grand_average(betas[1])]
     np.save(z_dir / "ols_2ndlevel_betasavg.npy", np.array(beta_gavg, dtype=object), allow_pickle=True)
 
-    for ridx, regvar in enumerate(regvars):
+    for ridx, regvar in enumerate([pvar, mvar]):
         epo_save = mne.concatenate_epochs(all_epos[ridx])
         epo_save.save(z_dir / f"ols_2ndlevel_allepochs-epo_{regvar}.fif", overwrite=True)
 
@@ -3996,8 +4009,6 @@ elif version == 17:
 
     np.save(z_dir / "ols_2ndlevel_tvals.npy", np.stack(tvals_list))
     np.save(z_dir / "ols_2ndlevel_pvals.npy", np.stack(pvals_list))
-
-
 
 
 #elif version == 12:

@@ -36,12 +36,12 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 16   # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 17   # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
 v14_mode = "joint"
-v16_mode = "separate"
+v17_mode = "separate"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -169,8 +169,20 @@ elif version == 16:
     else:
         raise ValueError("v19_mode must be 'separate' or 'joint'")
     os.makedirs(outfigpath, exist_ok=True)
-       
+    
 elif version == 17:
+    base_v17 = opj(outpathall, 'statistics_new/erps_massuni_drift_sv_response_classic_rp')
+    if v17_mode == "separate":
+        outpath = opj(base_v17, "v20_separateGLMs")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v20_separateGLMsOV_lowfreq")
+    elif v17_mode == "joint":
+        outpath = opj(base_v17, "v20_jointGLM_pain_money_RT")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v20_jointGLM_pain_money_RTOV_lowfreq")
+    else:
+        raise ValueError("v20_mode must be 'separate' or 'joint'")
+    os.makedirs(outfigpath, exist_ok=True)
+       
+elif version == 18:
     outpath = opj(outpathall, 'statistics_new/tfr_mod_9_v9_sv_pain_para')
     outfigpath = opj(outpathall, 'figures/tfr_mod_9_v9_sv_pain_para_wholebrain')
     if not os.path.exists(outfigpath):
@@ -258,6 +270,9 @@ if version == 15:
 if version == 16:
     regvars = ["painlevel", "moneylevel"]
     regvarsnames = ["Painlevel", "Moneylevel"]   
+if version == 17:
+    regvars = ["painlevel", "moneylevel"]
+    regvarsnames = ["Painlevel", "Moneylevel"]
     
 plot_times = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2]
 chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
@@ -3819,7 +3834,7 @@ if version == 15:
             )
             
             
-if version == 16:
+if version == 17:
 
     tvals = np.load(opj(outpath_glm, "ols_2ndlevel_tvals.npy"))   # (2, n_times, n_chans)
     pvals = np.load(opj(outpath_glm, "ols_2ndlevel_pvals.npy"))   # (2, n_times, n_chans)
@@ -3901,7 +3916,7 @@ if version == 16:
                          pad=0.2)
 
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v19_topo_beta_{regvar}_{tidx}.svg"),
+                opj(outfigpath, f"{fig_prefix}v20_topo_beta_{regvar}_{tidx}.svg"),
                 dpi=600,
                 bbox_inches="tight"
             )
@@ -3914,7 +3929,7 @@ if version == 16:
                                fontdict={"fontsize": param["labelfontsize"]-1})
                 cbar.ax.tick_params(labelsize=param["ticksfontsize"]-2)
                 fig2.savefig(
-                    opj(outfigpath, f"{fig_prefix}v19_topo_beta_cbar_{regvar}.svg"),
+                    opj(outfigpath, f"{fig_prefix}v20_topo_beta_cbar_{regvar}.svg"),
                     dpi=600,
                     bbox_inches="tight"
                 )
@@ -3989,7 +4004,7 @@ if version == 16:
             fig.tight_layout()
 
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v19_bins_{regvar}_{c}.svg"),
+                opj(outfigpath, f"{fig_prefix}v20_bins_{regvar}_{c}.svg"),
                 dpi=600,
                 bbox_inches="tight"
             )
@@ -4009,7 +4024,7 @@ if version == 16:
                 cbarout[0].axes[-1].tick_params(labelsize=param["ticksfontsize"])
                 cbarout[0].axes[0].remove()
                 cbarout[0].savefig(
-                    opj(outfigpath, f"{fig_prefix}v19_bins_cbar_{regvar}_{c}.svg"),
+                    opj(outfigpath, f"{fig_prefix}v20_bins_cbar_{regvar}_{c}.svg"),
                     dpi=800,
                     bbox_inches="tight"
                 )
@@ -4042,7 +4057,7 @@ if version == 16:
                          pad=0.2)
 
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v19_bins_topo_{regvar}_bin{bin_id}.svg"),
+                opj(outfigpath, f"{fig_prefix}v20_bins_topo_{regvar}_bin{bin_id}.svg"),
                 dpi=600,
                 bbox_inches="tight"
             )
@@ -4055,7 +4070,7 @@ if version == 16:
                                fontdict={"fontsize": param["labelfontsize"]-1})
                 cbar.ax.tick_params(labelsize=param["ticksfontsize"]-2)
                 fig2.savefig(
-                    opj(outfigpath, f"{fig_prefix}v19_bins_topo_cbar_{regvar}.svg"),
+                    opj(outfigpath, f"{fig_prefix}v20_bins_topo_cbar_{regvar}.svg"),
                     dpi=600,
                     bbox_inches="tight"
                 )
@@ -4094,7 +4109,7 @@ if version == 16:
 
             fig.tight_layout()
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v19_beta_meanSEM_{regvar}_{c}.svg"),
+                opj(outfigpath, f"{fig_prefix}v20_beta_meanSEM_{regvar}_{c}.svg"),
                 dpi=600,
                 bbox_inches="tight"
             )
