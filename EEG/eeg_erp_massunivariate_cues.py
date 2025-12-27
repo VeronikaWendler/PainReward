@@ -334,6 +334,8 @@ if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17]:
             epo = mne.read_epochs(
                 opj(basepath, p, "eeg", "erps_resp_rp", f"{p}_decision_resp_rp_singletrials-epo.fif"),
                 preload=True)
+            epo_1 = epo.copy()
+
 
 
         participants = epo_1.metadata['participant_id'].unique()
