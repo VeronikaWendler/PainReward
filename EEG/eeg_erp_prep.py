@@ -30,9 +30,9 @@ from pathlib import Path
 version = 1    # 1 = decision, 2 = passive
 
 # what to lock to: 'cue' (off+) or 'response'
-lock_type = 'response'       # or 'response'
+lock_type = 'cue_long'       # or 'response'
 
-erp_mode = "classic_rp"        # Gluth 2013
+erp_mode = None           # Gluth 2013 = classic_rp
 
 # Set bids directory
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
@@ -69,31 +69,37 @@ part.sort()
   
 # }
 
-# this is for the classic_rp script, otherwise use the above
 param = {
     "filtertype": "fir",
     "erpreject": dict(eeg=150e-6),
-    'erprejectshock': dict(eeg=150e-6),
+    "erprejectshock": dict(eeg=150e-6),
     "hp": None,
     "lp": 30,
     "erpbaseline": -0.2,
     "erpepochend": 1.0,
 }
+
+# Safety: do not allow classic_rp unless response-locked
+if lock_type in ["cue", "cue_long"]:
+    erp_mode = "normal"
+
 if erp_mode == "classic_rp":
+    # Classic RP settings
+    lock_type = "response"
     param["hp"] = 0.1
     param["lp"] = 10
-    print('lp = 10')
-    lock_type = "response"          
-    param["erpbaseline"] = -0.8   
+    param["erpbaseline"] = -0.8
     param["erpepochend"] = 0.2
 
+# Standard response-locked (non-classic)
+if version == 1 and lock_type == "response" and erp_mode != "classic_rp":
+    param["erpbaseline"] = -0.8
+    param["erpepochend"] = 0.2
 
-
-
-if version == 1 and lock_type == 'response':
-    param['erpbaseline'] = -0.8
-    param['erpepochend'] = 0.2
-
+# Cue-long window
+if version == 1 and lock_type == "cue_long":
+    param["erpbaseline"] = -0.2
+    param["erpepochend"] = 1.4
 #-----------------------------------------------------------------------------------------------------------------------
 # epoching erps
 # reject_stats = pd.DataFrame(data={'part': part, 'perc_removed_cues': 9999,
@@ -118,10 +124,11 @@ if version == 1 and lock_type == 'response':
 # else:
 #     count_col = 'Resp_any'  # number of response-locked epochs kept
 
-if lock_type == 'cue':
-    count_col = 'Off+'
+if lock_type in ["cue", "cue_long"]:
+    count_col = "Off+"
 else:
-    count_col = 'Resp_any'
+    count_col = "Resp_any"
+
 
 
 reject_stats = pd.DataFrame(data={
@@ -146,6 +153,11 @@ for p in part:
             if not os.path.exists(outdir):
                 os.mkdir(outdir)
             print("version 1: outdir = opj(outpath,  p, 'eeg', 'erps')")
+        elif lock_type == "cue_long":
+            outdir = opj(outpath, p, "eeg", "erps_long")
+            if not os.path.exists(outdir):
+                os.mkdir(outdir)
+            print("version 1: outdir = opj(outpath,  p, 'eeg', 'erps_long')")
         elif lock_type == 'response':
             if erp_mode == "classic_rp":
                 outdir = opj(outpath, p, "eeg", "erps_resp_rp")
@@ -218,8 +230,8 @@ for p in part:
     events_c = events[events['trial_type'].notna()]
 
     
-    if lock_type == 'cue':
-        # CUE-LOCKED (existing behaviour)
+    if lock_type in ["cue", "cue_long"]:
+         # CUE-LOCKED (existing behaviour)
         events_id = {"off+": 2}
         events_c = events_c[events_c['trial_type'] == 'off+']
         events_c['cue_num'] = events_c['trial_type'].map(events_id)
@@ -342,13 +354,14 @@ for p in part:
             )
     
             if lock_type == "cue":
-                fname = f"{p}_decision_{cond}_ave.fif"   # off+
-            
+                fname = f"{p}_decision_{cond}_ave.fif"  
+            elif lock_type == "cue_long":
+                fname = f"{p}_decision_long_{cond}_ave.fif"
             elif lock_type == "response" and erp_mode != "classic_rp":
-                fname = f"{p}_decision_resp_{cond}_ave.fif"   # standard response-locked
+                fname = f"{p}_decision_resp_{cond}_ave.fif"   
             
             elif lock_type == "response" and erp_mode == "classic_rp":
-                fname = f"{p}_decision_resp_rp_{cond}_ave.fif"  # classic RP
+                fname = f"{p}_decision_resp_rp_{cond}_ave.fif"  
             
             else:
                 raise ValueError("Invalid lock_type / erp_mode combination")
@@ -361,7 +374,9 @@ for p in part:
             section = "ERPs for cue off+"
             title = "Butterfly plots for off+"
             report_name = f"{p}_decision_cue_erps_report.html"
-        
+        elif lock_type == "cue_long":
+            section = "ERPs for cue off+ -long epoch"
+            report_name = f"{p}_decision_cue_long_erps_report.html"
         elif lock_type == "response" and erp_mode != "classic_rp":
             section = "ERPs for responses"
             title = "Butterfly plots for responses"
@@ -491,6 +506,11 @@ if version == 1 and lock_type == "cue":
     reject_stats.describe().to_csv(opj(outpath, "decision_cue_erps_rejectionstats_desc.csv"))
     print("Saved decision cue ERP rejection stats.")
 
+if version == 1 and lock_type == "cue_long":
+    reject_stats["perc_removed_all"] = (1 - reject_stats[count_col] / 125) * 100
+    reject_stats.to_csv(opj(outpath, "decision_cue_long_erps_rejectionstats.csv"), index=False)
+    reject_stats.describe().to_csv(opj(outpath, "decision_cue_long_erps_rejectionstats_desc.csv"))
+
 elif version == 1 and lock_type == "response":
     reject_stats["perc_removed_all"] = (1 - reject_stats[count_col] / 125) * 100
 
@@ -547,12 +567,14 @@ def average_time_win_strials(strials, chans_to_average, amp_lat):
 # Parameters to define
 chans_to_average = [['Fz'], ['FCz'], ['POz'], ['Cz'], ['CPz'], ['Pz'], ['Oz']]    #for averaging over more channels: [['F3'], ['F4'], ['Fz'], ['FC5'], ['FC6'], ['FC1'], ['FC2'], ['FCz'], ['C3'], ['C4'], ['CP1'], ['CP2'], ['CP5'], ['CP6'], ['P3'], ['Pz'], ['P4'], ['P7'], ['P8'], ['PO3'], ['PO7'], ['PO4'], ['O1'], ['Oz'], ['O2']]                                                                          
 
-if version == 1 and lock_type == "response":
+if version == 1 and lock_type == "cue_long":
+    amp_lat = [[0.3, 0.6], [0.6, 1.0], [1.0, 1.4]]
+    print("amp_lat = 0.3–0.6, 0.6–1.0, 1.0–1.4 (cue_long)")
+elif version == 1 and lock_type == "response":
     amp_lat = [[-0.5, 0.0]] if erp_mode == "classic_rp" else [[-0.5, 0.1]]
-    print(f"amp_lat = {amp_lat[0][0]} -> {amp_lat[0][1]} (response-locked, {erp_mode})")
 else:
     amp_lat = [[0.4, 0.8]]
-    print("amp_lat = 0.4 -> 0.8 (cue-locked / LPP)")
+
 
 
 #LPP is centro-parietal  (currently our focus for pain anticipation or (also) value-based choice)
@@ -567,7 +589,10 @@ if version == 1:
             outdir = opj(outpath, p, "eeg", "erps")
             epo_fname = f"{p}_decision_cues_singletrials-epo.fif"
             meta_outname = "decision_erpsmeta_cue.csv"
-
+        elif lock_type == "cue_long":
+           outdir = opj(outpath, p, "eeg", "erps_long")
+           epo_fname = f"{p}_decision_cues_long_singletrials-epo.fif"
+           meta_outname = "decision_erpsmeta_cue_long.csv"
         elif lock_type == "response":
             if erp_mode == "classic_rp":
                 outdir = opj(outpath, p, "eeg", "erps_resp_rp")
