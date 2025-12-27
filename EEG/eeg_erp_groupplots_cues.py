@@ -173,16 +173,16 @@ elif version == 16:
 elif version == 17:
     base_v17 = opj(outpathall, "statistics_new/erps_massuni_drift_sv_response_classic_rp")
     if v17_mode == "resid_joint":
-        outpath = opj(base_v17, "v20_resid_joint_SVmoney_RT")   # <-- MUST match your mass-uni outpath
+        outpath = opj(base_v17, "v17_resid_joint_SVmoney_RT")   # <-- MUST match your mass-uni outpath
         outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v20_resid_joint_SVmoney_RT")
     elif v17_mode == "separate":
-        outpath = opj(base_v17, "v20_separateGLMs_SVmoney_RT")
+        outpath = opj(base_v17, "v17_separateGLMs_SVmoney_RT")
         outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v20_separateGLMs_SVmoney_RT")
     elif v17_mode == "joint":
-        outpath = opj(base_v17, "v20_jointGLM_SVmoney_RT")
+        outpath = opj(base_v17, "v17_jointGLM_SVmoney_RT")
         outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v20_jointGLM_SVmoney_RT")
     else:
-        raise ValueError("v20_mode must be 'resid_joint', 'separate', or 'joint'")
+        raise ValueError("v17_mode must be 'resid_joint', 'separate', or 'joint'")
     os.makedirs(outfigpath, exist_ok=True)
 
        
