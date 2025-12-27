@@ -153,7 +153,7 @@ for p in part:
             if not os.path.exists(outdir):
                 os.mkdir(outdir)
             print("version 1: outdir = opj(outpath,  p, 'eeg', 'erps')")
-        elif lock_type == "cue_long":
+        elif lock_type == 'cue_long':
             outdir = opj(outpath, p, "eeg", "erps_long")
             if not os.path.exists(outdir):
                 os.mkdir(outdir)
@@ -479,7 +479,10 @@ for p in part:
         if lock_type == "cue":
             fname = f"{p}_decision_cues_singletrials-epo.fif"
             print("Saving cue-locked single trials:", fname)
-    
+            
+        elif lock_type == "cue_long":
+            fname = f"{p}_decision_cues_long_singletrials-epo.fif"
+            print("Saving cue-locked long single trials:", fname)
         elif lock_type == "response":
             suffix = "_rp" if erp_mode == "classic_rp" else ""
             fname = f"{p}_decision_resp{suffix}_singletrials-epo.fif"
