@@ -376,6 +376,7 @@ for p in part:
             report_name = f"{p}_decision_cue_erps_report.html"
         elif lock_type == "cue_long":
             section = "ERPs for cue off+ -long epoch"
+            title = "Butterfly plots for off+"
             report_name = f"{p}_decision_cue_long_erps_report.html"
         elif lock_type == "response" and erp_mode != "classic_rp":
             section = "ERPs for responses"
