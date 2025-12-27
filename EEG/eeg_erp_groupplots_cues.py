@@ -3856,7 +3856,7 @@ if version == 17:
     beta_gavg = np.load(opj(outpath_glm, "ols_2ndlevel_betasavg.npy"), allow_pickle=True)  # (2,) Evoked
 
     ref_epo = mne.read_epochs(
-        opj(outpath_glm, "ols_2ndlevel_allepochs-epo_sv_pain_para.fif"),
+        opj(outpath_glm, "ols_2ndlevel_allepochs-epo_painlevel.fif"),
         preload=False
     )
     if np.isclose(beta_gavg[0].times[0], 0.0) and (ref_epo.tmin < 0):
