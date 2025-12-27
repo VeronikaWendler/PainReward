@@ -173,7 +173,7 @@ elif version == 16:
 elif version == 17:
     base_v17 = opj(outpathall, "statistics_new/erps_massuni_drift_sv_response_classic_rp")
     if v17_mode == "resid_joint":
-        outpath = opj(base_v17, "v17_resid_joint_SVmoney_RT")   # <-- MUST match your mass-uni outpath
+        outpath = opj(base_v17, "v17_resid_joint_SVmoney_RT") 
         outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v20_resid_joint_SVmoney_RT")
     elif v17_mode == "separate":
         outpath = opj(base_v17, "v17_separateGLMs_SVmoney_RT")
@@ -279,8 +279,8 @@ if version == 17 and v17_mode == "resid_joint":
     regvars = ["pain_u", "money_u"]
     regvarsnames = ["SV_pain_para (unique|RT,money)", "SV_money (unique|RT,pain)"]
 elif version == 17:
-    regvars = ["sv_pain_para", "sv_money"]
-    regvarsnames = ["SV_pain_para", "SV_money"]
+    regvars = ["painlevel", "moneylevel"]
+    regvarsnames = ["Painlevel", "Moneylevel"]
 
 plot_times = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2]
 chan_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz']
@@ -3872,7 +3872,7 @@ if version == 17:
     if v17_mode == "resid_joint":
         # betas/stats are in this order in your massuni:
         regvars_betas  = ["pain_u", "money_u"]
-        regvarsnames   = ["SV_pain_para (unique | RT, money)", "SV_money (unique | RT, pain)"]
+        regvarsnames   = ["Pain (unique | RT, money)", "Money (unique | RT, pain)"]
 
         # epochs saved for binning (these filenames exist because you saved pvar/mvar):
         regvars_epochs = ["sv_pain_para", "sv_money"]
@@ -3884,12 +3884,12 @@ if version == 17:
 
     else:
         # non-residual version 17 (if you ever run it)
-        regvars_betas  = ["sv_pain_para", "sv_money"]
-        regvars_epochs = ["sv_pain_para", "sv_money"]
-        regvarsnames   = ["SV_pain_para", "SV_money"]
+        regvars_betas  = ["painlevel", "moneylevel"]
+        regvars_epochs = ["painlevel", "moneylevel"]
+        regvarsnames   = ["Painlevel", "Moneylevel"]
         cmap_map = {
-            "sv_pain_para": ("Blues", 6),
-            "sv_money":     ("Greens", 6),
+            "Painlevel": ("Blues", 6),
+            "Moneylevel": ("Greens", 6),
         }
 
     # Bonferroni across the 2 regressors
