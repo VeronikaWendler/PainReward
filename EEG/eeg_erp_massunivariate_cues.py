@@ -365,6 +365,7 @@ if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18]:
                 opj(basepath, p, "eeg", "erps_long", f"{p}_decision_cues_long_singletrials-epo.fif"),
                 preload=True
             )
+            epo_1 = epo.copy()
 
 
 
