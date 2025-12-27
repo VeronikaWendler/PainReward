@@ -3854,11 +3854,21 @@ if version == 17:
     tvals = np.load(opj(outpath_glm, "ols_2ndlevel_tvals.npy"))        # (2, n_times, n_chans)
     pvals = np.load(opj(outpath_glm, "ols_2ndlevel_pvals.npy"))        # (2, n_times, n_chans)
     beta_gavg = np.load(opj(outpath_glm, "ols_2ndlevel_betasavg.npy"), allow_pickle=True)  # (2,) Evoked
+
+    ref_epo = mne.read_epochs(
+        opj(outpath_glm, "ols_2ndlevel_allepochs-epo_sv_pain_para.fif"),
+        preload=False
+    )
+    if np.isclose(beta_gavg[0].times[0], 0.0) and (ref_epo.tmin < 0):
+        tshift = ref_epo.tmin - beta_gavg[0].times[0]   # e.g., -0.5 - 0.0 = -0.5 s
+        print(f"Shifting beta time axis by {tshift:.3f} s to match response-locked epochs.")
+        beta_gavg = np.array([ev.copy().shift_time(tshift, relative=True) for ev in beta_gavg], dtype=object)
+    else:
+        print("Beta time axis already looks correct; no shift applied.")
+    
     allbetas = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"), allow_pickle=True)     # (n_subj, 2, n_chan, n_time)
 
-    # ----------------------------
-    # Bookkeeping for v17
-    # ----------------------------
+
     if v17_mode == "resid_joint":
         # betas/stats are in this order in your massuni:
         regvars_betas  = ["pain_u", "money_u"]
