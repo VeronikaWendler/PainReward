@@ -176,12 +176,12 @@ elif version == 17:
     os.makedirs(outpath, exist_ok=True)
     if v17_mode == "resid_joint":
         outpath = opj(outpath, "v17_resid_joint_SVmoney_RT")
-    if v17_mode == "separate":
+    elif v17_mode == "separate":
         outpath = opj(outpath, "v17_separateGLMs_SVmoney_RT")
     elif v17_mode == "joint":
         outpath = opj(outpath, "v17_jointGLM_SVmoney_RT")
     else:
-        raise ValueError("v17_mode must be 'separate' or 'joint'")
+        raise ValueError("v17_mode must be 'separate' or 'joint' or 'resid_joint")
     os.makedirs(outpath, exist_ok=True)
       
       
