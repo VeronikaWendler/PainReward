@@ -191,7 +191,7 @@ elif version == 18:
     if v18_mode == "joint":
         outpath = opj(base_v18, "v18_long_SVmoneypain_RT")
     elif v18_mode == "separate":
-        outpath = opj(base_v18, "v18_long_SVmoneypain_RT")
+        outpath = opj(base_v18, "v18_long_SVmoneypain_RT_sep")
     else:
         raise ValueError("v18_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
