@@ -4249,8 +4249,9 @@ if version == 18:
     # exclude mastoids for masks
     chankeep = np.array([c not in ["M1", "M2"] for c in beta_gavg[0].ch_names])
 
-    # x ticks in ms (nice for 0..1400)
-    xticks = np.arange(int(np.floor(tmin*1000/200)*200), int(np.ceil(tmax*1000/200)*200)+1, 200)
+    tmin_ms = int(np.round(tmin * 1000))
+    tmax_ms = int(np.round(tmax * 1000))
+    xticks = np.arange((tmin_ms // 200) * 200, ((tmax_ms + 199) // 200) * 200 + 1, 200)
 
     # ----------------------------
     # Loop regressors
