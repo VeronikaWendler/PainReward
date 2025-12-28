@@ -4177,7 +4177,44 @@ if version == 18:
     # ----------------------------
     tvals = np.load(opj(outpath_glm, "ols_2ndlevel_tvals.npy"))        # (2, n_times, n_chans)
     pvals = np.load(opj(outpath_glm, "ols_2ndlevel_pvals.npy"))        # (2, n_times, n_chans)
-    beta_gavg = np.load(opj(outpath_glm, "ols_2ndlevel_betasavg.npy"), allow_pickle=True)  # (2,) Evoked
+
+    # ----------------------------
+    beta_gavg = np.load(opj(outpath_glm, "ols_2ndlevel_betasavg.npy"), allow_pickle=True)
+    allbetas = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"), allow_pickle=True)
+    
+    # ----------------------------
+    # TIME ALIGNMENT CHECK (CRITICAL)
+    # Make beta time axis match the epochs you saved for binning
+    # ----------------------------
+    ref_epo = mne.read_epochs(
+        opj(outpath_glm, "ols_2ndlevel_allepochs-epo_sv_pain_para.fif"),
+        preload=False
+    )
+    
+    beta_t0 = float(beta_gavg[0].times[0])
+    ref_t0  = float(ref_epo.times[0])   # should equal ref_epo.tmin
+    
+    print(f"[v18] beta_gavg tmin: {beta_t0:.6f} s")
+    print(f"[v18] ref epochs tmin: {ref_t0:.6f} s")
+    
+    # If they differ by more than half a sample, shift betas (labels only, data unchanged)
+    tol = 0.5 / param["testresampfreq"]
+    tshift = ref_t0 - beta_t0
+    
+    if abs(tshift) > tol:
+        print(f"[v18] Shifting beta time axis by {tshift:.6f} s to match epochs.")
+        beta_gavg = np.array(
+            [ev.copy().shift_time(tshift, relative=True) for ev in beta_gavg],
+            dtype=object
+        )
+    else:
+        print("[v18] Beta time axis already matches epochs; no shift applied.")
+    
+    # Now use *shifted* beta time axis everywhere below
+    times = beta_gavg[0].times
+    tmin, tmax = float(times[0]), float(times[-1])
+    print(f"[v18] final plot time range: {tmin:.3f}..{tmax:.3f} s")
+
     allbetas = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"), allow_pickle=True)     # (n_subj, 2, n_chan, n_time)
 
     # Cue-locked long epoch time axis
