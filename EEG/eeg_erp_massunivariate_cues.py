@@ -58,8 +58,8 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 20
-v20_mode = "joint"   # "joint" or "separate"
+version = 21
+v21_mode = "joint"   # "joint" or "separate"
 
 
 v13_mode = "joint"   # or "joint"s
@@ -229,7 +229,17 @@ elif version == 20:
     else:
         raise ValueError("v20_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
-       
+
+elif version == 21:
+    base_v21 = opj(outpath, "erps_massuni_sv_cuelong")
+    os.makedirs(base_v21, exist_ok=True)
+    if v21_mode == "joint":
+        outpath = opj(base_v21, "v21_long_SVmoneypain_RT")
+    elif v21_mode == "separate":
+        outpath = opj(base_v21, "v21_long_SVmoneypain_RT_sep")
+    else:
+        raise ValueError("v21_mode must be 'joint' or 'separate'")
+    os.makedirs(outpath, exist_ok=True)
 else:
     print("no version")
 
@@ -355,7 +365,7 @@ if version == 14:
     regvars = ['painlevel', 'moneylevel']
 if version == 17:
     regvars = ['painlevel', 'moneylevel']
-if version == 20:
+if version == 21:
     regvars = ['painlevel', 'moneylevel']
 #all_epos = [[] for i in range(len(regvars))]
 #allbetasnp = []
@@ -368,7 +378,7 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20]:
+if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21]:
     filtered_data = []
     for p in part:
         # data for this participant
@@ -392,7 +402,7 @@ if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20]:
                 opj(basepath, p, "eeg", "erps_resp", f"{p}_decision_resp_singletrials-epo.fif"),
                 preload=True)
             epo_1 = epo.copy()
-        elif version in [18,19,20]:
+        elif version in [18,19,20,21]:
             epo = mne.read_epochs(
                 opj(basepath, p, "eeg", "erps_long", f"{p}_decision_cues_long_singletrials-epo.fif"),
                 preload=True
@@ -4716,6 +4726,205 @@ elif version == 20:
     np.save(z_dir / "ols_2ndlevel_pvals.npy", np.stack(pvals_list))  # (4, n_times, n_chans)
 
     print(f"v20 done. Included n={len(included_subjects)}, skipped n={len(skipped_subjects)}.")
+
+
+# =========================
+
+elif version == 21:
+
+    z_dir = Path(outpath) / "Zscoring"
+    z_dir.mkdir(parents=True, exist_ok=True)
+
+    pvar, mvar, rt_col = "painlevel", "moneylevel", "rt"
+
+    for col in [pvar, mvar, rt_col, "participant", "trialsnum"]:
+        if col not in mod_data.columns:
+            raise RuntimeError(f"v21: mod_data missing required column: '{col}'")
+
+    def residualize_vec(y, X):
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        return y - X @ beta
+
+    included_subjects, skipped_subjects = [], []
+    # betas: pain, money, salience_unique
+    betas = [[] for _ in range(3)]
+    allbetasnp = []
+
+    # epochs to save for plotting/binning (pain & money in original units)
+    all_epos_pain = []
+    all_epos_money = []
+
+    for pa in part:
+
+        mod2 = mod_data[mod_data["participant"] == pa].copy()
+
+        epo = mne.read_epochs(
+            opj(basepath, pa, "eeg", "erps_long", f"{pa}_decision_cues_long_singletrials-epo.fif"),
+            preload=True
+        )
+
+        if "trialsnum" not in epo.metadata.columns:
+            raise RuntimeError("v21: epochs metadata missing 'trialsnum'.")
+
+        # align by trialsnum
+        keep_epo = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
+        epo_filt = epo[keep_epo]
+        mod2 = mod2[mod2["trialsnum"].isin(epo_filt.metadata["trialsnum"])].copy()
+
+        # sort both by trialsnum
+        epo_order = np.argsort(epo_filt.metadata["trialsnum"].to_numpy())
+        epo_filt = epo_filt[epo_order]
+        mod2 = mod2.sort_values("trialsnum").reset_index(drop=True)
+
+        # resample
+        if epo_filt.info["sfreq"] != param["testresampfreq"]:
+            epo_filt = epo_filt.resample(param["testresampfreq"])
+
+        # drop bad trials if present
+        if "badtrial" in epo_filt.metadata.columns:
+            good = np.where(epo_filt.metadata["badtrial"].to_numpy(int) == 0)[0]
+            epo_filt = epo_filt[good]
+            mod2 = mod2.iloc[good].reset_index(drop=True)
+
+        # finite check
+        vals = mod2[[pvar, mvar, rt_col]].to_numpy(float)
+        ok = np.all(np.isfinite(vals), axis=1)
+
+        if ok.sum() < 10:
+            skipped_subjects.append(pa)
+            continue
+
+        epo_filt = epo_filt[ok]
+        mod2k = mod2.iloc[ok].reset_index(drop=True)
+
+        # ---------
+        # regressors
+        # ---------
+        pain = mod2k[pvar].to_numpy(float)
+        money = mod2k[mvar].to_numpy(float)
+        rt = mod2k[rt_col].to_numpy(float)
+
+        # z-scored pain/money (as in your old approach)
+        pain_z = stats.zscore(pain)
+        money_z = stats.zscore(money)
+        rt_z = stats.zscore(rt)
+
+        # "salience" raw = pain + money
+        sal_raw = pain + money
+
+        # make salience identifiable:
+        # remove anything linearly explained by pain & money (and intercept)
+        X = np.column_stack([np.ones(len(pain)), pain, money])
+        sal_u = residualize_vec(sal_raw, X)
+        sal_u_z = stats.zscore(sal_u)
+
+        # keep epochs for binning plots (original units)
+        epo_keep = epo_filt.copy()
+        md = epo_keep.metadata.reset_index(drop=True).copy()
+        md["painlevel"] = pain
+        md["moneylevel"] = money
+        md["salience_raw"] = sal_raw
+        md["rt"] = rt
+        epo_keep.metadata = md
+
+        all_epos_pain.append(epo_keep.copy())
+        all_epos_money.append(epo_keep.copy())
+
+        # z-score EEG across trials
+        scale = Scaler(scalings="mean")
+        data_z = scale.fit_transform(epo_filt.get_data())
+
+        epo_z = mne.EpochsArray(
+            data_z,
+            info=epo_filt.info,
+            events=epo_filt.events,
+            tmin=epo_filt.tmin,
+            event_id=epo_filt.event_id,
+            metadata=epo_filt.metadata
+        )
+
+        # ---------
+        # GLM
+        # ---------
+        design = pd.DataFrame({
+            "Intercept": 1.0,
+            "pain_z": pain_z,
+            "money_z": money_z,
+            "salience_u_z": sal_u_z,
+            "RT_z": rt_z,
+        })
+
+        res = mne.stats.linear_regression(epo_z, design, names=list(design.columns))
+
+        beta_pain = res["pain_z"].beta
+        beta_money = res["money_z"].beta
+        beta_sal = res["salience_u_z"].beta
+
+        betas[0].append(beta_pain)
+        betas[1].append(beta_money)
+        betas[2].append(beta_sal)
+
+        allbetasnp.append(np.stack([beta_pain.data, beta_money.data, beta_sal.data]))  # (3, ch, t)
+        included_subjects.append(pa)
+
+    if len(allbetasnp) == 0:
+        raise RuntimeError("v21: no subjects included after filtering/alignment.")
+
+    allbetas = np.stack(allbetasnp)  # (n_subj, 3, n_chan, n_time)
+
+    # save
+    np.save(z_dir / "ols_2ndlevel_betas.npy", allbetas)
+    np.save(z_dir / "included_subjects.npy", np.array(included_subjects, dtype=object))
+    np.save(z_dir / "skipped_subjects.npy", np.array(skipped_subjects, dtype=object))
+
+    beta_gavg = [
+        mne.grand_average(betas[0]),
+        mne.grand_average(betas[1]),
+        mne.grand_average(betas[2]),
+    ]
+    np.save(z_dir / "ols_2ndlevel_betasavg.npy", np.array(beta_gavg, dtype=object), allow_pickle=True)
+
+    # epochs for plotting/binning
+    epo_save_p = mne.concatenate_epochs(all_epos_pain)
+    epo_save_m = mne.concatenate_epochs(all_epos_money)
+    epo_save_p.save(z_dir / "ols_2ndlevel_allepochs-epo_painlevel.fif", overwrite=True)
+    epo_save_m.save(z_dir / "ols_2ndlevel_allepochs-epo_moneylevel.fif", overwrite=True)
+
+    # ------------------------------------------------------------
+    # second-level cluster test (pain, money, salience_u)
+    # ------------------------------------------------------------
+    connect, _ = mne.channels.find_ch_adjacency(beta_gavg[0].info, ch_type="eeg")
+
+    p_thresh = param["cluster_threshold"] / 2.0
+    cluster_threshold = -stats.t.ppf(p_thresh, df=allbetas.shape[0] - 1)
+
+    regnames = ["pain_z", "money_z", "salience_u_z"]
+    tvals_list, pvals_list = [], []
+
+    for ridx, rname in enumerate(regnames):
+        data_reg = allbetas[:, ridx, :, :]          # (n_subj, n_chan, n_time)
+        testdata = np.swapaxes(data_reg, 2, 1)      # (n_subj, n_time, n_chan)
+
+        tval, clusters, cluster_p_values, _ = st_clust_1s_ttest(
+            testdata,
+            threshold=cluster_threshold,
+            adjacency=connect,
+            n_permutations=param["nperms"],
+            n_jobs=param["njobs"],
+            buffer_size=None,
+        )
+
+        pmap = np.ones_like(tval)
+        for c, p_val in zip(clusters, cluster_p_values):
+            pmap[c] = p_val
+
+        tvals_list.append(tval)
+        pvals_list.append(pmap)
+
+    np.save(z_dir / "ols_2ndlevel_tvals.npy", np.stack(tvals_list))  # (3, n_times, n_chans)
+    np.save(z_dir / "ols_2ndlevel_pvals.npy", np.stack(pvals_list))  # (3, n_times, n_chans)
+
+    print(f"v21 done. Included n={len(included_subjects)}, skipped n={len(skipped_subjects)}.")
 
 
 #elif version == 12:
