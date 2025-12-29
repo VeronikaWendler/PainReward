@@ -4586,7 +4586,7 @@ if version == 19:
 
         # epochs used for binning plots
         all_epos = mne.read_epochs(
-            opj(outpath_glm, f"ols_2ndlevel_allepochs-epo_{reg_epoch}.fif"),
+            opj(outpath_glm, f"ols_2ndlevel_allepochs-epo_sv_{reg_epoch}.fif"),
             preload=True
         )
         all_epos.metadata = all_epos.metadata.reset_index(drop=True)
