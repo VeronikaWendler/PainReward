@@ -59,7 +59,7 @@ if not os.path.exists(outpath):
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
 version = 20
-v19_mode = "joint"   # "joint" or "separate"
+v20_mode = "joint"   # "joint" or "separate"
 
 
 v13_mode = "joint"   # or "joint"s
@@ -4486,26 +4486,12 @@ elif version == 19:
     np.save(z_dir / "ols_2ndlevel_pvals.npy", np.stack(pvals_list))
 
     print(f"v19 done. Included n={len(included_subjects)}, skipped n={len(skipped_subjects)}.")
-
-# =========================
-# VERSION 20: Salience test (linear vs quadratic orthogonal)
-# cue-locked LONG ERPs
-# =========================
-
-version = 20
-v20_mode = "joint_poly"   # only mode for now
-
-# set output folder
-elif version == 20:
-    base_v20 = opj(outpath, "erps_massuni_salience_cuelong")
-    os.makedirs(base_v20, exist_ok=True)
-    outpath = opj(base_v20, "v20_long_pain_money_LQ_RT")
-    os.makedirs(outpath, exist_ok=True)
-
+    
+    
 # -------------------------
 # v20 ANALYSIS (put this where your v19 block is)
 # -------------------------
-if version == 20:
+elif version == 20:
 
     z_dir = Path(outpath) / "Zscoring"
     z_dir.mkdir(parents=True, exist_ok=True)
