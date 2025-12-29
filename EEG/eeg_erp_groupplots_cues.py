@@ -4544,13 +4544,13 @@ if version == 19:
     print(f"v18 time range: {tmin:.3f}..{tmax:.3f} s")
 
     # Bookkeeping: betas and epochs are in same order in v18
-    regvars_betas  = ["sv_painlevel", "sv_moneylevel"]
-    regvars_epochs = ["sv_painlevel", "sv_moneylevel"]
-    regvarsnames   = ["SV_painlevel", "SV_moneylevel"]
+    regvars_betas  = ["painlevel", "moneylevel"]
+    regvars_epochs = ["painlevel", "moneylevel"]
+    regvarsnames   = ["Painlevel", "Moneylevel"]
 
     cmap_map = {
-        "sv_painlevel": ("Blues", 6),
-        "sv_moneylevel":     ("Greens", 6),
+        "Painlevel": ("Blues", 6),
+        "Moneylevel":     ("Greens", 6),
     }
 
     # Bonferroni across the 2 regressors
