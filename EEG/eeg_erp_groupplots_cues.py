@@ -24,6 +24,7 @@ from pathlib import Path
 from mne.stats import spatio_temporal_cluster_1samp_test, combine_adjacency
 from mne.channels import find_ch_adjacency
 import scipy.stats as stats
+from mne.stats import fdr_correction
 
 #-----------------------------------------------------------------------------------------------------
 #
@@ -5156,10 +5157,9 @@ if version == 22:
     tvals = np.load(opj(outpath_glm, "ols_2ndlevel_tvals.npy"))        # (2, n_times, n_chans)
     pvals = np.load(opj(outpath_glm, "ols_2ndlevel_pvals.npy"))        # (2, n_times, n_chans)
 
-    # ----------------------------
     beta_gavg = np.load(opj(outpath_glm, "ols_2ndlevel_betasavg.npy"), allow_pickle=True)
-    allbetas = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"), allow_pickle=True)
-    
+    allbetas  = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"), allow_pickle=True)
+
     # ----------------------------
     # TIME ALIGNMENT CHECK (CRITICAL)
     # Make beta time axis match the epochs you saved for binning
@@ -5168,17 +5168,17 @@ if version == 22:
         opj(outpath_glm, "ols_2ndlevel_allepochs-epo_painlevel.fif"),
         preload=False
     )
-    
+
     beta_t0 = float(beta_gavg[0].times[0])
     ref_t0  = float(ref_epo.times[0])   # should equal ref_epo.tmin
-    
-    print(f"[v25] beta_gavg tmin: {beta_t0:.6f} s")
-    print(f"[v25] ref epochs tmin: {ref_t0:.6f} s")
-    
+
+    print(f"[v22] beta_gavg tmin: {beta_t0:.6f} s")
+    print(f"[v22] ref epochs tmin: {ref_t0:.6f} s")
+
     # If they differ by more than half a sample, shift betas (labels only, data unchanged)
     tol = 0.5 / param["testresampfreq"]
     tshift = ref_t0 - beta_t0
-    
+
     if abs(tshift) > tol:
         print(f"[v22] Shifting beta time axis by {tshift:.6f} s to match epochs.")
         beta_gavg = np.array(
@@ -5187,32 +5187,26 @@ if version == 22:
         )
     else:
         print("[v22] Beta time axis already matches epochs; no shift applied.")
-    
+
     # Now use *shifted* beta time axis everywhere below
     times = beta_gavg[0].times
     tmin, tmax = float(times[0]), float(times[-1])
     print(f"[v22] final plot time range: {tmin:.3f}..{tmax:.3f} s")
 
-    allbetas = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"), allow_pickle=True)     # (n_subj, 2, n_chan, n_time)
-
     # Cue-locked long epoch time axis
     times = beta_gavg[0].times
     tmin, tmax = times[0], times[-1]
-    print(f"v18 time range: {tmin:.3f}..{tmax:.3f} s")
+    print(f"[v22] time range: {tmin:.3f}..{tmax:.3f} s")
 
-    # Bookkeeping: betas and epochs are in same order in v18
+    # Bookkeeping: betas and epochs are in same order
     regvars_betas  = ["painlevel", "moneylevel"]
     regvars_epochs = ["painlevel", "moneylevel"]
     regvarsnames   = ["Painlevel", "Moneylevel"]
 
     cmap_map = {
-        "Painlevel": ("Blues", 6),
-        "Moneylevel":("Greens", 6),
+        "painlevel":  ("Blues", 6),
+        "moneylevel": ("Greens", 6),
     }
-
-    # Bonferroni across the 2 regressors
-    alpha_eff = param["alpha"] / len(regvars_betas)
-    print(f"v22 alpha_eff = {alpha_eff} (alpha={param['alpha']} / {len(regvars_betas)})")
 
     # Cue-locked long plotting times (clip to actual available range)
     plot_times = [0.4, 0.6, 0.8, 1.0, 1.2, 1.3, 1.4]   # seconds
@@ -5222,7 +5216,7 @@ if version == 22:
     times_pos = [np.abs(times - t).argmin() for t in plot_times_clipped]
 
     # timepoint used for binned topographies
-    bin_topo_time = 1.2  # seconds post-cue 
+    bin_topo_time = 1.2  # seconds post-cue
 
     # exclude mastoids for masks
     chankeep = np.array([c not in ["M1", "M2"] for c in beta_gavg[0].ch_names])
@@ -5249,6 +5243,23 @@ if version == 22:
         all_epos.metadata = all_epos.metadata.reset_index(drop=True)
 
         # ----------------------------
+        # FDR (BH) across ALL (time × channels) tests for THIS regressor
+        # ----------------------------
+        alpha = float(param["alpha"])
+
+        p_map = pvals[ridx].copy()  # (n_times, n_chans)
+        # Drop mastoids (and any other excluded channels) from the correction family
+        p_map[:, ~chankeep] = np.nan
+
+        p_flat = p_map[~np.isnan(p_map)].ravel()
+        reject, pval_fdr = fdr_correction(p_flat, alpha=alpha, method="indep")
+
+        rej_map = np.zeros_like(p_map, dtype=bool)
+        rej_map[~np.isnan(p_map)] = reject
+
+        print(f"[v22] {reg_beta}: FDR alpha={alpha}, rejected={reject.sum()} / {reject.size}")
+
+        # ----------------------------
         # 1) Topomap of beta at plot_times
         # ----------------------------
         beta_ev = beta_gavg[ridx].copy()
@@ -5256,9 +5267,9 @@ if version == 22:
         for tidx, timepos in enumerate(times_pos):
             fig, ax = plt.subplots(figsize=(1.2, 1.2))
 
-            p_row = pvals[ridx][timepos, :]
-            mask = np.zeros_like(p_row, dtype=bool)
-            mask[(p_row < alpha_eff) & chankeep] = True
+            # mask from FDR-corrected decisions
+            mask = rej_map[timepos, :].copy()
+            mask[~chankeep] = False
 
             im, _ = plot_topomap(
                 beta_ev.data[:, timepos],
@@ -5417,7 +5428,7 @@ if version == 22:
                 )
 
         # ----------------------------
-        # 4) Mean beta ± SEM over subjects (with sig bars)
+        # 4) Mean beta ± SEM over subjects (with sig bars; now FDR-based)
         # ----------------------------
         for c in chan_to_plot:
             if c not in beta_ev.ch_names:
@@ -5442,8 +5453,9 @@ if version == 22:
 
             timestep = 1000.0 / param["testresampfreq"]
             for ti, t_ms in enumerate(beta_ev.times * 1000):
-                if pvals[ridx][ti, pick] < alpha_eff:
-                    ax.fill_between([t_ms, t_ms + timestep], -0.02, -0.005, alpha=0.3, facecolor="red")
+                if rej_map[ti, pick]:
+                    ax.fill_between([t_ms, t_ms + timestep], -0.02, -0.005,
+                                    alpha=0.3, facecolor="red")
 
             fig.tight_layout()
             fig.savefig(
@@ -5451,6 +5463,7 @@ if version == 22:
                 dpi=600,
                 bbox_inches="tight"
             )
+            
             
 # if version == 11:
 #     from scipy.stats import ttest_1samp
