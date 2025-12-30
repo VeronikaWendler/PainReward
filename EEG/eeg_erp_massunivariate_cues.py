@@ -58,8 +58,8 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 21
-v21_mode = "joint"   # "joint" or "separate"
+version = 22
+v22_mode = "joint"   # "joint" or "separate"
 
 
 v13_mode = "joint"   # or "joint"s
@@ -240,6 +240,17 @@ elif version == 21:
     else:
         raise ValueError("v21_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
+
+elif version == 22:
+    base_v22 = opj(outpath, "erps_massuni_sv_cuelong")
+    os.makedirs(base_v22, exist_ok=True)
+    if v22_mode == "joint":
+        outpath = opj(base_v22, "v22_high_accept_joint")
+    elif v22_mode == "separate":
+        outpath = opj(base_v22, "v22_high_accept_sep")
+    else:
+        raise ValueError("v22_mode must be 'joint' or 'separate'")
+    os.makedirs(outpath, exist_ok=True)
 else:
     print("no version")
 
@@ -311,6 +322,13 @@ if version == 16:
     print("After Abs_Money_Pain filter, mod_data rows:", len(mod_data))
     print("After Abs_Money_Pain filter, unique participants:", mod_data['participant'].nunique())
 
+if version == 22:
+    mod_data["accept_mediansplit"] = pd.to_numeric(mod_data["accept_mediansplit"], errors="coerce")
+    mod_data = mod_data.loc[mod_data["accept_mediansplit"] == 1].copy()
+    print("After high-accept (median split) filter, mod_data rows:", len(mod_data))
+    print("After high-accept (median split) filter, unique participants:", mod_data["participant"].nunique())
+    
+
 
 
 # Subjects in EEG
@@ -365,7 +383,7 @@ if version == 14:
     regvars = ['painlevel', 'moneylevel']
 if version == 17:
     regvars = ['painlevel', 'moneylevel']
-if version == 21:
+if version == 22:
     regvars = ['painlevel', 'moneylevel']
 #all_epos = [[] for i in range(len(regvars))]
 #allbetasnp = []
@@ -378,7 +396,7 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21]:
+if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21, 22]:
     filtered_data = []
     for p in part:
         # data for this participant
@@ -402,7 +420,7 @@ if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21]:
                 opj(basepath, p, "eeg", "erps_resp", f"{p}_decision_resp_singletrials-epo.fif"),
                 preload=True)
             epo_1 = epo.copy()
-        elif version in [18,19,20,21]:
+        elif version in [18,19,20,21,22]:
             epo = mne.read_epochs(
                 opj(basepath, p, "eeg", "erps_long", f"{p}_decision_cues_long_singletrials-epo.fif"),
                 preload=True
@@ -4926,6 +4944,191 @@ elif version == 21:
 
     print(f"v21 done. Included n={len(included_subjects)}, skipped n={len(skipped_subjects)}.")
 
+
+elif version == 22:
+
+    z_dir = Path(outpath) / "Zscoring"
+    z_dir.mkdir(parents=True, exist_ok=True)
+
+    # columns in mod_data
+    pvar, mvar, rt_col = "painlevel", "moneylevel", "rt"
+
+    # sanity checks (fail fast if missing)
+    for col in [pvar, mvar, rt_col, "participant", "trialsnum"]:
+        if col not in mod_data.columns:
+            raise RuntimeError(f"v22: mod_data is missing required column: '{col}'")
+
+    included_subjects, skipped_subjects = [], []
+    betas = [[] for _ in range(2)]      # per-subject Evoked betas
+    all_epos = [[] for _ in range(2)]   # epochs to save for binning plots later
+    allbetasnp = []                     # (n_subj, 2, n_chan, n_time)
+
+    for pa in part:
+        # subject behavioural rows
+        mod2 = mod_data[mod_data["participant"] == pa].copy()
+
+        # load LONG cue-locked epochs
+        epo = mne.read_epochs(
+            opj(basepath, pa, "eeg", "erps_long", f"{pa}_decision_cues_long_singletrials-epo.fif"),
+            preload=True
+        )
+
+        # --- align by trialsnum (most robust for your setup)
+        if "trialsnum" not in epo.metadata.columns:
+            raise RuntimeError("v22: epochs metadata missing 'trialsnum'. Did you save it in ERP creation?")
+
+        # keep only trials that exist in mod2
+        keep_epo = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
+        epo_filt = epo[keep_epo]
+
+        mod2 = mod2[mod2["trialsnum"].isin(epo_filt.metadata["trialsnum"])].copy()
+
+        # sort both by trialsnum to guarantee row alignment
+        epo_order = np.argsort(epo_filt.metadata["trialsnum"].to_numpy())
+        epo_filt = epo_filt[epo_order]
+        mod2 = mod2.sort_values("trialsnum").reset_index(drop=True)
+
+        # resample to test frequency
+        if epo_filt.info["sfreq"] != param["testresampfreq"]:
+            epo_filt = epo_filt.resample(param["testresampfreq"])
+
+        # drop bad trials (from your ERP script)
+        if "badtrial" in epo_filt.metadata.columns:
+            good = np.where(epo_filt.metadata["badtrial"].to_numpy(int) == 0)[0]
+            epo_filt = epo_filt[good]
+            mod2 = mod2.iloc[good].reset_index(drop=True)
+
+        # finite check
+        vals = mod2[[pvar, mvar, rt_col]].to_numpy(float)
+        ok = np.all(np.isfinite(vals), axis=1)
+
+        if ok.sum() < 10:  # be a bit stricter for cue-long
+            skipped_subjects.append(pa)
+            continue
+
+        epo_filt = epo_filt[ok]
+        mod2k = mod2.iloc[ok].reset_index(drop=True)
+
+        # keep for binning plots later (keep original scale sv_pain_para / sv_money)
+        epo_keep_for_meta = epo_filt.copy()
+        md = epo_keep_for_meta.metadata.reset_index(drop=True).copy()
+        md[pvar] = mod2k[pvar].values
+        md[mvar] = mod2k[mvar].values
+        md[rt_col] = mod2k[rt_col].values
+        epo_keep_for_meta.metadata = md
+
+        # --- z-score predictors
+        pain_z  = stats.zscore(mod2k[pvar].to_numpy(float))
+        money_z = stats.zscore(mod2k[mvar].to_numpy(float))
+        rt_z    = stats.zscore(mod2k[rt_col].to_numpy(float))
+
+        # --- z-score EEG across trials (preserve events + tmin!)
+        scale = Scaler(scalings="mean")
+        data_z = scale.fit_transform(epo_filt.get_data())
+
+        epo_z = mne.EpochsArray(
+            data_z,
+            info=epo_filt.info,
+            events=epo_filt.events,
+            tmin=epo_filt.tmin,
+            event_id=epo_filt.event_id,
+            metadata=epo_filt.metadata
+        )
+
+        # --- run GLM
+        if v22_mode == "joint":
+            design = pd.DataFrame({
+                "Intercept": 1.0,
+                "painlevel_z": pain_z,
+                "moneylevel_z": money_z,
+                "RT_z": rt_z,
+            })
+            res = mne.stats.linear_regression(epo_z, design, names=list(design.columns))
+            beta_pain  = res["painlevel_z"].beta
+            beta_money = res["moneylevel_z"].beta
+
+        elif v22_mode == "separate":
+            design_p = pd.DataFrame({"Intercept": 1.0, "painlevel_z": pain_z, "RT_z": rt_z})
+            res_p = mne.stats.linear_regression(epo_z, design_p, names=list(design_p.columns))
+            beta_pain = res_p["painlevel_z"].beta
+
+            design_m = pd.DataFrame({"Intercept": 1.0, "moneylevel_z": money_z, "RT_z": rt_z})
+            res_m = mne.stats.linear_regression(epo_z, design_m, names=list(design_m.columns))
+            beta_money = res_m["moneylevel_z"].beta
+
+        else:
+            raise ValueError("v22_mode must be 'joint' or 'separate'")
+
+        # store for second-level
+        betas[0].append(beta_pain)
+        betas[1].append(beta_money)
+        allbetasnp.append(np.stack([beta_pain.data, beta_money.data]))  # (2, n_chan, n_time)
+
+        # store epochs for binning plots later (one copy per regressor)
+        all_epos[0].append(epo_keep_for_meta.copy())
+        all_epos[1].append(epo_keep_for_meta.copy())
+
+        included_subjects.append(pa)
+
+    if len(allbetasnp) == 0:
+        raise RuntimeError("v22: no subjects included after filtering/alignment.")
+
+    allbetas = np.stack(allbetasnp)  # (n_subj, 2, n_chan, n_time)
+
+    # save betas
+    np.save(z_dir / "ols_2ndlevel_betas.npy", allbetas)
+    np.save(z_dir / "included_subjects.npy", np.array(included_subjects, dtype=object))
+    np.save(z_dir / "skipped_subjects.npy", np.array(skipped_subjects, dtype=object))
+
+    # grand-average betas
+    beta_gavg = [mne.grand_average(betas[0]), mne.grand_average(betas[1])]
+    np.save(z_dir / "ols_2ndlevel_betasavg.npy", np.array(beta_gavg, dtype=object), allow_pickle=True)
+
+    # save epochs for plotting / binning
+    epo_save_p = mne.concatenate_epochs(all_epos[0])
+    epo_save_m = mne.concatenate_epochs(all_epos[1])
+    epo_save_p.save(z_dir / "ols_2ndlevel_allepochs-epo_painlevel.fif", overwrite=True)
+    epo_save_m.save(z_dir / "ols_2ndlevel_allepochs-epo_moneylevel.fif", overwrite=True)
+
+    # ------------------------------------------------------------
+    # second-level spatio-temporal cluster test
+    # ------------------------------------------------------------
+    connect, _ = mne.channels.find_ch_adjacency(beta_gavg[0].info, ch_type="eeg")
+
+    # two-sided threshold
+    p_thresh = param["cluster_threshold"] / 2.0
+    cluster_threshold = -stats.t.ppf(p_thresh, df=allbetas.shape[0] - 1)
+
+    regnames = ["painlevel", "moneylevel"]
+    tvals_list, pvals_list = [], []
+
+    for ridx, rname in enumerate(regnames):
+        # allbetas: (n_subj, 2, n_chan, n_time) -> cluster expects (n_subj, n_time, n_chan)
+        data_reg = allbetas[:, ridx, :, :]          # (n_subj, n_chan, n_time)
+        testdata = np.swapaxes(data_reg, 2, 1)      # (n_subj, n_time, n_chan)
+
+        tval, clusters, cluster_p_values, _ = st_clust_1s_ttest(
+            testdata,
+            threshold=cluster_threshold,
+            adjacency=connect,
+            n_permutations=param["nperms"],
+            n_jobs=param["njobs"],
+            buffer_size=None,
+        )
+
+        # build p-map
+        pmap = np.ones_like(tval)
+        for c, p_val in zip(clusters, cluster_p_values):
+            pmap[c] = p_val
+
+        tvals_list.append(tval)
+        pvals_list.append(pmap)
+
+    np.save(z_dir / "ols_2ndlevel_tvals.npy", np.stack(tvals_list))
+    np.save(z_dir / "ols_2ndlevel_pvals.npy", np.stack(pvals_list))
+
+    print(f"v22 done. Included n={len(included_subjects)}, skipped n={len(skipped_subjects)}.")
+    
 
 #elif version == 12:
     # 9 
