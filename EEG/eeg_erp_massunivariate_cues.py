@@ -331,7 +331,7 @@ if version == 22:
 
 
 
-# Subjects in EEG
+# Subjects in EEG 
 eeg_participants = set(part) # should be 1 - 50
 # Subjects in HDDM CSV (should be 38 in total)
 beh_participants = set(mod_data["participant"].unique())
