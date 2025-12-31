@@ -270,9 +270,9 @@ elif version == 24:
     base_v24 = opj(outpath, "erps_massuni_sv_cuelong")
     os.makedirs(base_v24, exist_ok=True)
     if v24_mode == "joint":
-        outpath = opj(base_v24, "v24_high_accept_joint")
+        outpath = opj(base_v24, "v25_low_accept_joint")
     elif v24_mode == "separate":
-        outpath = opj(base_v24, "v24_high_accept_sep")
+        outpath = opj(base_v24, "v25_low_accept_sep")
     else:
         raise ValueError("v24_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
@@ -359,7 +359,7 @@ if version == 23:
     
 if version == 24:
     mod_data["accept_mediansplit"] = pd.to_numeric(mod_data["accept_mediansplit"], errors="coerce")
-    mod_data = mod_data.loc[mod_data["accept_mediansplit"] == 1].copy()
+    mod_data = mod_data.loc[mod_data["accept_mediansplit"] == 0].copy()
     print("After high-accept (median split) filter, mod_data rows:", len(mod_data))
     print("After high-accept (median split) filter, unique participants:", mod_data["participant"].nunique())
     
