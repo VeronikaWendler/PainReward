@@ -5150,7 +5150,7 @@ if version == 20:
             )
 
 
-iif version == 22:
+elif version == 22:
     # ----------------------------
     # Load second-level outputs
     # ----------------------------
