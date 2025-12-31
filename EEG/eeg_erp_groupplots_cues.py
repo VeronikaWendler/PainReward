@@ -42,7 +42,7 @@ version = 22   # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
 v14_mode = "joint"
-v22_mode = "joint"
+v22_mode = "separate"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -5150,15 +5150,15 @@ if version == 20:
             )
 
 
-if version == 22:
+iif version == 22:
     # ----------------------------
     # Load second-level outputs
     # ----------------------------
-    tvals = np.load(opj(outpath_glm, "ols_2ndlevel_tvals.npy"))        # (2, n_times, n_chans)
-    pvals = np.load(opj(outpath_glm, "ols_2ndlevel_pvals.npy"))        # (2, n_times, n_chans)
+    tvals = np.load(opj(outpath_glm, "ols_2ndlevel_tvals.npy"))  # (2, n_times, n_chans)
+    pvals = np.load(opj(outpath_glm, "ols_2ndlevel_pvals.npy"))  # (2, n_times, n_chans)
 
     beta_gavg = np.load(opj(outpath_glm, "ols_2ndlevel_betasavg.npy"), allow_pickle=True)
-    allbetas  = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"), allow_pickle=True)
+    allbetas  = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"),    allow_pickle=True)  # (n_subj, 2, n_chan, n_time)
 
     # ----------------------------
     # TIME ALIGNMENT CHECK (CRITICAL)
@@ -5170,49 +5170,49 @@ if version == 22:
     )
 
     beta_t0 = float(beta_gavg[0].times[0])
-    ref_t0  = float(ref_epo.times[0])   # should equal ref_epo.tmin
+    ref_t0  = float(ref_epo.times[0])
 
-    print(f"[v22] beta_gavg tmin: {beta_t0:.6f} s")
-    print(f"[v22] ref epochs tmin: {ref_t0:.6f} s")
+    print(f"[v22|{v22_mode}] beta_gavg tmin: {beta_t0:.6f} s")
+    print(f"[v22|{v22_mode}] ref epochs tmin: {ref_t0:.6f} s")
 
-    # If they differ by more than half a sample, shift betas (labels only, data unchanged)
     tol = 0.5 / param["testresampfreq"]
     tshift = ref_t0 - beta_t0
 
     if abs(tshift) > tol:
-        print(f"[v22] Shifting beta time axis by {tshift:.6f} s to match epochs.")
+        print(f"[v22|{v22_mode}] Shifting beta time axis by {tshift:.6f} s to match epochs.")
         beta_gavg = np.array(
             [ev.copy().shift_time(tshift, relative=True) for ev in beta_gavg],
             dtype=object
         )
     else:
-        print("[v22] Beta time axis already matches epochs; no shift applied.")
+        print(f"[v22|{v22_mode}] Beta time axis already matches epochs; no shift applied.")
 
-    # Now use *shifted* beta time axis everywhere below
     times = beta_gavg[0].times
     tmin, tmax = float(times[0]), float(times[-1])
-    print(f"[v22] final plot time range: {tmin:.3f}..{tmax:.3f} s")
+    print(f"[v22|{v22_mode}] final plot time range: {tmin:.3f}..{tmax:.3f} s")
 
-    # Cue-locked long epoch time axis
-    times = beta_gavg[0].times
-    tmin, tmax = times[0], times[-1]
-    print(f"[v22] time range: {tmin:.3f}..{tmax:.3f} s")
-
-    # Bookkeeping: betas and epochs are in same order
-    regvars_betas  = ["painlevel", "moneylevel"]
-    regvars_epochs = ["painlevel", "moneylevel"]
-    regvarsnames   = ["Painlevel", "Moneylevel"]
+    # ----------------------------
+    # Bookkeeping (always 2 betas saved: painlevel, moneylevel)
+    # ----------------------------
+    regvars_betas  = ["painlevel", "moneylevel"]   # index order in saved arrays
+    regvars_epochs = ["painlevel", "moneylevel"]   # filenames for saved epochs
+    regvarsnames   = ["Painlevel", "Moneylevel"]   # for titles
 
     cmap_map = {
         "painlevel":  ("Blues", 6),
         "moneylevel": ("Greens", 6),
     }
 
-    # Cue-locked long plotting times (clip to actual available range)
-    plot_times = [0.4, 0.6, 0.8, 1.0, 1.2, 1.3, 1.4]   # seconds
+    # Bonferroni across the TWO betas you are plotting
+    alpha_eff = param["alpha"] / len(regvars_betas)
+    print(f"[v22|{v22_mode}] alpha_eff = {alpha_eff} (alpha={param['alpha']} / {len(regvars_betas)})")
+
+    # Clip plotting times to actual available range
+    plot_times = [0.4, 0.6, 0.8, 1.0, 1.2, 1.3, 1.4]
     plot_times_clipped = [t for t in plot_times if (t >= tmin) and (t <= tmax)]
     if len(plot_times_clipped) == 0:
         raise RuntimeError(f"No plot_times fall within epoch time range [{tmin:.3f}, {tmax:.3f}] s")
+
     times_pos = [np.abs(times - t).argmin() for t in plot_times_clipped]
 
     # timepoint used for binned topographies
@@ -5226,7 +5226,7 @@ if version == 22:
     xticks = np.arange((tmin_ms // 200) * 200, ((tmax_ms + 199) // 200) * 200 + 1, 200)
 
     # ----------------------------
-    # Loop regressors
+    # Loop regressors (pain, money)
     # ----------------------------
     for ridx, reg_beta in enumerate(regvars_betas):
 
@@ -5235,29 +5235,12 @@ if version == 22:
 
         cmap, vminmax = cmap_map.get(reg_beta, ("viridis", 6))
 
-        # epochs used for binning plots
+        # epochs used for binning plots (NOTE: v22 file names have NO 'sv_' prefix)
         all_epos = mne.read_epochs(
             opj(outpath_glm, f"ols_2ndlevel_allepochs-epo_{reg_epoch}.fif"),
             preload=True
         )
         all_epos.metadata = all_epos.metadata.reset_index(drop=True)
-
-        # ----------------------------
-        # FDR (BH) across ALL (time × channels) tests for THIS regressor
-        # ----------------------------
-        alpha = float(param["alpha"])
-
-        p_map = pvals[ridx].copy()  # (n_times, n_chans)
-        # Drop mastoids (and any other excluded channels) from the correction family
-        p_map[:, ~chankeep] = np.nan
-
-        p_flat = p_map[~np.isnan(p_map)].ravel()
-        reject, pval_fdr = fdr_correction(p_flat, alpha=alpha, method="indep")
-
-        rej_map = np.zeros_like(p_map, dtype=bool)
-        rej_map[~np.isnan(p_map)] = reject
-
-        print(f"[v22] {reg_beta}: FDR alpha={alpha}, rejected={reject.sum()} / {reject.size}")
 
         # ----------------------------
         # 1) Topomap of beta at plot_times
@@ -5267,16 +5250,18 @@ if version == 22:
         for tidx, timepos in enumerate(times_pos):
             fig, ax = plt.subplots(figsize=(1.2, 1.2))
 
-            # mask from FDR-corrected decisions
-            mask = rej_map[timepos, :].copy()
-            mask[~chankeep] = False
+            p_row = pvals[ridx][timepos, :]
+            mask = np.zeros_like(p_row, dtype=bool)
+            mask[(p_row < alpha_eff) & chankeep] = True
 
             im, _ = plot_topomap(
                 beta_ev.data[:, timepos],
                 pos=beta_ev.info,
                 mask=mask,
-                mask_params=dict(marker="o", markerfacecolor="w", markeredgecolor="k",
-                                 linewidth=0, markersize=2),
+                mask_params=dict(
+                    marker="o", markerfacecolor="w", markeredgecolor="k",
+                    linewidth=0, markersize=2
+                ),
                 cmap=cmap,
                 show=False,
                 ch_type="eeg",
@@ -5288,29 +5273,35 @@ if version == 22:
                 contours=0,
             )
 
-            ax.set_title(f"{reg_name}\n{int(plot_times_clipped[tidx]*1000)} ms",
-                         fontdict={"size": param["labelfontsize"]-1},
-                         pad=0.2)
+            ax.set_title(
+                f"{reg_name}\n{int(plot_times_clipped[tidx]*1000)} ms",
+                fontdict={"size": param["labelfontsize"]-1},
+                pad=0.2
+            )
 
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v25_topo_beta_{reg_beta}_{tidx}.svg"),
-                dpi=600,
-                bbox_inches="tight"
+                opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_topo_beta_{reg_beta}_{tidx}.svg"),
+                dpi=600, bbox_inches="tight"
             )
 
             # colorbar (once per regressor)
             if tidx == (len(times_pos) - 1):
                 fig2, cax = plt.subplots(figsize=(0.25, 1.2))
                 cbar = fig2.colorbar(im, cax=cax, orientation="vertical", aspect=1)
-                cbar.set_label("Beta (z)", rotation=270, labelpad=12,
-                               fontdict={"fontsize": param["labelfontsize"]-1})
+                cbar.set_label(
+                    "Beta (z)",
+                    rotation=270, labelpad=12,
+                    fontdict={"fontsize": param["labelfontsize"]-1}
+                )
                 cbar.ax.tick_params(labelsize=param["ticksfontsize"]-2)
                 fig2.savefig(
-                    opj(outfigpath, f"{fig_prefix}v25_topo_beta_cbar_{reg_beta}.svg"),
-                    dpi=600,
-                    bbox_inches="tight"
+                    opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_topo_beta_cbar_{reg_beta}.svg"),
+                    dpi=600, bbox_inches="tight"
                 )
 
+        # ----------------------------
+        # 2) Binned-by-regressor ERP line plots
+        # ----------------------------
         nbins = 5
         if reg_epoch not in all_epos.metadata.columns:
             raise RuntimeError(f"Metadata column '{reg_epoch}' not found in epochs metadata.")
@@ -5373,9 +5364,8 @@ if version == 22:
             fig.tight_layout()
 
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v22_bins_{reg_beta}_{c}.svg"),
-                dpi=600,
-                bbox_inches="tight"
+                opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_bins_{reg_beta}_{c}.svg"),
+                dpi=600, bbox_inches="tight"
             )
 
         # ----------------------------
@@ -5405,37 +5395,40 @@ if version == 22:
                 contours=0,
             )
 
-            ax.set_title(f"{reg_name}\nBin {bin_id} @ {int(bt*1000)} ms",
-                         fontdict={"size": param["labelfontsize"]-1},
-                         pad=0.2)
+            ax.set_title(
+                f"{reg_name}\nBin {bin_id} @ {int(bt*1000)} ms",
+                fontdict={"size": param["labelfontsize"]-1},
+                pad=0.2
+            )
 
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v25_bins_topo_{reg_beta}_bin{bin_id}.svg"),
-                dpi=600,
-                bbox_inches="tight"
+                opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_bins_topo_{reg_beta}_bin{bin_id}.svg"),
+                dpi=600, bbox_inches="tight"
             )
 
             if bi == (len(bin_ids) - 1):
                 fig2, cax = plt.subplots(figsize=(0.25, 1.2))
                 cbar = fig2.colorbar(im, cax=cax, orientation="vertical", aspect=1)
-                cbar.set_label("Amplitude (µV)", rotation=270, labelpad=12,
-                               fontdict={"fontsize": param["labelfontsize"]-1})
+                cbar.set_label(
+                    "Amplitude (µV)",
+                    rotation=270, labelpad=12,
+                    fontdict={"fontsize": param["labelfontsize"]-1}
+                )
                 cbar.ax.tick_params(labelsize=param["ticksfontsize"]-2)
                 fig2.savefig(
-                    opj(outfigpath, f"{fig_prefix}v25_bins_topo_cbar_{reg_beta}.svg"),
-                    dpi=600,
-                    bbox_inches="tight"
+                    opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_bins_topo_cbar_{reg_beta}.svg"),
+                    dpi=600, bbox_inches="tight"
                 )
 
         # ----------------------------
-        # 4) Mean beta ± SEM over subjects (with sig bars; now FDR-based)
+        # 4) Mean beta ± SEM over subjects (with sig bars)
         # ----------------------------
         for c in chan_to_plot:
             if c not in beta_ev.ch_names:
                 continue
             pick = beta_ev.ch_names.index(c)
 
-            sub_avg = allbetas[:, ridx, pick, :]   # (n_subj, n_time)
+            sub_avg = allbetas[:, ridx, pick, :]  # (n_subj, n_time)
             sem = scipy.stats.sem(sub_avg, axis=0)
             mean = beta_ev.data[pick, :]
 
@@ -5453,17 +5446,20 @@ if version == 22:
 
             timestep = 1000.0 / param["testresampfreq"]
             for ti, t_ms in enumerate(beta_ev.times * 1000):
-                if rej_map[ti, pick]:
-                    ax.fill_between([t_ms, t_ms + timestep], -0.02, -0.005,
-                                    alpha=0.3, facecolor="red")
+                if pvals[ridx][ti, pick] < alpha_eff:
+                    ax.fill_between(
+                        [t_ms, t_ms + timestep],
+                        -0.02, -0.005,
+                        alpha=0.3,
+                        facecolor="red"
+                    )
 
             fig.tight_layout()
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v25_beta_meanSEM_{reg_beta}_{c}.svg"),
-                dpi=600,
-                bbox_inches="tight"
+                opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_beta_meanSEM_{reg_beta}_{c}.svg"),
+                dpi=600, bbox_inches="tight"
             )
-            
+ 
             
 # if version == 11:
 #     from scipy.stats import ttest_1samp
