@@ -37,12 +37,12 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 22   # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 23   # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
 v14_mode = "joint"
-v22_mode = "separate"
+v23_mode = "joint"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -239,13 +239,13 @@ elif version == 22:
 elif version == 23:
     base_v23 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
     if v23_mode == "joint":
-        outpath = opj(base_v23, "v23_high_accept_joint")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v25_jointGLM_SVpain_SVmoney_RT")
-    elif v22_mode == "separate":
-        outpath = opj(base_v22, "v22_high_accept_sep")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v25_long_SVmoneypain_RT_sep")
+        outpath = opj(base_v23, "v23_low_accept_joint")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v26_jointGLM_SVpain_SVmoney_RT")
+    elif v23_mode == "separate":
+        outpath = opj(base_v23, "v23_low_accept_sep")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v26_long_SVmoneypain_RT_sep")
     else:
-        raise ValueError("v22_mode must be 'joint' or 'separate'")
+        raise ValueError("v23_mode must be 'joint' or 'separate'")
     os.makedirs(outfigpath, exist_ok=True)
          
 else:
@@ -335,7 +335,7 @@ if version == 17 and v17_mode == "resid_joint":
     regvars_epochs = ["sv_pain_para", "sv_money"] 
     regvars = ["pain_u", "money_u"]
     regvarsnames = ["SV_pain_para (unique|RT,money)", "SV_money (unique|RT,pain)"]
-elif version == 22:
+elif version == 23:
     regvars = ["painlevel", "moneylevel"]
     regvarsnames = ["Painlevel", "Moneylevel"]
 
@@ -5162,20 +5162,14 @@ if version == 20:
             )
 
 
-elif version == 22:
-    # ----------------------------
-    # Load second-level outputs
-    # ----------------------------
+elif version == 23:
+
     tvals = np.load(opj(outpath_glm, "ols_2ndlevel_tvals.npy"))  # (2, n_times, n_chans)
     pvals = np.load(opj(outpath_glm, "ols_2ndlevel_pvals.npy"))  # (2, n_times, n_chans)
-
     beta_gavg = np.load(opj(outpath_glm, "ols_2ndlevel_betasavg.npy"), allow_pickle=True)
     allbetas  = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"),    allow_pickle=True)  # (n_subj, 2, n_chan, n_time)
 
-    # ----------------------------
-    # TIME ALIGNMENT CHECK (CRITICAL)
-    # Make beta time axis match the epochs you saved for binning
-    # ----------------------------
+
     ref_epo = mne.read_epochs(
         opj(outpath_glm, "ols_2ndlevel_allepochs-epo_painlevel.fif"),
         preload=False
@@ -5184,24 +5178,24 @@ elif version == 22:
     beta_t0 = float(beta_gavg[0].times[0])
     ref_t0  = float(ref_epo.times[0])
 
-    print(f"[v22|{v22_mode}] beta_gavg tmin: {beta_t0:.6f} s")
-    print(f"[v22|{v22_mode}] ref epochs tmin: {ref_t0:.6f} s")
+    print(f"[v23|{v23_mode}] beta_gavg tmin: {beta_t0:.6f} s")
+    print(f"[v23|{v23_mode}] ref epochs tmin: {ref_t0:.6f} s")
 
     tol = 0.5 / param["testresampfreq"]
     tshift = ref_t0 - beta_t0
 
     if abs(tshift) > tol:
-        print(f"[v22|{v22_mode}] Shifting beta time axis by {tshift:.6f} s to match epochs.")
+        print(f"[v23|{v23_mode}] Shifting beta time axis by {tshift:.6f} s to match epochs.")
         beta_gavg = np.array(
             [ev.copy().shift_time(tshift, relative=True) for ev in beta_gavg],
             dtype=object
         )
     else:
-        print(f"[v22|{v22_mode}] Beta time axis already matches epochs; no shift applied.")
+        print(f"[v23|{v23_mode}] Beta time axis already matches epochs; no shift applied.")
 
     times = beta_gavg[0].times
     tmin, tmax = float(times[0]), float(times[-1])
-    print(f"[v22|{v22_mode}] final plot time range: {tmin:.3f}..{tmax:.3f} s")
+    print(f"[v23|{v23_mode}] final plot time range: {tmin:.3f}..{tmax:.3f} s")
 
     # ----------------------------
     # Bookkeeping (always 2 betas saved: painlevel, moneylevel)
@@ -5217,7 +5211,7 @@ elif version == 22:
 
     # Bonferroni across the TWO betas you are plotting
     alpha_eff = param["alpha"] / len(regvars_betas)
-    print(f"[v22|{v22_mode}] alpha_eff = {alpha_eff} (alpha={param['alpha']} / {len(regvars_betas)})")
+    print(f"[v23|{v23_mode}] alpha_eff = {alpha_eff} (alpha={param['alpha']} / {len(regvars_betas)})")
 
     # Clip plotting times to actual available range
     plot_times = [0.4, 0.6, 0.8, 1.0, 1.2, 1.3, 1.4]
@@ -5292,7 +5286,7 @@ elif version == 22:
             )
 
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_topo_beta_{reg_beta}_{tidx}.svg"),
+                opj(outfigpath, f"{fig_prefix}v23_{v23_mode}_topo_beta_{reg_beta}_{tidx}.svg"),
                 dpi=600, bbox_inches="tight"
             )
 
@@ -5307,7 +5301,7 @@ elif version == 22:
                 )
                 cbar.ax.tick_params(labelsize=param["ticksfontsize"]-2)
                 fig2.savefig(
-                    opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_topo_beta_cbar_{reg_beta}.svg"),
+                    opj(outfigpath, f"{fig_prefix}v23_{v23_mode}_topo_beta_cbar_{reg_beta}.svg"),
                     dpi=600, bbox_inches="tight"
                 )
 
@@ -5376,7 +5370,7 @@ elif version == 22:
             fig.tight_layout()
 
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_bins_{reg_beta}_{c}.svg"),
+                opj(outfigpath, f"{fig_prefix}v23_{v23_mode}_bins_{reg_beta}_{c}.svg"),
                 dpi=600, bbox_inches="tight"
             )
 
@@ -5414,7 +5408,7 @@ elif version == 22:
             )
 
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_bins_topo_{reg_beta}_bin{bin_id}.svg"),
+                opj(outfigpath, f"{fig_prefix}v23_{v23_mode}_bins_topo_{reg_beta}_bin{bin_id}.svg"),
                 dpi=600, bbox_inches="tight"
             )
 
@@ -5428,7 +5422,7 @@ elif version == 22:
                 )
                 cbar.ax.tick_params(labelsize=param["ticksfontsize"]-2)
                 fig2.savefig(
-                    opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_bins_topo_cbar_{reg_beta}.svg"),
+                    opj(outfigpath, f"{fig_prefix}v23_{v23_mode}_bins_topo_cbar_{reg_beta}.svg"),
                     dpi=600, bbox_inches="tight"
                 )
 
@@ -5468,7 +5462,7 @@ elif version == 22:
 
             fig.tight_layout()
             fig.savefig(
-                opj(outfigpath, f"{fig_prefix}v22_{v22_mode}_beta_meanSEM_{reg_beta}_{c}.svg"),
+                opj(outfigpath, f"{fig_prefix}v23_{v23_mode}_beta_meanSEM_{reg_beta}_{c}.svg"),
                 dpi=600, bbox_inches="tight"
             )
  
