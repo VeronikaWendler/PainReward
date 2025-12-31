@@ -250,12 +250,15 @@ elif version == 23:
     
 elif version == 24:
     base_v24 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
-    outpath = opj(base_v24, "v24_high_accept_svpain_only")  
-    outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v27_v24_high_accept_svpain_only")
+    outpath = opj(base_v24, "v24_high_accept_joint")  
+    outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v27_high_accept_svpain_only")
     os.makedirs(outfigpath, exist_ok=True)
     
 else:
     print("No Version")
+    
+    
+
 
 # map glm_version subfolder + file + figure name
 if glm_version == 'noz':
