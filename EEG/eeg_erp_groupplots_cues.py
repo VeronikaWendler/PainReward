@@ -235,6 +235,18 @@ elif version == 22:
     else:
         raise ValueError("v22_mode must be 'joint' or 'separate'")
     os.makedirs(outfigpath, exist_ok=True)
+    
+elif version == 23:
+    base_v23 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
+    if v23_mode == "joint":
+        outpath = opj(base_v23, "v23_high_accept_joint")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v25_jointGLM_SVpain_SVmoney_RT")
+    elif v22_mode == "separate":
+        outpath = opj(base_v22, "v22_high_accept_sep")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v25_long_SVmoneypain_RT_sep")
+    else:
+        raise ValueError("v22_mode must be 'joint' or 'separate'")
+    os.makedirs(outfigpath, exist_ok=True)
          
 else:
     print("No Version")
