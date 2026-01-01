@@ -337,9 +337,9 @@ elif version == 30:
     base_v30 = opj(outpath, "erps_massuni_sv_cuelong")
     os.makedirs(base_v30, exist_ok=True)
     if v30_mode == "joint":
-        outpath = opj(base_v30, "v30_male_joint")
+        outpath = opj(base_v30, "v30_female_joint")
     elif v30_mode == "separate":
-        outpath = opj(base_v30, "v30_male_sep")
+        outpath = opj(base_v30, "v30_female_sep")
     else:
         raise ValueError("v29_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
@@ -466,7 +466,6 @@ if version == 29:
     
 if version == 30:
     mod_data["sex_bin"] = pd.to_numeric(mod_data["sex_bin"], errors="coerce")
-    mod_data = mod_data.loc[mod_data["sex_bin"] == 1].copy()
     print("After sex_bin m filter, mod_data rows:", len(mod_data))
     print("After sex_bin m filter, unique participants:", mod_data["participant"].nunique())
     
