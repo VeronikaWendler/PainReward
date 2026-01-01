@@ -6132,7 +6132,7 @@ elif version == 26:
 
 
     ref_epo = mne.read_epochs(
-        opj(outpath_glm, "ols_2ndlevel_allepochs-epo_painlevel.fif"),
+        opj(outpath_glm, "ols_2ndlevel_allepochs-epo_sv_pain_para.fif"),
         preload=False
     )
 
