@@ -6065,7 +6065,7 @@ elif version == 26:
         # ----------------------------
         # GLM: joint vs separate (v13 style)
         # ----------------------------
-        if v25_mode == "separate":
+        if v26_mode == "separate":
             # pain GLM
             design_p = mod2k[["Intercept", "sv_pain_para_z", "RT_z"]]
             res_p = mne.stats.linear_regression(
@@ -6080,7 +6080,7 @@ elif version == 26:
             )
             beta_money = res_m["sv_money_z"].beta
 
-        elif v25_mode == "joint":
+        elif v26_mode == "joint":
             # one joint GLM
             design = mod2k[["Intercept", "sv_pain_para_z", "sv_money_z", "RT_z"]]
             res = mne.stats.linear_regression(
