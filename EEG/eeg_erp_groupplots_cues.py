@@ -42,7 +42,7 @@ version = 25   # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
 v14_mode = "joint"
-v25_mode = "joint"
+v25_mode = "separate"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
