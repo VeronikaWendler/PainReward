@@ -318,7 +318,7 @@ elif version == 29:
         raise ValueError("v29_mode must be 'joint' or 'separate'")
     os.makedirs(outfigpath, exist_ok=True)
         
-elif version == 30
+elif version == 30:
     base_v30 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
     if v30_mode == "joint":
         outpath = opj(base_v30, "v30_male_joint")
