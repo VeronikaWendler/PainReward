@@ -42,7 +42,7 @@ version = 25   # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
 v14_mode = "joint"
-v25_mode = "separate"
+v25_mode = "joint"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -258,11 +258,11 @@ elif version == 24:
 elif version == 25:
     base_v25 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
     if v25_mode == "joint":
-        outpath = opj(base_v25, "v25_high_low_STA_TAI_joint")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v30_jointGLM_SVpain_SVmoney_RT")
+        outpath = opj(base_v25, "v25_high_STA_TAI_joint")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v30_jointGLM_high_STA_TAI_RT")
     elif v25_mode == "separate":
-        outpath = opj(base_v25, "v25_high_low_STA_TAI_sep")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v30_long_SVmoneypain_RT_sep")
+        outpath = opj(base_v25, "v25_high_STA_TAI_sep")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v30_sepGLM_high_STA_TAI_RT")
     else:
         raise ValueError("v25_mode must be 'joint' or 'separate'")
     os.makedirs(outfigpath, exist_ok=True)
