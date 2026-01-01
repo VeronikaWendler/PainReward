@@ -315,14 +315,12 @@ elif version == 28:
     base_v28 = opj(outpath, "erps_massuni_sv_cuelong")
     os.makedirs(base_v28, exist_ok=True)
     if v28_mode == "joint":
-        outpath = opj(base_v28, "v26_high_STA_SAI_SV_joint")
+        outpath = opj(base_v28, "v26_low_STA_SAI_SV_joint")
     elif v28_mode == "separate":
-        outpath = opj(base_v28, "v26_high_STA_SAI_SV_sep")
+        outpath = opj(base_v28, "v26_low_STA_SAI_SV_sep")
     else:
         raise ValueError("v28_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
-    
-    
     
     
 else:
@@ -434,7 +432,7 @@ if version == 27:
     
 if version == 28:
     mod_data["sta_sai_mediansplit"] = pd.to_numeric(mod_data["sta_sai_mediansplit"], errors="coerce")
-    mod_data = mod_data.loc[mod_data["sta_sai_mediansplit"] == 1].copy()
+    mod_data = mod_data.loc[mod_data["sta_sai_mediansplit"] == 0].copy()
     print("After high sta_sai_mediansplit (median split) filter, mod_data rows:", len(mod_data))
     print("After high sta_sai_mediansplit (median split) filter, unique participants:", mod_data["participant"].nunique())
     
