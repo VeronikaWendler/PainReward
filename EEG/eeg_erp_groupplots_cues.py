@@ -284,10 +284,10 @@ elif version == 26:
 elif version == 27:
     base_v27 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
     if v27_mode == "joint":
-        outpath = opj(base_v27, "v27_high_STA_SAI_joint")
+        outpath = opj(base_v27, "v26_high_STA_SAI_joint")
         outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v33_jointGLM_high_STA_SAI_RT")
     elif v27_mode == "separate":
-        outpath = opj(base_v27, "v27_low_STA_SAI_sep")
+        outpath = opj(base_v27, "v26_low_STA_SAI_sep")
         outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v33_sepGLM_high_STA_SAI_RT")
     else:
         raise ValueError("v27_mode must be 'joint' or 'separate'")
