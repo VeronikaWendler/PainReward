@@ -59,7 +59,7 @@ if not os.path.exists(outpath):
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
 version = 25
-v25_mode = "separate"   # "joint" or "separate"
+v25_mode = "joint"   # "joint" or "separate"
 
 
 v13_mode = "joint"   # or "joint"s
@@ -282,9 +282,9 @@ elif version == 25:
     base_v25 = opj(outpath, "erps_massuni_sv_cuelong")
     os.makedirs(base_v25, exist_ok=True)
     if v25_mode == "joint":
-        outpath = opj(base_v25, "v25_high_STA_TAI_joint")
+        outpath = opj(base_v25, "v25_high_low_STA_TAI_joint")
     elif v25_mode == "separate":
-        outpath = opj(base_v25, "v25_high_STA_TAI_sep")
+        outpath = opj(base_v25, "v25_high_low_STA_TAI_sep")
     else:
         raise ValueError("v25_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
@@ -381,7 +381,7 @@ if version == 24:
 
 if version == 25:
     mod_data["sta_tai_mediansplit"] = pd.to_numeric(mod_data["sta_tai_mediansplit"], errors="coerce")
-    mod_data = mod_data.loc[mod_data["sta_tai_mediansplit"] == 0].copy()
+    mod_data = mod_data.loc[mod_data["sta_tai_mediansplit"] == 1].copy()
     print("After high sta_tai_mediansplit (median split) filter, mod_data rows:", len(mod_data))
     print("After high sta_tai_mediansplit (median split) filter, unique participants:", mod_data["participant"].nunique())
     
