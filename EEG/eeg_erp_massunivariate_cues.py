@@ -58,8 +58,8 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 26
-v26_mode = "joint"   # "joint" or "separate"
+version = 27
+v27_mode = "joint"   # "joint" or "separate"
 
 
 v13_mode = "joint"   # or "joint"s
@@ -553,7 +553,7 @@ if version == 18:
     regvars = ['sv_pain_para', 'sv_money']
 if version == 14:
     regvars = ['painlevel', 'moneylevel']
-if version == 25:
+if version == 27:
     regvars = ['painlevel', 'moneylevel']
 if version == 24:
     regvars = ['sv_pain_para']
