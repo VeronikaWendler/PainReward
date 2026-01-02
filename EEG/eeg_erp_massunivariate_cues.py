@@ -58,8 +58,8 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 28
-v28_mode = "joint"   # "joint" or "separate"
+version = 29
+v29_mode = "joint"   # "joint" or "separate"
 
 
 v13_mode = "joint"   # or "joint"s
