@@ -357,7 +357,7 @@ elif version == 31:
     
 elif version == 32:
     base_v32 = opj(outpath, "erps_massuni_sv_cuelong")
-    os.makedirs(base_v31, exist_ok=True)
+    os.makedirs(base_v32, exist_ok=True)
     if v32_mode == "joint":
         outpath = opj(base_v32, "v32_fast_RT_joint")
     elif v32_mode == "separate":
