@@ -359,9 +359,9 @@ elif version == 32:
     base_v32 = opj(outpath, "erps_massuni_sv_cuelong")
     os.makedirs(base_v32, exist_ok=True)
     if v32_mode == "joint":
-        outpath = opj(base_v32, "v32_slow_RT_joint")
+        outpath = opj(base_v32, "v32_fast_RT_joint")
     elif v32_mode == "separate":
-        outpath = opj(base_v32, "v32_slow_RT_sep")
+        outpath = opj(base_v32, "v32_fast_RT_sep")
     else:
         raise ValueError("v32_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
@@ -499,7 +499,7 @@ if version == 31:
     
 if version == 32:
     mod_data["rt_fast_slow"] = pd.to_numeric(mod_data["rt_fast_slow"], errors="coerce")
-    mod_data = mod_data.loc[mod_data["rt_fast_slow"] == 0].copy()
+    mod_data = mod_data.loc[mod_data["rt_fast_slow"] == 1].copy()
     print("After rt_fast_slow filter, mod_data rows:", len(mod_data))
     print("After rt_fast_slow filter, unique participants:", mod_data["participant"].nunique())
     
