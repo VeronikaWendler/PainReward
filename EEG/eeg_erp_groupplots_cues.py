@@ -333,11 +333,11 @@ elif version == 30:
 elif version == 31:
     base_v31 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
     if v31_mode == "joint":
-        outpath = opj(base_v31, "v31_first_25_joint")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v36_jointGLM_first25_RT")
+        outpath = opj(base_v31, "v31_first_10_joint")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v36_jointGLM_first10_RT")
     elif v31_mode == "separate":
-        outpath = opj(base_v31, "v31_first_25_sep")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v36_sepGLM_first25_RT")
+        outpath = opj(base_v31, "v31_first_10_sep")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v36_sepGLM_first10_RT")
     else:
         raise ValueError("v31_mode must be 'joint' or 'separate'")
     os.makedirs(outfigpath, exist_ok=True)
