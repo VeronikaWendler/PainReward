@@ -309,8 +309,8 @@ elif version == 28:
 elif version == 29:
     base_v29 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
     if v29_mode == "joint":
-        outpath = opj(base_v29, "v29_low_PCS_joint")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v34_jointGLM_low_PCS_RT")
+        outpath = opj(base_v29, "v29_high_PCS_joint")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v34_jointGLM_high_PCS_RT")
     elif v29_mode == "separate":
         outpath = opj(base_v29, "v29_low_PCS_sep")
         outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v34_sepGLM_low_PCS_RT")
