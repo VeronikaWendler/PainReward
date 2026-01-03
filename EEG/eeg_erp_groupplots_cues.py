@@ -46,7 +46,7 @@ v28_mode = "joint"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
-# partz   - PartZscoring     (raw regressors + z-scored RT) ##
+# partz   - PartZscoring  #   (raw regressors + z-scored RT) ##
 
 glm_version = 'z'   
 
