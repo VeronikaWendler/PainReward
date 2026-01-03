@@ -37,12 +37,12 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 30  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 31  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
 v14_mode = "joint"
-v30_mode = "joint"
+v31_mode = "joint"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -444,7 +444,7 @@ if version == 17 and v17_mode == "resid_joint":
     regvars_epochs = ["sv_pain_para", "sv_money"] 
     regvars = ["pain_u", "money_u"]
     regvarsnames = ["SV_pain_para (unique|RT,money)", "SV_money (unique|RT,pain)"]
-elif version == 30:
+elif version == 31:
     regvars = ["painlevel", "moneylevel"]
     regvarsnames = ["Painlevel", "Moneylevel"]
 if version == 28:
