@@ -345,8 +345,8 @@ elif version == 31:
 elif version == 32:
     base_v32 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
     if v32_mode == "joint":
-        outpath = opj(base_v32, "v32_high_RT_joint")
-        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v37_jointGLM_high_RT_RT")
+        outpath = opj(base_v32, "v32_fast_RT_joint")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v37_jointGLM_fast_RT_RT")
     elif v32_mode == "separate":
         outpath = opj(base_v32, "v32_slow_RT_sep")
         outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v37_sepGLM_slow_RT_RT")
