@@ -360,7 +360,7 @@ else:
     
 
 
-# map glm_version subfolder + file + figure name
+# map glm_version subfolder + file + figure name#
 if glm_version == 'noz':
     stats_subdir = 'NO_Zscoring'
     suffix = '_noz'       
