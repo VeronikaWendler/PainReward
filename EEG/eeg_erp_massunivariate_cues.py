@@ -652,28 +652,6 @@ def extract_bin_amplitudes_roi(epo, roi_chs=("C3", "Cz", "C1"), bins=((-0.4,-0.2
 
     return out, present
 
-def extract_bin_amplitudes_channels(epo, chs=("Cz",), bins=((-0.4,-0.2), (-0.2,-0.1)), min_chs=1):
-    """
-    Returns:
-      rp_amp_by_bin: dict {(tmin,tmax): (n_trials,)} mean amp over chosen channels and time bin
-      used_chs: list of channels actually used
-    """
-    used_chs = [ch for ch in chs if ch in epo.ch_names]
-    if len(used_chs) < min_chs:
-        raise ValueError(f"Channels not found. Wanted {chs}, found {used_chs}")
-
-    e = epo.copy().pick_channels(used_chs)
-    data = e.get_data()   # (n_trials, n_ch, n_times)
-    times = e.times
-
-    rp_amp_by_bin = {}
-    for (tmin, tmax) in bins:
-        tidx = np.where((times >= tmin) & (times <= tmax))[0]
-        if len(tidx) < 3:
-            raise ValueError(f"Too few samples in bin {(tmin, tmax)}")
-        # mean over time then channels -> (n_trials,)
-        rp_amp_by_bin[(tmin, tmax)] = data[:, :, tidx].mean(axis=2).mean(axis=1)
-
     return rp_amp_by_bin, used_chs
 
 def extract_bin_amplitudes_roi(epo, roi_chs=("Pz","Cz","CPz"), bins=((-0.4,-0.2),(-0.2,-0.1)), min_chs=1):
@@ -692,6 +670,69 @@ def extract_bin_amplitudes_roi(epo, roi_chs=("Pz","Cz","CPz"), bins=((-0.4,-0.2)
             raise ValueError(f"Too few samples in bin {(tmin, tmax)}")
         out[(tmin, tmax)] = data[:, :, tidx].mean(axis=2).mean(axis=1)  # (n_trials,)
     return out, present
+
+
+####
+def extract_bin_amplitudes_channels(epo, chs=("Pz", "Cz", "CPz"), bins=((-0.4,-0.2), (-0.2,-0.1)), min_chs=1):
+    present = [ch for ch in chs if ch in epo.ch_names]
+    if len(present) < min_chs:
+        raise ValueError(f"Channels not found. Wanted {chs}, found {present}")
+
+    e = epo.copy().pick_channels(present)
+    data = e.get_data()      # (n_trials, n_ch, n_times)
+    times = e.times
+
+    out = {}  # (tmin, tmax) -> (n_trials,)
+    for (tmin, tmax) in bins:
+        tidx = np.where((times >= tmin) & (times <= tmax))[0]
+        if len(tidx) < 3:
+            raise ValueError(f"Too few samples in bin {(tmin, tmax)}")
+        out[(tmin, tmax)] = data[:, :, tidx].mean(axis=2).mean(axis=1)  # mean over time then channels
+
+    return out, present, times
+
+def subject_slope_from_means(levels, means):
+    """
+    levels: array-like (e.g., [1..5])
+    means:  array-like (same length)
+    returns slope (beta1) from mean ~ intercept + level_z
+    """
+    levels = np.asarray(levels, dtype=float)
+    means  = np.asarray(means, dtype=float)
+    keep = np.isfinite(levels) & np.isfinite(means)
+    if keep.sum() < 3:
+        return np.nan
+    x = stats.zscore(levels[keep])
+    X = np.column_stack([np.ones(len(x)), x])
+    b = fit_ols_beta(X, means[keep])
+    return float(b[1])
+
+def group_regress(y, x):
+    """
+    y ~ intercept + z(x)
+    Returns t, p, beta.
+    """
+    y = np.asarray(y, dtype=float)
+    x = np.asarray(x, dtype=float)
+    keep = np.isfinite(y) & np.isfinite(x)
+    if keep.sum() < 8:
+        return np.nan, np.nan, np.nan, int(keep.sum())
+    yz = y[keep]
+    xz = stats.zscore(x[keep])
+    X = np.column_stack([np.ones(len(xz)), xz])
+    b = fit_ols_beta(X, yz)
+    # t-test for beta1 via standard OLS formula
+    yhat = X @ b
+    resid = yz - yhat
+    dof = len(yz) - X.shape[1]
+    s2 = (resid @ resid) / dof
+    XtX_inv = np.linalg.inv(X.T @ X)
+    se_b1 = np.sqrt(s2 * XtX_inv[1,1])
+    t = b[1] / se_b1
+    p = 2 * stats.t.sf(np.abs(t), df=dof)
+    return float(t), float(p), float(b[1]), int(keep.sum())
+
+
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate Regression with 3 GLMs
 #
@@ -8500,174 +8541,231 @@ if version == 35:
         print(" ", rp_outdir / f"{prefix}rp_times.npy")
 
 
-if version == 36:
+elif version == 36:
 
-    # -------------------------
-    # SETTINGS
-    # -------------------------
-    bins    = [(-0.4, -0.2), (-0.2, -0.1)]     # your old bins example
-    rt_col  = "rt"                              # optional: for subject mean RT covariate
-    sets = [
-        ("roi_PzCzCPz", ("Pz","Cz","CPz")),
-        ("ch_Cz",       ("Cz",)),
-        ("ch_CPz",       ("CPz",)),
-        ("ch_Pz",       ("Pz",)),
-    ]
+    # bins & electrodes
+    bins = [(-0.4, -0.2), (-0.2, -0.1)]
+    electrode_sets = {
+        "roi_PzCzCPz": ("Pz", "Cz", "CPz"),
+        "ch_Pz": ("Pz",),
+        "ch_Cz": ("Cz",),
+        "ch_CPz": ("CPz",),
+    }
 
+    # columns
+    pain_col = "painlevel"
+    money_col = "moneylevel"
+    v_pain_col = "v_painlevel"
+    v_money_col = "v_moneylevel"
+
+    # epochs
     rp_epo_dirname = "erps_resp_rp"
     rp_epo_suffix  = "_decision_resp_rp_singletrials-epo.fif"
 
     rp_outdir = Path(outpath) / "Zscoring"
     rp_outdir.mkdir(parents=True, exist_ok=True)
 
-    # -------------------------
-    # LOAD SUBJECT-LEVEL PREDICTORS
-    # -------------------------
-    # Example: you exported this from HDDM/HDDMrl or your own summary script
-    # MUST contain: participant_id, v_painlevel, v_moneylevel
-    subj_params_csv = Path(outpath) / "your_subject_level_drift_rates.csv"
-    subj_df = pd.read_csv(subj_params_csv)
+    # Outputs
+    means_rows = []     # subject × level × bin × set
+    slopes_rows = []    # subject × bin × set (slope pain, slope money)
+    group_rows = []     # group regressions slope ~ v
+    wf_store = {}       # set_name -> list of subject waveforms
+    times_store = {}    # set_name -> times
 
-    # safety: enforce string ids if yours are like "sub-001"
-    subj_df["participant_id"] = subj_df["participant_id"].astype(str)
+    included, skipped = [], []
 
-    # -------------------------
-    # LOOP electrode sets, compute subject RP summaries
-    # -------------------------
-    for set_name, roi_chs in sets:
-        prefix = f"{set_name}__"
+    for pa in part:
+        print(f"\n[VERSION36] {pa}")
 
-        rows = []
-        waveforms = []
-        rp_times = None
-        included, skipped = [], []
+        epo_path = os.path.join(basepath, pa, "eeg", rp_epo_dirname, f"{pa}{rp_epo_suffix}")
+        if not os.path.exists(epo_path):
+            print("  missing epochs:", epo_path)
+            skipped.append(pa)
+            continue
 
-        for pa in part:
-            pa = str(pa)
-            if pa not in set(subj_df["participant_id"].values):
-                skipped.append(pa)
+        epo = mne.read_epochs(epo_path, preload=True)
+
+        # align behavioral trials
+        mod2 = trial_map[trial_map["participant_id"] == pa].copy()
+
+        if epo.metadata is not None and ("trialsnum" in epo.metadata.columns) and ("trialsnum" in mod2.columns):
+            keep = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
+            epo = epo[keep]
+            mod2 = mod2.set_index("trialsnum").loc[epo.metadata["trialsnum"].values].reset_index()
+        else:
+            mod2 = mod2.reset_index(drop=True).iloc[:len(epo)].copy()
+
+        # drop bad trials
+        if epo.metadata is not None and "badtrial" in epo.metadata.columns:
+            good = np.where(epo.metadata["badtrial"].to_numpy() == 0)[0]
+            epo = epo[good]
+            mod2 = mod2.iloc[good].reset_index(drop=True)
+
+        if len(epo) < 8:
+            print("  too few trials:", len(epo))
+            skipped.append(pa)
+            continue
+
+        # subject-level drift regressors
+        if v_pain_col not in mod2.columns or v_money_col not in mod2.columns:
+            print(f"  missing {v_pain_col}/{v_money_col} in mod2")
+            skipped.append(pa)
+            continue
+
+        v_pain = float(mod2[v_pain_col].iloc[0])
+        v_money = float(mod2[v_money_col].iloc[0])
+
+        # loop electrode sets
+        for set_name, chs in electrode_sets.items():
+
+            try:
+                rp_amp_by_bin, used_chs, times = extract_bin_amplitudes_channels(epo, chs=chs, bins=bins, min_chs=1)
+            except Exception as e:
+                print(f"  [{set_name}] skip: {e}")
                 continue
 
-            epo_path = os.path.join(basepath, pa, "eeg", rp_epo_dirname, f"{pa}{rp_epo_suffix}")
-            if not os.path.exists(epo_path):
-                skipped.append(pa)
-                continue
+            # store waveform for RP presence (subject average across used_chs)
+            ev = epo.copy().pick_channels(list(used_chs)).average()
+            subj_wave = ev.data.mean(axis=0)  # mean across channels
+            wf_store.setdefault(set_name, []).append(subj_wave)
+            times_store[set_name] = ev.times
 
-            epo = mne.read_epochs(epo_path, preload=True)
+            # ----- CONDITION MEANS per bin -----
+            for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
 
-            # (optional) drop bad trials if present
-            if epo.metadata is not None and "badtrial" in epo.metadata.columns:
-                good = np.where(epo.metadata["badtrial"].to_numpy() == 0)[0]
-                epo = epo[good]
+                # pain means
+                if pain_col in mod2.columns:
+                    for lvl in sorted(pd.unique(mod2[pain_col].dropna())):
+                        idx = np.where(mod2[pain_col].to_numpy() == lvl)[0]
+                        if len(idx) >= 3:
+                            means_rows.append({
+                                "participant": pa,
+                                "set": set_name,
+                                "bin_tmin": tmin,
+                                "bin_tmax": tmax,
+                                "factor": "painlevel",
+                                "level": int(lvl),
+                                "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
+                                "n_trials": int(len(idx)),
+                                v_pain_col: v_pain,
+                                v_money_col: v_money,
+                            })
 
-            if len(epo) < 8:
-                skipped.append(pa)
-                continue
+                # money means
+                if money_col in mod2.columns:
+                    for lvl in sorted(pd.unique(mod2[money_col].dropna())):
+                        idx = np.where(mod2[money_col].to_numpy() == lvl)[0]
+                        if len(idx) >= 3:
+                            means_rows.append({
+                                "participant": pa,
+                                "set": set_name,
+                                "bin_tmin": tmin,
+                                "bin_tmax": tmax,
+                                "factor": "moneylevel",
+                                "level": int(lvl),
+                                "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
+                                "n_trials": int(len(idx)),
+                                v_pain_col: v_pain,
+                                v_money_col: v_money,
+                            })
 
-            # per-trial amplitudes per bin
-            rp_amp_by_bin, roi_used = extract_bin_amplitudes_roi(epo, roi_chs=roi_chs, bins=bins, min_chs=1)
+            # ----- WITHIN-SUBJECT SLOPES (per bin) -----
+            for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
 
-            # subject-level RP per bin = mean across trials (NO single-trial regression here)
-            for (tmin, tmax), amps in rp_amp_by_bin.items():
-                rows.append({
-                    "participant_id": pa,
+                # slope RP vs painlevel (within subject)
+                slope_pain = np.nan
+                if pain_col in mod2.columns:
+                    pain_levels = []
+                    pain_means = []
+                    for lvl in sorted(pd.unique(mod2[pain_col].dropna())):
+                        idx = np.where(mod2[pain_col].to_numpy() == lvl)[0]
+                        if len(idx) >= 3:
+                            pain_levels.append(float(lvl))
+                            pain_means.append(float(np.mean(rp_amp[idx]) * 1e6))
+                    slope_pain = subject_slope_from_means(pain_levels, pain_means)
+
+                # slope RP vs moneylevel (within subject)
+                slope_money = np.nan
+                if money_col in mod2.columns:
+                    money_levels = []
+                    money_means = []
+                    for lvl in sorted(pd.unique(mod2[money_col].dropna())):
+                        idx = np.where(mod2[money_col].to_numpy() == lvl)[0]
+                        if len(idx) >= 3:
+                            money_levels.append(float(lvl))
+                            money_means.append(float(np.mean(rp_amp[idx]) * 1e6))
+                    slope_money = subject_slope_from_means(money_levels, money_means)
+
+                slopes_rows.append({
+                    "participant": pa,
+                    "set": set_name,
                     "bin_tmin": tmin,
                     "bin_tmax": tmax,
-                    "rp_amp_uV": float(np.mean(amps) * 1e6),
-                    "n_trials": int(len(amps)),
-                    "roi_used": "+".join(roi_used),
+                    "slope_rp_vs_painlevel": slope_pain,
+                    "slope_rp_vs_moneylevel": slope_money,
+                    v_pain_col: v_pain,
+                    v_money_col: v_money,
                 })
 
-            # store subject average waveform (ROI mean)
-            ev = epo.copy().pick_channels(list(roi_used)).average()
-            wave = ev.data.mean(axis=0)  # ROI average waveform
-            waveforms.append(wave)
-            rp_times = ev.times if rp_times is None else rp_times
+        included.append(pa)
 
-            included.append(pa)
+    # ---- Save tables ----
+    means_df = pd.DataFrame(means_rows)
+    slopes_df = pd.DataFrame(slopes_rows)
 
-        rp_subj = pd.DataFrame(rows)
+    means_df.to_csv(rp_outdir / "v36_rp_condition_means_by_bin.csv", index=False)
+    slopes_df.to_csv(rp_outdir / "v36_rp_subject_slopes_by_bin.csv", index=False)
 
-        # merge in predictors
-        merged = rp_subj.merge(subj_df, on="participant_id", how="inner")
+    np.save(rp_outdir / "v36_included_subjects.npy", np.array(included, dtype=object))
+    np.save(rp_outdir / "v36_skipped_subjects.npy", np.array(skipped, dtype=object))
 
-        # Save subject-level RP table for this set
-        merged.to_csv(rp_outdir / f"{prefix}rp_subjectlevel_table_by_bin.csv", index=False)
+    # ---- Save waveforms per set ----
+    for set_name, wfs in wf_store.items():
+        wfs = np.vstack(wfs)  # (n_subj, n_times)
+        np.save(rp_outdir / f"v36_{set_name}__rp_subject_waveforms.npy", wfs)
+        np.save(rp_outdir / f"v36_{set_name}__rp_times.npy", times_store[set_name])
 
-        if len(waveforms) > 0:
-            waveforms = np.vstack(waveforms)
-            np.save(rp_outdir / f"{prefix}rp_subject_waveforms.npy", waveforms)
-            np.save(rp_outdir / f"{prefix}rp_times.npy", rp_times)
+    # ---- Group regressions: slope ~ v ----
+    # (one test per set × bin × slope-type)
+    group_rows = []
+    if len(slopes_df) > 0:
+        for (set_name, tmin, tmax), sdf in slopes_df.groupby(["set", "bin_tmin", "bin_tmax"]):
 
-        np.save(rp_outdir / f"{prefix}rp_included_subjects.npy", np.array(included, dtype=object))
-        np.save(rp_outdir / f"{prefix}rp_skipped_subjects.npy", np.array(skipped, dtype=object))
-
-        # -------------------------
-        # GROUP REGRESSION ACROSS SUBJECTS (per bin)
-        # -------------------------
-        # Model: rp_amp ~ v_painlevel + v_moneylevel
-        # (Add covariates here if you want, e.g., mean_rt)
-        stats_rows = []
-
-        for (tmin, tmax), sdf in merged.groupby(["bin_tmin","bin_tmax"]):
-            # need finite values
-            keep = np.isfinite(sdf["rp_amp_uV"].to_numpy())
-            keep &= np.isfinite(sdf["v_painlevel"].to_numpy())
-            keep &= np.isfinite(sdf["v_moneylevel"].to_numpy())
-
-            d = sdf.loc[keep].copy()
-            if len(d) < 10:
-                continue
-
-            y = d["rp_amp_uV"].to_numpy(dtype=float)
-
-            x1 = stats.zscore(d["v_painlevel"].to_numpy(dtype=float))
-            x2 = stats.zscore(d["v_moneylevel"].to_numpy(dtype=float))
-
-            X = np.column_stack([np.ones(len(d)), x1, x2])
-
-            beta, *_ = np.linalg.lstsq(X, y, rcond=None)
-            yhat = X @ beta
-            resid = y - yhat
-
-            # OLS standard errors
-            n, p = X.shape
-            s2 = (resid @ resid) / (n - p)
-            XtX_inv = np.linalg.inv(X.T @ X)
-            se = np.sqrt(np.diag(s2 * XtX_inv))
-
-            tvals = beta / se
-            pvals = 2 * (1 - stats.t.cdf(np.abs(tvals), df=n - p))
-
-            stats_rows.append({
-                "bin_tmin": tmin,
-                "bin_tmax": tmax,
-                "n_subj": int(n),
-
-                "b_intercept": float(beta[0]),
-                "b_v_pain_z": float(beta[1]),
-                "b_v_money_z": float(beta[2]),
-
-                "t_v_pain_z": float(tvals[1]),
-                "p_v_pain_z": float(pvals[1]),
-                "t_v_money_z": float(tvals[2]),
-                "p_v_money_z": float(pvals[2]),
+            # pain slope predicted by v_painlevel
+            t, p, b, n = group_regress(
+                y=sdf["slope_rp_vs_painlevel"].to_numpy(),
+                x=sdf[v_pain_col].to_numpy()
+            )
+            group_rows.append({
+                "set": set_name, "bin_tmin": tmin, "bin_tmax": tmax,
+                "dv": "slope_rp_vs_painlevel", "predictor": v_pain_col,
+                "n_subj": n, "beta_z": b, "t": t, "p": p
             })
 
-        reg_stats = pd.DataFrame(stats_rows)
+            # money slope predicted by v_moneylevel
+            t, p, b, n = group_regress(
+                y=sdf["slope_rp_vs_moneylevel"].to_numpy(),
+                x=sdf[v_money_col].to_numpy()
+            )
+            group_rows.append({
+                "set": set_name, "bin_tmin": tmin, "bin_tmax": tmax,
+                "dv": "slope_rp_vs_moneylevel", "predictor": v_money_col,
+                "n_subj": n, "beta_z": b, "t": t, "p": p
+            })
 
-        # Bonferroni across bins × 2 predictors
-        if len(reg_stats) > 0:
-            m = len(reg_stats) * 2
-            reg_stats["p_v_pain_bonf"]  = np.minimum(1.0, reg_stats["p_v_pain_z"]  * m)
-            reg_stats["p_v_money_bonf"] = np.minimum(1.0, reg_stats["p_v_money_z"] * m)
+    group_df = pd.DataFrame(group_rows)
 
-        reg_stats.to_csv(rp_outdir / f"{prefix}rp_subjectlevel_regression_stats_by_bin.csv", index=False)
+    # Bonferroni over all tests in this table
+    if len(group_df) > 0:
+        m = len(group_df)
+        group_df["p_bonf"] = np.minimum(1.0, group_df["p"] * m)
 
-        print(f"[v36] Saved for {set_name}:")
-        print(" ", rp_outdir / f"{prefix}rp_subjectlevel_table_by_bin.csv")
-        print(" ", rp_outdir / f"{prefix}rp_subjectlevel_regression_stats_by_bin.csv")
+    group_df.to_csv(rp_outdir / "v36_group_regress_slopes_on_v_by_bin.csv", index=False)
 
+    print("\n[V36] Saved:")
+    print(" ", rp_outdir / "v36_rp_condition_means_by_bin.csv")
+    print(" ", rp_outdir / "v36_rp_subject_slopes_by_bin.csv")
+    print(" ", rp_outdir / "v36_group_regress_slopes_on_v_by_bin.csv")
 #elif version == 12:
     # 9 
 # TFR beta maps for sv_pain_para (cue-locked), ERP-like per band
