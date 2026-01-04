@@ -8831,10 +8831,10 @@ if version == 35:
     rp_dir.mkdir(parents=True, exist_ok=True)
 
     electrode_sets = [
-        "roi_PzCzCPz",
-        "ch_Cz",
+        "roi_C3CzC1",
         "ch_C3",
-        "ch_C4",
+        "ch_Cz",
+        "ch_C1",
     ]
 
     for set_name in electrode_sets:
