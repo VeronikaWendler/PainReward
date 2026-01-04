@@ -621,7 +621,7 @@ def gluth_style_subject_beta(rp_amp, mod2, regvar, rt_col="rt"):
     return float(beta[1]), int(len(y))
 
 
-def extract_bin_amplitudes_roi(epo, roi_chs=("Pz", "Cz", "CPz"), bins=((-0.4,-0.2), (-0.2,-0.1)), min_chs=1):
+def extract_bin_amplitudes_roi(epo, roi_chs=("C3", "Cz", "C1"), bins=((-0.4,-0.2), (-0.2,-0.1)), min_chs=1):
     present = [ch for ch in roi_chs if ch in epo.ch_names]
     if len(present) < min_chs:
         raise ValueError(f"ROI channels not found. Wanted {roi_chs}, found {present}")
@@ -8253,10 +8253,10 @@ if version == 35:
 
     # --- Define the electrode sets you want to test ---
     electrode_sets = {
-        "roi_PzCzCPz": ("Pz", "Cz", "CPz"),
+        "roi_PzCzCPz": ("C3", "Cz", "C1),
         "ch_Cz": ("Cz",),
         "ch_C3": ("C3",),
-        "ch_C4": ("C4",),
+        "ch_C1": ("C1",),
     }
 
     for set_name, chs in electrode_sets.items():
