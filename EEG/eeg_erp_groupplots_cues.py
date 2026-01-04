@@ -8824,24 +8824,25 @@ elif version == 34:
                 dpi=600, bbox_inches="tight"
             )
 
-if version == 35:
-    rp_dir = Path(outpath) / stats_subdir  # should be the same folder you saved into (Zscoring)
 
-    # UPDATED FILENAMES (ROI version)
-    betas_csv = rp_dir / "rp_roi_gluth_subject_betas_single_window.csv"
-    stats_csv = rp_dir / "rp_roi_gluth_group_stats_single_window.csv"
+
+if version == 35:
+    rp_dir = Path(outpath) / stats_subdir 
+
+    betas_csv = rp_dir / "rp_roi_gluth_subject_betas_by_bin.csv"
+    stats_csv = rp_dir / "rp_roi_gluth_group_stats_by_bin.csv"
     wf_npy    = rp_dir / "rp_roi_subject_waveforms.npy"
     t_npy     = rp_dir / "rp_roi_times.npy"
 
     if not betas_csv.exists():
-        raise FileNotFoundError(f"Missing: {betas_csv} (check rp_dir / stats_subdir / filenames)")
+        raise FileNotFoundError(f"Missing: {betas_csv}\nCheck rp_dir={rp_dir} and stats_subdir={stats_subdir}")
 
     rp_df = pd.read_csv(betas_csv)
     rp_stats = pd.read_csv(stats_csv) if stats_csv.exists() else None
 
-    # 1) Grand-average RP waveform (ROI-averaged)
+
     if wf_npy.exists() and t_npy.exists():
-        wfs = np.load(wf_npy)   # (n_subj, n_times) in Volts
+        wfs = np.load(wf_npy)  
         times = np.load(t_npy)
 
         mean = wfs.mean(axis=0) * 1e6
@@ -8854,35 +8855,53 @@ if version == 35:
         ax.axhline(0, linestyle="--", color="gray")
         ax.set_xlabel("Time from response (ms)")
         ax.set_ylabel("Amplitude (µV)")
-        ax.set_title("Grand-average RP (response-locked, ROI FCz/Cz/CPz)")
+        ax.set_title("Grand-average RP (response-locked, ROI Pz/Cz/CPz)")
         fig.tight_layout()
         fig.savefig(opj(outfigpath, f"{fig_prefix}rp_roi_grand_average_waveform.svg"),
                     dpi=600, bbox_inches="tight")
 
-    # 2) One bar per regressor (single window)
     if rp_stats is not None and len(rp_stats) > 0:
-        for _, row in rp_stats.iterrows():
-            regvar = row["regvar"]
-            mean_beta = row["mean_beta"]
-            sem_beta = row["sem_beta"]
-            p = row["p"]
-            p_bonf = row["p_bonf"] if "p_bonf" in row.index else np.nan
 
-            fig, ax = plt.subplots(figsize=(3.2, 2.5))
-            ax.bar([0], [mean_beta], yerr=[sem_beta], capsize=4)
+        # create a nice bin label column
+        rp_stats = rp_stats.copy()
+        rp_stats["bin_label"] = rp_stats.apply(
+            lambda r: f"{r.bin_tmin:.1f}–{r.bin_tmax:.1f}s", axis=1
+        )
+
+        for regvar in sorted(rp_stats["regvar"].unique()):
+            sdf = rp_stats[rp_stats["regvar"] == regvar].sort_values(["bin_tmin", "bin_tmax"])
+
+            x = np.arange(len(sdf))
+            means = sdf["mean_beta"].to_numpy()
+            sems  = sdf["sem_beta"].to_numpy()
+            pvals = sdf["p"].to_numpy()
+            pbonf = sdf["p_bonf"].to_numpy() if "p_bonf" in sdf.columns else np.full(len(sdf), np.nan)
+
+            fig, ax = plt.subplots(figsize=(4.2, 2.6))
+            ax.bar(x, means, yerr=sems, capsize=4)
             ax.axhline(0, linestyle="--", color="gray")
-            ax.set_xticks([0])
-            ax.set_xticklabels(["-0.5–-0.1s"])
-            ax.set_ylabel("β (EEG units / z-predictors)")
-            title = f"RP ROI: {regvar}\n(p={p:.3f}"
-            if np.isfinite(p_bonf):
-                title += f", p_bonf={p_bonf:.3f}"
-            title += ")"
-            ax.set_title(title)
+            ax.set_xticks(x)
+            ax.set_xticklabels(sdf["bin_label"].to_list())
+            ax.set_ylabel("β (trend; z-predictors)")
+            ax.set_title(f"RP ROI (Pz/Cz/CPz): {regvar}")
+
+            # annotate p-values above bars
+            for i in range(len(sdf)):
+                txt = f"p={pvals[i]:.3f}"
+                if np.isfinite(pbonf[i]):
+                    txt += f"\nbonf={pbonf[i]:.3f}"
+                ax.text(x[i], means[i], txt, ha="center", va="bottom", fontsize=8)
+
+                # optional star if bonferroni significant
+                if np.isfinite(pbonf[i]) and pbonf[i] < 0.05:
+                    ax.text(x[i], means[i], "*", ha="center", va="bottom", fontsize=14)
 
             fig.tight_layout()
-            fig.savefig(opj(outfigpath, f"{fig_prefix}rp_roi_single_window_beta_{regvar}.svg"),
+            fig.savefig(opj(outfigpath, f"{fig_prefix}rp_roi_bin_betas_{regvar}.svg"),
                         dpi=600, bbox_inches="tight")
+            
+            
+            
 # if version == 11:
 #     from scipy.stats import ttest_1samp
 #     from statsmodels.stats.multitest import fdrcorrection
