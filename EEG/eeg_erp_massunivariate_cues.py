@@ -8253,7 +8253,7 @@ if version == 35:
 
     # --- Define the electrode sets you want to test ---
     electrode_sets = {
-        "roi_PzCzCPz": ("C3", "Cz", "C1"),
+        "roi_C3CzC1": ("C3", "Cz", "C1"),
         "ch_Cz": ("Cz",),
         "ch_C3": ("C3",),
         "ch_C1": ("C1",),
