@@ -37,7 +37,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 34  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 33  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
@@ -8390,8 +8390,8 @@ elif version == 33:
         "money_is5_c": ("Greens", 6),
     }
 
-    alpha_eff = param["alpha"] / len(regvars_betas)
-    print(f"[v32] alpha_eff = {alpha_eff} (alpha={param['alpha']} / {len(regvars_betas)})")
+    alpha_eff = param["alpha"]
+    print(f"[v32] alpha_eff = {alpha_eff} (alpha={param['alpha']}")
 
     # clip plot times to available
     plot_times = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.3, 1.4]
@@ -8640,8 +8640,8 @@ elif version == 34:
         "money_z": ("Greens", 6),
     }
 
-    alpha_eff = param["alpha"] / len(regvars_betas)
-    print(f"[v33] alpha_eff = {alpha_eff} (alpha={param['alpha']} / {len(regvars_betas)})")
+    alpha_eff = param["alpha"]
+    print(f"[v33] alpha_eff = {alpha_eff} (alpha={param['alpha']}")
 
     plot_times = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.3, 1.4]
     plot_times_clipped = [t for t in plot_times if (t >= tmin) and (t <= tmax)]
