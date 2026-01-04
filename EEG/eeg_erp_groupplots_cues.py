@@ -9470,6 +9470,176 @@ elif version == 38:
                     dpi=600, bbox_inches="tight"
                 )
                 plt.close(fig)
+                
+elif version == 39:
+
+    rp_dir = Path(outpath) / stats_subdir   
+    rp_dir.mkdir(parents=True, exist_ok=True)
+
+    electrode_sets = [
+        "roi_PzCzCPz",
+        "ch_Pz",
+        "ch_Cz",
+        "ch_CPz",
+        "ch_C3",
+        "ch_C4",
+    ]
+
+    subj_csv  = rp_dir / "v38_nosv_subject_level_rp_means_by_bin.csv"
+    group_csv = rp_dir / "v38_nosv_group_regress_rp_on_subject_predictors_by_bin.csv"
+
+    if not subj_csv.exists():
+        raise FileNotFoundError(f"Missing: {subj_csv}")
+    if not group_csv.exists():
+        raise FileNotFoundError(f"Missing: {group_csv}")
+
+    subj_df  = pd.read_csv(subj_csv)
+    group_df = pd.read_csv(group_csv)
+
+    def bin_label(tmin, tmax):
+        return f"{tmin:.1f}–{tmax:.1f}s"
+
+    # -----------------------
+    # 1) Waveforms
+    # -----------------------
+    for set_name in electrode_sets:
+        wf_npy = rp_dir / f"v38_nosv_{set_name}__rp_subject_waveforms.npy"
+        t_npy  = rp_dir / f"v38_nosv_{set_name}__rp_times.npy"
+
+        if not (wf_npy.exists() and t_npy.exists()):
+            print(f"[V38 NO-SV PLOT] Missing waveform files for {set_name}: {wf_npy} / {t_npy}")
+            continue
+
+        wfs = np.load(wf_npy)   # (n_subj, n_times) in Volts
+        times = np.load(t_npy)  # seconds
+
+        mean = wfs.mean(axis=0) * 1e6
+        sem  = stats.sem(wfs, axis=0) * 1e6
+
+        fig, ax = plt.subplots(figsize=(4, 2.5))
+        ax.plot(times * 1000, mean, linewidth=2)
+        ax.fill_between(times * 1000, mean - sem, mean + sem, alpha=0.3)
+        ax.axvline(0, linestyle="--", color="gray")
+        ax.axhline(0, linestyle="--", color="gray")
+        ax.set_xlabel("Time from response (ms)")
+        ax.set_ylabel("Amplitude (µV)")
+        ax.set_title(f"V38 (no-SV) Grand-average RP: {set_name}")
+        fig.tight_layout()
+        fig.savefig(
+            opj(outfigpath, f"{fig_prefix}v38_nosv_{set_name}__rp_grand_average_waveform.svg"),
+            dpi=600, bbox_inches="tight"
+        )
+        plt.close(fig)
+
+    # -----------------------
+    # 2) Group betas by bin
+    # -----------------------
+    group_df = group_df.copy()
+    group_df["bin_label"] = group_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
+    has_fdr = "p_fdr_bh" in group_df.columns
+
+    for set_name in electrode_sets:
+        sdf_set = group_df[group_df["set"] == set_name].copy()
+        if len(sdf_set) == 0:
+            continue
+
+        for predictor in sorted(sdf_set["predictor"].unique()):
+            sdf_pred = sdf_set[sdf_set["predictor"] == predictor].copy()
+            if len(sdf_pred) == 0:
+                continue
+
+            models = sorted(sdf_pred["model"].unique())  # ["joint_plus_rt","separate_plus_rt"] typically
+
+            bins_sorted = (
+                sdf_pred[["bin_tmin", "bin_tmax", "bin_label"]]
+                .drop_duplicates()
+                .sort_values(["bin_tmin", "bin_tmax"])
+            )
+            x = np.arange(len(bins_sorted))
+            width = 0.35 if len(models) > 1 else 0.6
+
+            fig, ax = plt.subplots(figsize=(5.6, 2.9))
+
+            for mi, model in enumerate(models):
+                sdf_m = sdf_pred[sdf_pred["model"] == model].merge(
+                    bins_sorted, on=["bin_tmin", "bin_tmax", "bin_label"], how="right"
+                )
+
+                betas = sdf_m["beta_z"].to_numpy(dtype=float)
+                pvals = sdf_m["p"].to_numpy(dtype=float)
+                pfdr  = sdf_m["p_fdr_bh"].to_numpy(dtype=float) if has_fdr else np.full_like(betas, np.nan)
+
+                offset = (mi - (len(models) - 1) / 2) * width
+                xpos = x + offset
+
+                ax.bar(xpos, betas, width=width, label=model)
+
+                # annotate p-values
+                for i in range(len(betas)):
+                    if not np.isfinite(betas[i]):
+                        continue
+
+                    txt = f"p={pvals[i]:.3f}"
+                    if np.isfinite(pfdr[i]):
+                        txt += f"\nFDR={pfdr[i]:.3f}"
+                    ax.text(xpos[i], betas[i], txt, ha="center", va="bottom", fontsize=7)
+
+                    sig = (np.isfinite(pfdr[i]) and pfdr[i] < 0.05) or (
+                        not np.isfinite(pfdr[i]) and np.isfinite(pvals[i]) and pvals[i] < 0.05
+                    )
+                    if sig:
+                        ax.text(xpos[i], betas[i], "*", ha="center", va="bottom", fontsize=14)
+
+            ax.axhline(0, linestyle="--", color="gray")
+            ax.set_xticks(x)
+            ax.set_xticklabels(bins_sorted["bin_label"].to_list())
+            ax.set_ylabel("β (standardized)")
+            ax.set_title(f"V38 (no-SV, RT-controlled): RP_mean_uV ~ {predictor}\n{set_name}")
+            ax.legend(frameon=False)
+            fig.tight_layout()
+
+            fig.savefig(
+                opj(outfigpath, f"{fig_prefix}v38_nosv_{set_name}__betas_{predictor}.svg"),
+                dpi=600, bbox_inches="tight"
+            )
+            plt.close(fig)
+
+    # -----------------------
+    # 3) Scatter plots: rp_mean_uV vs predictors (+ rt_subj)
+    # -----------------------
+    subj_df = subj_df.copy()
+    subj_df["bin_label"] = subj_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
+
+    # only predictors that exist in the NO-SV subject table
+    candidate_preds = [c for c in ["v_painlevel_subj", "v_moneylevel_subj", "rt_subj"] if c in subj_df.columns]
+
+    for set_name in electrode_sets:
+        sdf_set = subj_df[subj_df["set"] == set_name].copy()
+        if len(sdf_set) == 0:
+            continue
+
+        for (tmin, tmax), sdf_bin in sdf_set.groupby(["bin_tmin", "bin_tmax"]):
+            for pred in candidate_preds:
+                x = sdf_bin[pred].to_numpy(dtype=float)
+                y = sdf_bin["rp_mean_uV"].to_numpy(dtype=float)
+                keep = np.isfinite(x) & np.isfinite(y)
+                if keep.sum() < 8:
+                    continue
+
+                r, p = stats.pearsonr(x[keep], y[keep])
+
+                fig, ax = plt.subplots(figsize=(3.6, 3.1))
+                ax.scatter(x[keep], y[keep])
+                ax.set_xlabel(pred)
+                ax.set_ylabel("RP mean (µV)")
+                ax.set_title(f"V38 (no-SV) {set_name} {bin_label(tmin,tmax)}\nr={r:.2f}, p={p:.3f}")
+                fig.tight_layout()
+                fig.savefig(
+                    opj(outfigpath, f"{fig_prefix}v38_nosv_{set_name}__scatter_rpmean__{pred}__{tmin:.2f}_{tmax:.2f}.svg"),
+                    dpi=600, bbox_inches="tight"
+                )
+                plt.close(fig)
+
 
 # if version == 11:
 #     from scipy.stats import ttest_1samp

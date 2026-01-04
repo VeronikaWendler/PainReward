@@ -58,13 +58,13 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 38
+version = 39
 v32_mode = "joint"   # "joint" or "separate"
 
 
 v13_mode = "joint"   # or "joint"s
 v17_mode="joint"
-v38_mode = "separate"
+v39_mode = "separate"
 
 if version == 1:
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_passive')
@@ -423,6 +423,16 @@ elif version == 38:
         raise ValueError("v38_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
     
+elif version == 39:
+    base_v39 = opj(outpath, "erps_massuni_sv_cuelong")
+    os.makedirs(base_v39, exist_ok=True)
+    if v39_mode == "joint":
+        outpath = opj(base_v39, "v39_rp_joint")
+    elif v39_mode == "separate":
+        outpath = opj(base_v39, "v39_rp_sep")
+    else:
+        raise ValueError("v38_mode must be 'joint' or 'separate'")
+    os.makedirs(outpath, exist_ok=True)
 else:
     print("no version")
 
@@ -841,7 +851,7 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21, 22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38]:
+if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21, 22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39]:
     filtered_data = []
     for p in part:
         # data for this participant
@@ -856,7 +866,7 @@ if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21, 22,23,24,25
             epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
                                   p + '_decision_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
-        elif version in [17,35,36,37,38]:
+        elif version in [17,35,36,37,38,39]:
             epo = mne.read_epochs(
                 opj(basepath, p, "eeg", "erps_resp_rp", f"{p}_decision_resp_rp_singletrials-epo.fif"),
                 preload=True)
@@ -9419,6 +9429,312 @@ elif version == 38:
     print("\n[V38] Saved:")
     print(" ", rp_outdir / "v38_subject_level_rp_means_by_bin.csv")
     print(" ", rp_outdir / "v38_group_regress_rp_on_subject_predictors_by_bin.csv")
+    
+    
+elif version == 39:
+
+    bins = [(-0.4, -0.2), (-0.2, -0.1)]
+
+    electrode_sets = {
+        "roi_PzCzCPz": ("Pz", "Cz", "CPz"),
+        "ch_Pz": ("Pz",),
+        "ch_Cz": ("Cz",),
+        "ch_CPz": ("CPz",),
+        "ch_C3": ("C3",),
+        "ch_C4": ("C4",),
+    }
+
+    v_pain_col  = "v_painlevel_subj"
+    v_money_col = "v_moneylevel_subj"
+
+    # RT covariate
+    rt_col = "rt"
+    rt_summary = "median"  # "median" or "mean"
+
+    # epochs
+    rp_epo_dirname = "erps_resp_rp"
+    rp_epo_suffix  = "_decision_resp_rp_singletrials-epo.fif"
+
+    rp_outdir = Path(outpath) / "Zscoring"
+    rp_outdir.mkdir(parents=True, exist_ok=True)
+
+    # -----------------------
+    # HELPERS
+    # -----------------------
+    def ols_with_t(X, y):
+        """
+        OLS + t-tests.
+        X: (n, p) with intercept
+        y: (n,)
+        returns: beta, tvals, pvals, df_resid
+        """
+        X = np.asarray(X, float)
+        y = np.asarray(y, float)
+
+        keep = np.isfinite(y) & np.isfinite(X).all(axis=1)
+        X = X[keep]
+        y = y[keep]
+
+        n, p = X.shape
+        df = n - p
+        if df <= 0 or n <= p + 1:
+            return (np.full(p, np.nan), np.full(p, np.nan), np.full(p, np.nan), df)
+
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        resid = y - X @ beta
+
+        s2 = (resid @ resid) / df
+        XtX_inv = np.linalg.inv(X.T @ X)
+        se = np.sqrt(np.diag(XtX_inv) * s2)
+
+        tvals = beta / se
+        pvals = 2 * stats.t.sf(np.abs(tvals), df)
+        return beta, tvals, pvals, df
+
+    def z(x):
+        x = np.asarray(x, float)
+        return stats.zscore(x, nan_policy="omit")
+
+    def group_regress_with_cov(y, x, cov):
+        """
+        y ~ z(x) + z(cov) (+ intercept)
+        Returns t, p, beta_z, n
+        """
+        y = np.asarray(y, float)
+        x = np.asarray(x, float)
+        cov = np.asarray(cov, float)
+
+        keep = np.isfinite(y) & np.isfinite(x) & np.isfinite(cov)
+        y = y[keep]; x = x[keep]; cov = cov[keep]
+        n = len(y)
+        if n < 8:
+            return np.nan, np.nan, np.nan, n
+
+        X = np.column_stack([np.ones(n), z(x), z(cov)])
+        beta, tvals, pvals, _ = ols_with_t(X, y)
+        return float(tvals[1]), float(pvals[1]), float(beta[1]), n
+
+    def group_regress_joint2_with_cov(y, x1, x2, cov):
+        """
+        y ~ z(x1) + z(x2) + z(cov) (+ intercept)
+        Returns stats for x1 and x2 (unique effects):
+          t1,p1,b1, t2,p2,b2, n
+        """
+        y = np.asarray(y, float)
+        x1 = np.asarray(x1, float)
+        x2 = np.asarray(x2, float)
+        cov = np.asarray(cov, float)
+
+        keep = np.isfinite(y) & np.isfinite(x1) & np.isfinite(x2) & np.isfinite(cov)
+        y = y[keep]; x1 = x1[keep]; x2 = x2[keep]; cov = cov[keep]
+        n = len(y)
+        if n < 8:
+            return (np.nan, np.nan, np.nan,
+                    np.nan, np.nan, np.nan, n)
+
+        X = np.column_stack([np.ones(n), z(x1), z(x2), z(cov)])
+        beta, tvals, pvals, _ = ols_with_t(X, y)
+
+        # indices: 1=x1, 2=x2, 3=cov
+        return (float(tvals[1]), float(pvals[1]), float(beta[1]),
+                float(tvals[2]), float(pvals[2]), float(beta[2]), n)
+
+    def fdr_bh(pvals):
+        """
+        Benjamini-Hochberg FDR.
+        Returns adjusted p-values aligned to input order.
+        """
+        pvals = np.asarray(pvals, float)
+        out = np.full_like(pvals, np.nan)
+        keep = np.isfinite(pvals)
+        p = pvals[keep]
+        if len(p) == 0:
+            return out
+
+        order = np.argsort(p)
+        ranked = p[order]
+        m = len(ranked)
+        q = ranked * m / (np.arange(m) + 1)
+
+        # enforce monotonicity from high->low
+        q = np.minimum.accumulate(q[::-1])[::-1]
+        q = np.clip(q, 0, 1)
+
+        out_keep = np.empty(m)
+        out_keep[order] = q
+        out[keep] = out_keep
+        return out
+
+    # NOTE: you already have this helper from earlier versions:
+    # def extract_bin_amplitudes_channels(epo, chs=..., bins=..., min_chs=1):
+    #     -> returns (rp_amp_by_bin, used_chs, times)
+
+    predictors = [v_pain_col, v_money_col]
+
+    # -----------------------
+    # MAIN LOOP
+    # -----------------------
+    subj_rows = []
+    wf_store = {}
+    times_store = {}
+    included, skipped = [], []
+
+    for pa in part:
+        print(f"\n[V38 no-SV subject-level + RT] {pa}")
+
+        epo_path = os.path.join(basepath, pa, "eeg", rp_epo_dirname, f"{pa}{rp_epo_suffix}")
+        if not os.path.exists(epo_path):
+            print("  missing epochs:", epo_path)
+            skipped.append(pa)
+            continue
+
+        epo = mne.read_epochs(epo_path, preload=True)
+
+        mod2 = trial_map[trial_map["participant_id"] == pa].copy()
+
+        # Align by trialsnum if possible
+        if epo.metadata is not None and ("trialsnum" in epo.metadata.columns) and ("trialsnum" in mod2.columns):
+            keep = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
+            epo = epo[keep]
+            mod2 = mod2.set_index("trialsnum").loc[epo.metadata["trialsnum"].values].reset_index()
+        else:
+            mod2 = mod2.reset_index(drop=True).iloc[:len(epo)].copy()
+
+        # Drop bad trials
+        if epo.metadata is not None and "badtrial" in epo.metadata.columns:
+            good = np.where(epo.metadata["badtrial"].to_numpy() == 0)[0]
+            epo = epo[good]
+            mod2 = mod2.iloc[good].reset_index(drop=True)
+
+        if len(epo) < 8:
+            print("  too few trials:", len(epo))
+            skipped.append(pa)
+            continue
+
+        # require predictors exist
+        missing_cols = [c for c in predictors if c not in mod2.columns]
+        if len(missing_cols):
+            print("  missing cols:", missing_cols)
+            skipped.append(pa)
+            continue
+
+        # subject-level predictors: take first row (constant by design)
+        v_pain  = float(mod2[v_pain_col].iloc[0])
+        v_money = float(mod2[v_money_col].iloc[0])
+
+        # subject-level RT summary
+        rt_vals = mod2[rt_col].to_numpy(dtype=float) if rt_col in mod2.columns else np.array([])
+        rt_vals = rt_vals[np.isfinite(rt_vals)]
+        rt_subj = (float(np.median(rt_vals)) if rt_summary == "median" else float(np.mean(rt_vals))) if len(rt_vals) else np.nan
+
+        any_set_used = False
+
+        for set_name, chs in electrode_sets.items():
+            try:
+                rp_amp_by_bin, used_chs, _ = extract_bin_amplitudes_channels(
+                    epo, chs=chs, bins=bins, min_chs=1
+                )
+            except Exception as e:
+                print(f"  [{set_name}] skip: {e}")
+                continue
+
+            any_set_used = True
+
+            # store waveform (RP presence plot)
+            ev = epo.copy().pick_channels(list(used_chs)).average()
+            wf_store.setdefault(set_name, []).append(ev.data.mean(axis=0))
+            times_store[set_name] = ev.times
+
+            for (tmin, tmax), rp_amp_trials in rp_amp_by_bin.items():
+                rp_mean_uV = float(np.mean(rp_amp_trials) * 1e6)
+
+                subj_rows.append({
+                    "participant": pa,
+                    "set": set_name,
+                    "bin_tmin": float(tmin),
+                    "bin_tmax": float(tmax),
+                    "rp_mean_uV": rp_mean_uV,
+                    "n_trials": int(len(rp_amp_trials)),
+                    v_pain_col: v_pain,
+                    v_money_col: v_money,
+                    "rt_subj": rt_subj,
+                    "chs_used": "+".join(used_chs),
+                })
+
+        if any_set_used:
+            included.append(pa)
+        else:
+            skipped.append(pa)
+
+    subj_df = pd.DataFrame(subj_rows)
+    subj_df.to_csv(rp_outdir / "v38_nosv_subject_level_rp_means_by_bin.csv", index=False)
+
+    np.save(rp_outdir / "v38_nosv_included_subjects.npy", np.array(included, dtype=object))
+    np.save(rp_outdir / "v38_nosv_skipped_subjects.npy", np.array(skipped, dtype=object))
+
+    # save waveforms per set
+    for set_name, wfs in wf_store.items():
+        wfs = np.vstack(wfs)
+        np.save(rp_outdir / f"v38_nosv_{set_name}__rp_subject_waveforms.npy", wfs)
+        np.save(rp_outdir / f"v38_nosv_{set_name}__rp_times.npy", times_store[set_name])
+
+    # -----------------------
+    # GROUP-LEVEL REGRESSIONS
+    # -----------------------
+    group_rows = []
+
+    if len(subj_df) > 0:
+        for (set_name, tmin, tmax), sdf in subj_df.groupby(["set", "bin_tmin", "bin_tmax"]):
+            y = sdf["rp_mean_uV"].to_numpy(dtype=float)
+            rt_cov = sdf["rt_subj"].to_numpy(dtype=float)
+
+            # separate + RT
+            for pred in predictors:
+                t1, p1, b1, n1 = group_regress_with_cov(
+                    y=y,
+                    x=sdf[pred].to_numpy(dtype=float),
+                    cov=rt_cov
+                )
+                group_rows.append({
+                    "set": set_name, "bin_tmin": tmin, "bin_tmax": tmax,
+                    "model": "separate_plus_rt",
+                    "dv": "rp_mean_uV", "predictor": pred,
+                    "n_subj": n1, "beta_z": b1, "t": t1, "p": p1
+                })
+
+            # joint + RT (unique effects): pain + money + RT
+            jt1, jp1, jb1, jt2, jp2, jb2, nj = group_regress_joint2_with_cov(
+                y=y,
+                x1=sdf[v_pain_col].to_numpy(dtype=float),
+                x2=sdf[v_money_col].to_numpy(dtype=float),
+                cov=rt_cov
+            )
+
+            group_rows.append({
+                "set": set_name, "bin_tmin": tmin, "bin_tmax": tmax,
+                "model": "joint_plus_rt",
+                "dv": "rp_mean_uV", "predictor": v_pain_col,
+                "n_subj": nj, "beta_z": jb1, "t": jt1, "p": jp1
+            })
+            group_rows.append({
+                "set": set_name, "bin_tmin": tmin, "bin_tmax": tmax,
+                "model": "joint_plus_rt",
+                "dv": "rp_mean_uV", "predictor": v_money_col,
+                "n_subj": nj, "beta_z": jb2, "t": jt2, "p": jp2
+            })
+
+    group_df = pd.DataFrame(group_rows)
+
+    # FDR-BH across all tests
+    if len(group_df) > 0:
+        group_df["p_fdr_bh"] = fdr_bh(group_df["p"].to_numpy(dtype=float))
+
+    group_df.to_csv(rp_outdir / "v38_nosv_group_regress_rp_on_subject_predictors_by_bin.csv", index=False)
+
+    print("\n[V38 no-SV] Saved:")
+    print(" ", rp_outdir / "v38_nosv_subject_level_rp_means_by_bin.csv")
+    print(" ", rp_outdir / "v38_nosv_group_regress_rp_on_subject_predictors_by_bin.csv")
+
 
 #elif version == 12:
     # 9 
