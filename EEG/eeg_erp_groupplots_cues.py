@@ -8825,9 +8825,9 @@ elif version == 34:
             )
 
 if version == 35:
-    rp_dir = Path(outpath) / stats_subdir  # same as your outpath_glm
-    betas_csv = rp_dir / "rp_cz_gluth_subject_betas_by_bin.csv"
-    stats_csv = rp_dir / "rp_cz_gluth_group_stats_by_bin.csv"
+    rp_dir = Path(outpath) / stats_subdir  # where you saved
+    betas_csv = rp_dir / "rp_cz_gluth_subject_betas_single_window.csv"
+    stats_csv = rp_dir / "rp_cz_gluth_group_stats_single_window.csv"
     wf_npy = rp_dir / "rp_cz_subject_waveforms.npy"
     t_npy = rp_dir / "rp_cz_times.npy"
 
@@ -8836,8 +8836,9 @@ if version == 35:
 
     # 1) Grand-average RP waveform at Cz
     if wf_npy.exists() and t_npy.exists():
-        wfs = np.load(wf_npy)       # (n_subj, n_times)
-        times = np.load(t_npy)      # (n_times,)
+        wfs = np.load(wf_npy)  # (n_subj, n_times) in Volts
+        times = np.load(t_npy)
+
         mean = wfs.mean(axis=0) * 1e6
         sem = stats.sem(wfs, axis=0) * 1e6
 
@@ -8853,30 +8854,22 @@ if version == 35:
         fig.savefig(opj(outfigpath, f"{fig_prefix}rp_cz_grand_average_waveform.svg"),
                     dpi=600, bbox_inches="tight")
 
-    for regvar in rp_df["regvar"].unique():
-        sdf = rp_stats[rp_stats["regvar"] == regvar].copy()
-        if len(sdf) == 0:
-            continue
+    # 2) One bar per regressor (single window)
+    for _, row in rp_stats.iterrows():
+        regvar = row["regvar"]
+        mean_beta = row["mean_beta"]
+        sem_beta = row["sem_beta"]
+        p = row["p"]
 
-        # x labels
-        sdf["bin_label"] = sdf.apply(lambda r: f"{r.bin_tmin:.1f}–{r.bin_tmax:.1f}s", axis=1)
-
-        fig, ax = plt.subplots(figsize=(4, 2.5))
-        x = np.arange(len(sdf))
-        ax.bar(x, sdf["mean_beta"].values, yerr=sdf["sem_beta"].values, capsize=3)
+        fig, ax = plt.subplots(figsize=(3.2, 2.5))
+        ax.bar([0], [mean_beta], yerr=[sem_beta], capsize=4)
         ax.axhline(0, linestyle="--", color="gray")
-        ax.set_xticks(x)
-        ax.set_xticklabels(sdf["bin_label"].values, rotation=0)
+        ax.set_xticks([0])
+        ax.set_xticklabels(["-0.5–-0.1s"])
         ax.set_ylabel("β (z-EEG units)")
-        ax.set_title(f"RP @ Cz: {regvar} effect (bins)")
-
-        # mark Holm-significant bins
-        for i, p_holm in enumerate(sdf["p_holm"].values):
-            if np.isfinite(p_holm) and p_holm < 0.05:
-                ax.text(i, sdf["mean_beta"].iloc[i], "*", ha="center", va="bottom", fontsize=14)
-
+        ax.set_title(f"RP @ Cz: {regvar}\n(p={p:.3f})")
         fig.tight_layout()
-        fig.savefig(opj(outfigpath, f"{fig_prefix}rp_cz_bin_betas_{regvar}.svg"),
+        fig.savefig(opj(outfigpath, f"{fig_prefix}rp_cz_single_window_beta_{regvar}.svg"),
                     dpi=600, bbox_inches="tight")
 
 # if version == 11:

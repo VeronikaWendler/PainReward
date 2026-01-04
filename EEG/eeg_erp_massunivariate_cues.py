@@ -64,7 +64,7 @@ v32_mode = "joint"   # "joint" or "separate"
 
 v13_mode = "joint"   # or "joint"s
 v17_mode="joint"
-v35_mode = "separate"
+v35_mode = "joint"
 
 if version == 1:
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_passive')
@@ -573,43 +573,30 @@ def _z(x):
     return stats.zscore(x, nan_policy="omit")
 
 def fit_ols_beta(X, y):
-    """
-    X: (n_trials, n_params) includes intercept
-    y: (n_trials,)
-    returns beta vector (n_params,)
-    """
+    """OLS beta via least squares."""
     beta, *_ = np.linalg.lstsq(X, y, rcond=None)
     return beta
 
-def extract_rp_bins_betas(
+def extract_rp_window_beta(
     epo, mod2, regvar, rt_col="rt", cz_name="Cz",
-    bins=((-0.4, -0.2), (-0.2, 0.0)),
-    mode="separate",  
-    extra_joint=None  
+    window=(-0.5, -0.1),
+    mode="separate",  # "separate" or "joint_pain_money"
 ):
     """
-    epo: MNE Epochs (already matched to mod2 rows and cleaned)
-    mod2: pandas df aligned with epo (same trial order)
-    regvar: one of ["painlevel","moneylevel","sv_pain_para"]
-    mode:
-      - "separate": EEG ~ reg_z + RT_z
-      - "joint_pain_money": EEG ~ pain_z + money_z + RT_z 
-    Returns:
-      dict with per-bin beta for target regvar plus diagnostics
+    Single-window RP regression at Cz.
+
+    Returns dict:
+      - beta: beta for regvar (or pain/money depending on regvar when joint)
+      - n_trials
     """
     if cz_name not in epo.ch_names:
         raise ValueError(f"{cz_name} not found in epoch channels")
 
-    # pick Cz only
     epo_cz = epo.copy().pick_channels([cz_name])
     times = epo_cz.times
     data = epo_cz.get_data()[:, 0, :]  # (n_trials, n_times)
 
-    # pull predictors
-    rt = mod2[rt_col].to_numpy(dtype=float)
-    if not np.any(np.isfinite(rt)):
-        raise ValueError("RT is all non-finite")
-
+    # required predictors
     cols_needed = [rt_col]
     if mode == "separate":
         cols_needed += [regvar]
@@ -624,10 +611,19 @@ def extract_rp_bins_betas(
     keep &= np.isfinite(data).all(axis=1)
 
     if keep.sum() < 8:
-        return None  
+        return None
 
     modk = mod2.iloc[keep].reset_index(drop=True)
     datk = data[keep, :]
+
+    # window indices
+    tmin, tmax = window
+    tidx = np.where((times >= tmin) & (times <= tmax))[0]
+    if len(tidx) < 3:
+        return None
+
+    # DV: per-trial mean amplitude in window
+    y = datk[:, tidx].mean(axis=1)
 
     # design matrix
     X_parts = [np.ones(len(modk))]
@@ -635,42 +631,25 @@ def extract_rp_bins_betas(
     if mode == "separate":
         reg_z = stats.zscore(modk[regvar].to_numpy(dtype=float))
         X_parts.append(reg_z)
-        beta_index = 1 
-        colnames = ["Intercept", f"{regvar}_z"]
-    else:  # joint_pain_money
+        beta_index = 1
+    else:
         pain_z = stats.zscore(modk["painlevel"].to_numpy(dtype=float))
         money_z = stats.zscore(modk["moneylevel"].to_numpy(dtype=float))
         X_parts += [pain_z, money_z]
-        colnames = ["Intercept", "pain_z", "money_z"]
         beta_index = 1 if regvar == "painlevel" else 2
 
     rt_z = stats.zscore(modk[rt_col].to_numpy(dtype=float))
     X_parts.append(rt_z)
-    colnames.append("RT_z")
 
     X = np.column_stack(X_parts)
 
-    # trial-wise bin means
-    out = {
+    beta = fit_ols_beta(X, y)
+    return {
+        "beta": float(beta[beta_index]),
         "n_trials": int(len(modk)),
-        "bins": [],
-        "betas": [],
-        "colnames": colnames,
+        "window_tmin": float(tmin),
+        "window_tmax": float(tmax),
     }
-
-    for (tmin, tmax) in bins:
-        tidx = np.where((times >= tmin) & (times <= tmax))[0]
-        if len(tidx) < 3:
-            out["bins"].append((tmin, tmax))
-            out["betas"].append(np.nan)
-            continue
-
-        y = datk[:, tidx].mean(axis=1)  # (n_trials,)
-        beta = fit_ols_beta(X, y)
-        out["bins"].append((tmin, tmax))
-        out["betas"].append(float(beta[beta_index]))
-
-    return out
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate Regression with 3 GLMs
@@ -8247,35 +8226,26 @@ elif version == 34:
 
 
 
-# -------------------------------
-# RP Gluth-style ROI analysis @ Cz
-# -------------------------------
+
 if version == 35:
-    # You decide what regressors you want here:
-    # run pain then money then sv_pain_para (each as its own analysis),
-    # OR set regvars = [...] and loop them all.
     regvars = ["painlevel", "moneylevel", "sv_pain_para"]
     cz_name = "Cz"
-    bins = [(-0.4, -0.2), (-0.2, 0.0)]  # short bins for fast participants
+    window = (-0.5, -0.1) 
 
-    # where your response-locked RP epochs live
-    # (choose resp_rp if you saved the classic RP set; otherwise resp)
-    rp_epo_dirname = "erps_resp_rp"  # if you saved classic_rp epochs
+    rp_epo_dirname = "erps_resp_rp"
     rp_epo_suffix = "_decision_resp_rp_singletrials-epo.fif"
 
     rp_outdir = Path(outpath) / "Zscoring"
     rp_outdir.mkdir(parents=True, exist_ok=True)
 
-    rows = []  # long-form table: one row per subject × regvar × bin
-    rp_waveforms = []  # per subject average Cz waveform (for grand avg plotting)
+    rows = []          # subject-level betas (one per regvar)
+    rp_waveforms = []  # subject-average Cz waveform for grand avg plot
     rp_times = None
-    included = []
-    skipped = []
+    included, skipped = [], []
 
     for pa in part:
         print(f"\n[RP] processing {pa}")
 
-        # --- load response-locked epochs ---
         epo_path = opj(basepath, pa, "eeg", rp_epo_dirname, f"{pa}{rp_epo_suffix}")
         if not os.path.exists(epo_path):
             print(f"[RP] missing epochs: {epo_path}")
@@ -8284,17 +8254,14 @@ if version == 35:
 
         epo = mne.read_epochs(epo_path, preload=True)
 
-        # --- match trials to behavioral frame using your existing trial_map ---
+        # align trials
         mod2 = trial_map[trial_map["participant_id"] == pa].copy()
 
-        # match by trialsnum if present in both
         if "trialsnum" in epo.metadata.columns and "trialsnum" in mod2.columns:
             keep = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
             epo = epo[keep]
-            # align mod2 to epo order
             mod2 = mod2.set_index("trialsnum").loc[epo.metadata["trialsnum"].values].reset_index()
         else:
-            # fall back: assume already aligned (less safe)
             mod2 = mod2.reset_index(drop=True).iloc[: len(epo)].copy()
 
         # drop bad trials
@@ -8308,53 +8275,48 @@ if version == 35:
             skipped.append(pa)
             continue
 
-        # (optional) z-score EEG across trials like your massuni code
-        # If you want raw microvolts RP, skip this. For regression betas, z-scoring EEG is fine.
+        # z-score EEG across trials (same as your pipeline)
         scale = Scaler(scalings="mean")
         epo_z = mne.EpochsArray(scale.fit_transform(epo.get_data()), epo.info, tmin=epo.times[0])
 
-        # store subject-average Cz waveform (not regression, just RP presence)
-        epo_cz = epo.copy().pick_channels([cz_name])
-        ev_cz = epo_cz.average()
+        # store subject-average Cz waveform (for RP presence)
+        ev_cz = epo.copy().pick_channels([cz_name]).average()
         rp_waveforms.append(ev_cz.data[0, :])
         rp_times = ev_cz.times if rp_times is None else rp_times
 
-        # run regressors
+        # regressors
         for regvar in regvars:
             if regvar not in mod2.columns:
                 print(f"[RP] missing regvar in mod2: {regvar}")
                 continue
 
-            out = extract_rp_bins_betas(
+            out = extract_rp_window_beta(
                 epo=epo_z,
                 mod2=mod2,
                 regvar=regvar,
                 rt_col="rt",
                 cz_name=cz_name,
-                bins=bins,
-                mode="separate",  # or "joint_pain_money" if you want unique pain/money
+                window=window,
+                mode="separate",
             )
             if out is None:
-                print(f"[RP] skip {pa}/{regvar}: too few valid trials")
+                print(f"[RP] skip {pa}/{regvar}: too few valid trials or window issue")
                 continue
 
-            for (b, beta) in zip(out["bins"], out["betas"]):
-                rows.append({
-                    "participant": pa,
-                    "regvar": regvar,
-                    "bin_tmin": b[0],
-                    "bin_tmax": b[1],
-                    "beta": beta,
-                    "n_trials": out["n_trials"],
-                })
+            rows.append({
+                "participant": pa,
+                "regvar": regvar,
+                "window_tmin": out["window_tmin"],
+                "window_tmax": out["window_tmax"],
+                "beta": out["beta"],
+                "n_trials": out["n_trials"],
+            })
 
         included.append(pa)
 
-    # save subject-level table
     rp_df = pd.DataFrame(rows)
-    rp_df.to_csv(rp_outdir / "rp_cz_gluth_subject_betas_by_bin.csv", index=False)
+    rp_df.to_csv(rp_outdir / "rp_cz_gluth_subject_betas_single_window.csv", index=False)
 
-    # save grand-average RP waveform (presence)
     if len(rp_waveforms) > 0:
         rp_waveforms = np.vstack(rp_waveforms)  # (n_subj, n_times)
         np.save(rp_outdir / "rp_cz_subject_waveforms.npy", rp_waveforms)
@@ -8363,14 +8325,15 @@ if version == 35:
     np.save(rp_outdir / "rp_included_subjects.npy", np.array(included, dtype=object))
     np.save(rp_outdir / "rp_skipped_subjects.npy", np.array(skipped, dtype=object))
 
-    print("\n[RP] saved:",
-          rp_outdir / "rp_cz_gluth_subject_betas_by_bin.csv")
-    
+    print("\n[RP] saved:", rp_outdir / "rp_cz_gluth_subject_betas_single_window.csv")
+
     from scipy import stats
+    import numpy as np
+    import pandas as pd
     
     stats_rows = []
     if len(rp_df) > 0:
-        for (regvar, tmin, tmax), subdf in rp_df.groupby(["regvar", "bin_tmin", "bin_tmax"]):
+        for regvar, subdf in rp_df.groupby(["regvar"]):
             betas = subdf["beta"].to_numpy(dtype=float)
             betas = betas[np.isfinite(betas)]
             if len(betas) < 8:
@@ -8378,9 +8341,7 @@ if version == 35:
             tval, pval = stats.ttest_1samp(betas, 0.0)
             stats_rows.append({
                 "regvar": regvar,
-                "bin_tmin": tmin,
-                "bin_tmax": tmax,
-                "n_subj": len(betas),
+                "n_subj": int(len(betas)),
                 "mean_beta": float(np.mean(betas)),
                 "sem_beta": float(stats.sem(betas)),
                 "t": float(tval),
@@ -8389,31 +8350,13 @@ if version == 35:
     
     rp_stats = pd.DataFrame(stats_rows)
     
-    # Holm correction within each regvar across bins
-    rp_stats["p_holm"] = np.nan
-    for regvar, sdf in rp_stats.groupby("regvar"):
-        pvals = sdf["p"].to_numpy()
-        order = np.argsort(pvals)
-        m = len(pvals)
-        adj = np.empty(m)
-        for i, idx in enumerate(order):
-            adj[idx] = min(1.0, (m - i) * pvals[idx])
-        # enforce monotonicity
-        adj_sorted = np.maximum.accumulate(adj[order])[np.argsort(order)]
-        rp_stats.loc[sdf.index, "p_holm"] = adj_sorted
+    if len(rp_stats) > 0:
+        m = len(rp_stats)
+        rp_stats["p_bonf_regvars"] = np.minimum(1.0, rp_stats["p"].to_numpy() * m)
     
-    rp_stats.to_csv(rp_outdir / "rp_cz_gluth_group_stats_by_bin.csv", index=False)
-    print("[RP] saved:", rp_outdir / "rp_cz_gluth_group_stats_by_bin.csv")
-
-
-
-
-
-
-
-
-
-
+    rp_stats.to_csv(rp_outdir / "rp_cz_gluth_group_stats_single_window.csv", index=False)
+    print("[RP] saved:", rp_outdir / "rp_cz_gluth_group_stats_single_window.csv")
+    
 
 
 
