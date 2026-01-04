@@ -58,13 +58,13 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 35
+version = 36
 v32_mode = "joint"   # "joint" or "separate"
 
 
 v13_mode = "joint"   # or "joint"s
 v17_mode="joint"
-v35_mode = "separate"
+v36_mode = "separate"
 
 if version == 1:
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_passive')
@@ -388,6 +388,19 @@ elif version == 35:
     else:
         raise ValueError("v32_mode must be 'joint' or 'separate'")
     os.makedirs(outpath, exist_ok=True)
+    
+
+elif version == 36:
+    base_v36 = opj(outpath, "erps_massuni_sv_cuelong")
+    os.makedirs(base_v36, exist_ok=True)
+    if v36_mode == "joint":
+        outpath = opj(base_v36, "v36_rp_joint")
+    elif v36_mode == "separate":
+        outpath = opj(base_v36, "v36_rp_sep")
+    else:
+        raise ValueError("v32_mode must be 'joint' or 'separate'")
+    os.makedirs(outpath, exist_ok=True)
+    
 else:
     print("no version")
 
@@ -663,7 +676,22 @@ def extract_bin_amplitudes_channels(epo, chs=("Cz",), bins=((-0.4,-0.2), (-0.2,-
 
     return rp_amp_by_bin, used_chs
 
+def extract_bin_amplitudes_roi(epo, roi_chs=("Pz","Cz","CPz"), bins=((-0.4,-0.2),(-0.2,-0.1)), min_chs=1):
+    present = [ch for ch in roi_chs if ch in epo.ch_names]
+    if len(present) < min_chs:
+        raise ValueError(f"ROI channels not found. Wanted {roi_chs}, found {present}")
 
+    e = epo.copy().pick_channels(present)
+    data = e.get_data()      # (n_trials, n_ch, n_times)
+    times = e.times
+
+    out = {}
+    for (tmin, tmax) in bins:
+        tidx = np.where((times >= tmin) & (times <= tmax))[0]
+        if len(tidx) < 3:
+            raise ValueError(f"Too few samples in bin {(tmin, tmax)}")
+        out[(tmin, tmax)] = data[:, :, tidx].mean(axis=2).mean(axis=1)  # (n_trials,)
+    return out, present
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate Regression with 3 GLMs
 #
@@ -8470,6 +8498,175 @@ if version == 35:
         print(" ", rp_outdir / f"{prefix}rp_gluth_group_stats_by_bin.csv")
         print(" ", rp_outdir / f"{prefix}rp_subject_waveforms.npy")
         print(" ", rp_outdir / f"{prefix}rp_times.npy")
+
+
+if version == 36:
+
+    # -------------------------
+    # SETTINGS
+    # -------------------------
+    bins    = [(-0.4, -0.2), (-0.2, -0.1)]     # your old bins example
+    rt_col  = "rt"                              # optional: for subject mean RT covariate
+    sets = [
+        ("roi_PzCzCPz", ("Pz","Cz","CPz")),
+        ("ch_Cz",       ("Cz",)),
+        ("ch_CPz",       ("CPz",)),
+        ("ch_Pz",       ("Pz",)),
+    ]
+
+    rp_epo_dirname = "erps_resp_rp"
+    rp_epo_suffix  = "_decision_resp_rp_singletrials-epo.fif"
+
+    rp_outdir = Path(outpath) / "Zscoring"
+    rp_outdir.mkdir(parents=True, exist_ok=True)
+
+    # -------------------------
+    # LOAD SUBJECT-LEVEL PREDICTORS
+    # -------------------------
+    # Example: you exported this from HDDM/HDDMrl or your own summary script
+    # MUST contain: participant_id, v_painlevel, v_moneylevel
+    subj_params_csv = Path(outpath) / "your_subject_level_drift_rates.csv"
+    subj_df = pd.read_csv(subj_params_csv)
+
+    # safety: enforce string ids if yours are like "sub-001"
+    subj_df["participant_id"] = subj_df["participant_id"].astype(str)
+
+    # -------------------------
+    # LOOP electrode sets, compute subject RP summaries
+    # -------------------------
+    for set_name, roi_chs in sets:
+        prefix = f"{set_name}__"
+
+        rows = []
+        waveforms = []
+        rp_times = None
+        included, skipped = [], []
+
+        for pa in part:
+            pa = str(pa)
+            if pa not in set(subj_df["participant_id"].values):
+                skipped.append(pa)
+                continue
+
+            epo_path = os.path.join(basepath, pa, "eeg", rp_epo_dirname, f"{pa}{rp_epo_suffix}")
+            if not os.path.exists(epo_path):
+                skipped.append(pa)
+                continue
+
+            epo = mne.read_epochs(epo_path, preload=True)
+
+            # (optional) drop bad trials if present
+            if epo.metadata is not None and "badtrial" in epo.metadata.columns:
+                good = np.where(epo.metadata["badtrial"].to_numpy() == 0)[0]
+                epo = epo[good]
+
+            if len(epo) < 8:
+                skipped.append(pa)
+                continue
+
+            # per-trial amplitudes per bin
+            rp_amp_by_bin, roi_used = extract_bin_amplitudes_roi(epo, roi_chs=roi_chs, bins=bins, min_chs=1)
+
+            # subject-level RP per bin = mean across trials (NO single-trial regression here)
+            for (tmin, tmax), amps in rp_amp_by_bin.items():
+                rows.append({
+                    "participant_id": pa,
+                    "bin_tmin": tmin,
+                    "bin_tmax": tmax,
+                    "rp_amp_uV": float(np.mean(amps) * 1e6),
+                    "n_trials": int(len(amps)),
+                    "roi_used": "+".join(roi_used),
+                })
+
+            # store subject average waveform (ROI mean)
+            ev = epo.copy().pick_channels(list(roi_used)).average()
+            wave = ev.data.mean(axis=0)  # ROI average waveform
+            waveforms.append(wave)
+            rp_times = ev.times if rp_times is None else rp_times
+
+            included.append(pa)
+
+        rp_subj = pd.DataFrame(rows)
+
+        # merge in predictors
+        merged = rp_subj.merge(subj_df, on="participant_id", how="inner")
+
+        # Save subject-level RP table for this set
+        merged.to_csv(rp_outdir / f"{prefix}rp_subjectlevel_table_by_bin.csv", index=False)
+
+        if len(waveforms) > 0:
+            waveforms = np.vstack(waveforms)
+            np.save(rp_outdir / f"{prefix}rp_subject_waveforms.npy", waveforms)
+            np.save(rp_outdir / f"{prefix}rp_times.npy", rp_times)
+
+        np.save(rp_outdir / f"{prefix}rp_included_subjects.npy", np.array(included, dtype=object))
+        np.save(rp_outdir / f"{prefix}rp_skipped_subjects.npy", np.array(skipped, dtype=object))
+
+        # -------------------------
+        # GROUP REGRESSION ACROSS SUBJECTS (per bin)
+        # -------------------------
+        # Model: rp_amp ~ v_painlevel + v_moneylevel
+        # (Add covariates here if you want, e.g., mean_rt)
+        stats_rows = []
+
+        for (tmin, tmax), sdf in merged.groupby(["bin_tmin","bin_tmax"]):
+            # need finite values
+            keep = np.isfinite(sdf["rp_amp_uV"].to_numpy())
+            keep &= np.isfinite(sdf["v_painlevel"].to_numpy())
+            keep &= np.isfinite(sdf["v_moneylevel"].to_numpy())
+
+            d = sdf.loc[keep].copy()
+            if len(d) < 10:
+                continue
+
+            y = d["rp_amp_uV"].to_numpy(dtype=float)
+
+            x1 = stats.zscore(d["v_painlevel"].to_numpy(dtype=float))
+            x2 = stats.zscore(d["v_moneylevel"].to_numpy(dtype=float))
+
+            X = np.column_stack([np.ones(len(d)), x1, x2])
+
+            beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+            yhat = X @ beta
+            resid = y - yhat
+
+            # OLS standard errors
+            n, p = X.shape
+            s2 = (resid @ resid) / (n - p)
+            XtX_inv = np.linalg.inv(X.T @ X)
+            se = np.sqrt(np.diag(s2 * XtX_inv))
+
+            tvals = beta / se
+            pvals = 2 * (1 - stats.t.cdf(np.abs(tvals), df=n - p))
+
+            stats_rows.append({
+                "bin_tmin": tmin,
+                "bin_tmax": tmax,
+                "n_subj": int(n),
+
+                "b_intercept": float(beta[0]),
+                "b_v_pain_z": float(beta[1]),
+                "b_v_money_z": float(beta[2]),
+
+                "t_v_pain_z": float(tvals[1]),
+                "p_v_pain_z": float(pvals[1]),
+                "t_v_money_z": float(tvals[2]),
+                "p_v_money_z": float(pvals[2]),
+            })
+
+        reg_stats = pd.DataFrame(stats_rows)
+
+        # Bonferroni across bins × 2 predictors
+        if len(reg_stats) > 0:
+            m = len(reg_stats) * 2
+            reg_stats["p_v_pain_bonf"]  = np.minimum(1.0, reg_stats["p_v_pain_z"]  * m)
+            reg_stats["p_v_money_bonf"] = np.minimum(1.0, reg_stats["p_v_money_z"] * m)
+
+        reg_stats.to_csv(rp_outdir / f"{prefix}rp_subjectlevel_regression_stats_by_bin.csv", index=False)
+
+        print(f"[v36] Saved for {set_name}:")
+        print(" ", rp_outdir / f"{prefix}rp_subjectlevel_table_by_bin.csv")
+        print(" ", rp_outdir / f"{prefix}rp_subjectlevel_regression_stats_by_bin.csv")
 
 #elif version == 12:
     # 9 
