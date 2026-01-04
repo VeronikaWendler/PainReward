@@ -37,12 +37,12 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 38  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 39  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
 v14_mode = "joint"
-v38_mode = "separate"
+v39_mode = "separate"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -414,6 +414,17 @@ elif version == 38:
         raise ValueError("v38_mode must be 'joint' or 'separate'")
     os.makedirs(outfigpath, exist_ok=True)
 
+elif version == 39:
+    base_v39 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
+    if v39_mode == "joint":
+        outpath = opj(base_v39, "v39_rp_joint")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v44_rp_joint")
+    elif v39_mode == "separate":
+        outpath = opj(base_v39, "v39_rp_sep")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v44_rp_sep")
+    else:
+        raise ValueError("v38_mode must be 'joint' or 'separate'")
+    os.makedirs(outfigpath, exist_ok=True)
     
 else:
     print("No Version")
@@ -9470,6 +9481,8 @@ elif version == 38:
                     dpi=600, bbox_inches="tight"
                 )
                 plt.close(fig)
+                
+                
                 
 elif version == 39:
 
