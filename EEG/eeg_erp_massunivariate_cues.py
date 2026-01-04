@@ -58,7 +58,7 @@ if not os.path.exists(outpath):
     os.mkdir(outpath)
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 33
+version = 34
 v32_mode = "joint"   # "joint" or "separate"
 
 
@@ -600,7 +600,7 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21, 22,23,24,25,26,27,28,29,30,31,32,33]:
+if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21, 22,23,24,25,26,27,28,29,30,31,32,33,34]:
     filtered_data = []
     for p in part:
         # data for this participant
@@ -624,7 +624,7 @@ if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21, 22,23,24,25
                 opj(basepath, p, "eeg", "erps_resp", f"{p}_decision_resp_singletrials-epo.fif"),
                 preload=True)
             epo_1 = epo.copy()
-        elif version in [18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33]:
+        elif version in [18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]:
             epo = mne.read_epochs(
                 opj(basepath, p, "eeg", "erps_long", f"{p}_decision_cues_long_singletrials-epo.fif"),
                 preload=True
