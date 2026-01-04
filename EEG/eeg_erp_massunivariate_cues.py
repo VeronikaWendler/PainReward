@@ -715,14 +715,14 @@ if version in [1, 2, 3, 4, 7, 11, 12, 13, 14,15,16,17, 18,19, 20,21, 22,23,24,25
                                   p + '_decision_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
         elif version in [17,35]:
-            epo = mne.read_epochs(
-                opj(basepath, p, "eeg", "erps_resp_rp", f"{p}_decision_resp_rp_singletrials-epo.fif"),
-                preload=True)
-            epo_1 = epo.copy()
             # epo = mne.read_epochs(
-            #     opj(basepath, p, "eeg", "erps_resp", f"{p}_decision_resp_singletrials-epo.fif"),
+            #     opj(basepath, p, "eeg", "erps_resp_rp", f"{p}_decision_resp_rp_singletrials-epo.fif"),
             #     preload=True)
             # epo_1 = epo.copy()
+            epo = mne.read_epochs(
+                opj(basepath, p, "eeg", "erps_resp", f"{p}_decision_resp_singletrials-epo.fif"),
+                preload=True)
+            epo_1 = epo.copy()
         elif version in [18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]:
             epo = mne.read_epochs(
                 opj(basepath, p, "eeg", "erps_long", f"{p}_decision_cues_long_singletrials-epo.fif"),
@@ -8233,7 +8233,7 @@ if version == 35:
     window = (-0.5, -0.1) 
 
     rp_epo_dirname = "erps_resp_rp"
-    rp_epo_suffix = "_decision_resp_rp_singletrials-epo.fif"
+    rp_epo_suffix = "_decision_resp_singletrials-epo.fif"
 
     rp_outdir = Path(outpath) / "Zscoring"
     rp_outdir.mkdir(parents=True, exist_ok=True)
