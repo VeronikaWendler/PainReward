@@ -639,6 +639,30 @@ def extract_bin_amplitudes_roi(epo, roi_chs=("Pz", "Cz", "CPz"), bins=((-0.4,-0.
 
     return out, present
 
+def extract_bin_amplitudes_channels(epo, chs=("Cz",), bins=((-0.4,-0.2), (-0.2,-0.1)), min_chs=1):
+    """
+    Returns:
+      rp_amp_by_bin: dict {(tmin,tmax): (n_trials,)} mean amp over chosen channels and time bin
+      used_chs: list of channels actually used
+    """
+    used_chs = [ch for ch in chs if ch in epo.ch_names]
+    if len(used_chs) < min_chs:
+        raise ValueError(f"Channels not found. Wanted {chs}, found {used_chs}")
+
+    e = epo.copy().pick_channels(used_chs)
+    data = e.get_data()   # (n_trials, n_ch, n_times)
+    times = e.times
+
+    rp_amp_by_bin = {}
+    for (tmin, tmax) in bins:
+        tidx = np.where((times >= tmin) & (times <= tmax))[0]
+        if len(tidx) < 3:
+            raise ValueError(f"Too few samples in bin {(tmin, tmax)}")
+        # mean over time then channels -> (n_trials,)
+        rp_amp_by_bin[(tmin, tmax)] = data[:, :, tidx].mean(axis=2).mean(axis=1)
+
+    return rp_amp_by_bin, used_chs
+
 
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate Regression with 3 GLMs
@@ -8218,9 +8242,8 @@ elif version == 34:
 if version == 35:
 
     regvars  = ["painlevel", "moneylevel"]
-    bins     = [(-0.4, -0.2), (-0.2, -0.1)]   
+    bins     = [(-0.4, -0.2), (-0.2, -0.1)]
     rt_col   = "rt"
-    roi_chs  = ("Pz", "Cz", "CPz")
 
     rp_epo_dirname = "erps_resp_rp"
     rp_epo_suffix  = "_decision_resp_rp_singletrials-epo.fif"
@@ -8228,210 +8251,225 @@ if version == 35:
     rp_outdir = Path(outpath) / "Zscoring"
     rp_outdir.mkdir(parents=True, exist_ok=True)
 
-    # outputs
-    trial_rows   = []   # for R mixed model: one row per TRIAL × BIN
-    mean_rows    = []   # ERP-style per subject means (per BIN)
-    beta_rows    = []   # Gluth-style subject betas (numeric trend) per BIN
-    rp_waveforms = []   # per subject ROI-mean waveform (for RP presence plot)
-    rp_times     = None
+    # --- Define the electrode sets you want to test ---
+    electrode_sets = {
+        "roi_PzCzCPz": ("Pz", "Cz", "CPz"),
+        "ch_Cz": ("Cz",),
+        "ch_C3": ("C3",),
+        "ch_C4": ("C4",),
+    }
 
-    included, skipped = [], []
+    for set_name, chs in electrode_sets.items():
+        print(f"\n==============================")
+        print(f"[RP bins] Running electrode set: {set_name}  channels={chs}")
+        print(f"==============================")
 
-    for pa in part:
-        print(f"\n[RP ROI bins] {pa}")
+        # outputs for THIS set
+        trial_rows   = []
+        mean_rows    = []
+        beta_rows    = []
+        rp_waveforms = []
+        rp_times     = None
+        included, skipped = [], []
 
-        epo_path = os.path.join(basepath, pa, "eeg", rp_epo_dirname, f"{pa}{rp_epo_suffix}")
-        if not os.path.exists(epo_path):
-            print("  missing:", epo_path)
-            skipped.append(pa)
-            continue
+        for pa in part:
+            print(f"\n[{set_name}] {pa}")
 
-        epo = mne.read_epochs(epo_path, preload=True)
+            epo_path = os.path.join(basepath, pa, "eeg", rp_epo_dirname, f"{pa}{rp_epo_suffix}")
+            if not os.path.exists(epo_path):
+                print("  missing:", epo_path)
+                skipped.append(pa)
+                continue
 
-        # behavioral alignment
-        mod2 = trial_map[trial_map["participant_id"] == pa].copy()
+            epo = mne.read_epochs(epo_path, preload=True)
 
-        # align by trialsnum if possible
-        if epo.metadata is not None and ("trialsnum" in epo.metadata.columns) and ("trialsnum" in mod2.columns):
-            keep = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
-            epo = epo[keep]
-            mod2 = mod2.set_index("trialsnum").loc[epo.metadata["trialsnum"].values].reset_index()
-        else:
-            mod2 = mod2.reset_index(drop=True).iloc[:len(epo)].copy()
+            # behavioral alignment
+            mod2 = trial_map[trial_map["participant_id"] == pa].copy()
 
-        # drop bad trials
-        if epo.metadata is not None and "badtrial" in epo.metadata.columns:
-            good = np.where(epo.metadata["badtrial"].to_numpy() == 0)[0]
-            epo = epo[good]
-            mod2 = mod2.iloc[good].reset_index(drop=True)
+            if epo.metadata is not None and ("trialsnum" in epo.metadata.columns) and ("trialsnum" in mod2.columns):
+                keep = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
+                epo = epo[keep]
+                mod2 = mod2.set_index("trialsnum").loc[epo.metadata["trialsnum"].values].reset_index()
+            else:
+                mod2 = mod2.reset_index(drop=True).iloc[:len(epo)].copy()
 
-        if len(epo) < 8:
-            print("  too few trials:", len(epo))
-            skipped.append(pa)
-            continue
+            # drop bad trials
+            if epo.metadata is not None and "badtrial" in epo.metadata.columns:
+                good = np.where(epo.metadata["badtrial"].to_numpy() == 0)[0]
+                epo = epo[good]
+                mod2 = mod2.iloc[good].reset_index(drop=True)
 
-        # ---- ROI RP amplitudes per trial per bin ----
-        rp_amp_by_bin, roi_used = extract_bin_amplitudes_roi(
-            epo,
-            roi_chs=roi_chs,
-            bins=bins,
-            min_chs=1
-        )
+            if len(epo) < 8:
+                print("  too few trials:", len(epo))
+                skipped.append(pa)
+                continue
 
-        # ---- store subject-average ROI waveform (RP presence) ----
-        ev_roi = epo.copy().pick_channels(list(roi_used)).average()
-        # average across ROI channels -> (n_times,)
-        subj_wave = ev_roi.data.mean(axis=0)
-        rp_waveforms.append(subj_wave)
-        rp_times = ev_roi.times if rp_times is None else rp_times
+            # ---- Extract amplitudes (single channel or ROI) ----
+            try:
+                rp_amp_by_bin, used_chs = extract_bin_amplitudes_channels(
+                    epo, chs=chs, bins=bins, min_chs=1
+                )
+            except ValueError as e:
+                print("  skip (channels missing):", e)
+                skipped.append(pa)
+                continue
 
-        # ---- Trial-level export (for R LMM): one row per trial × bin ----
-        for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
-            for i in range(len(epo)):
-                row = {
-                    "participant": pa,
-                    "trial_index": i,
-                    "bin_tmin": tmin,
-                    "bin_tmax": tmax,
-                    "rp_amp_uV": float(rp_amp[i] * 1e6),
-                    "rt": float(mod2.iloc[i][rt_col]) if rt_col in mod2.columns else np.nan,
-                    "roi_used": "+".join(roi_used),
-                }
-                for rv in regvars:
-                    row[rv] = mod2.iloc[i][rv] if rv in mod2.columns else np.nan
-                trial_rows.append(row)
+            # ---- Subject-average waveform for RP presence plot (mean over used channels) ----
+            ev = epo.copy().pick_channels(list(used_chs)).average()
+            subj_wave = ev.data.mean(axis=0)  # mean over channels
+            rp_waveforms.append(subj_wave)
+            rp_times = ev.times if rp_times is None else rp_times
 
-        # ---- ERP-style condition means (per subject × bin) ----
-        for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
+            # ---- Trial-level export (for R LMM): one row per trial × bin ----
+            for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
+                for i in range(len(epo)):
+                    row = {
+                        "participant": pa,
+                        "trial_index": i,
+                        "bin_tmin": tmin,
+                        "bin_tmax": tmax,
+                        "rp_amp_uV": float(rp_amp[i] * 1e6),
+                        "rt": float(mod2.iloc[i][rt_col]) if rt_col in mod2.columns else np.nan,
+                        "chs_used": "+".join(used_chs),
+                        "set_name": set_name,
+                    }
+                    for rv in regvars:
+                        row[rv] = mod2.iloc[i][rv] if rv in mod2.columns else np.nan
+                    trial_rows.append(row)
 
-            # pain means
-            if "painlevel" in mod2.columns:
-                for lvl in sorted(pd.unique(mod2["painlevel"].dropna())):
-                    idx = np.where(mod2["painlevel"].to_numpy() == lvl)[0]
-                    if len(idx) >= 3:
-                        mean_rows.append({
-                            "participant": pa,
-                            "factor": "painlevel",
-                            "level": lvl,
-                            "bin_tmin": tmin,
-                            "bin_tmax": tmax,
-                            "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
-                            "n_trials": int(len(idx)),
-                            "roi_used": "+".join(roi_used),
-                        })
+            # ---- ERP-style condition means (per subject × bin) ----
+            for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
 
-            # money means
-            if "moneylevel" in mod2.columns:
-                for lvl in sorted(pd.unique(mod2["moneylevel"].dropna())):
-                    idx = np.where(mod2["moneylevel"].to_numpy() == lvl)[0]
-                    if len(idx) >= 3:
-                        mean_rows.append({
-                            "participant": pa,
-                            "factor": "moneylevel",
-                            "level": lvl,
-                            "bin_tmin": tmin,
-                            "bin_tmax": tmax,
-                            "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
-                            "n_trials": int(len(idx)),
-                            "roi_used": "+".join(roi_used),
-                        })
-
-            # optional 5×5 cell means
-            if ("painlevel" in mod2.columns) and ("moneylevel" in mod2.columns):
-                for pl in sorted(pd.unique(mod2["painlevel"].dropna())):
-                    for ml in sorted(pd.unique(mod2["moneylevel"].dropna())):
-                        idx = np.where(
-                            (mod2["painlevel"].to_numpy() == pl) &
-                            (mod2["moneylevel"].to_numpy() == ml)
-                        )[0]
+                if "painlevel" in mod2.columns:
+                    for lvl in sorted(pd.unique(mod2["painlevel"].dropna())):
+                        idx = np.where(mod2["painlevel"].to_numpy() == lvl)[0]
                         if len(idx) >= 3:
                             mean_rows.append({
                                 "participant": pa,
-                                "factor": "pain_x_money",
-                                "painlevel": pl,
-                                "moneylevel": ml,
+                                "factor": "painlevel",
+                                "level": lvl,
                                 "bin_tmin": tmin,
                                 "bin_tmax": tmax,
                                 "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
                                 "n_trials": int(len(idx)),
-                                "roi_used": "+".join(roi_used),
+                                "chs_used": "+".join(used_chs),
+                                "set_name": set_name,
                             })
 
-        # ---- Gluth-style subject betas (numeric trend) per bin ----
-        if rt_col in mod2.columns:
-            for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
-                for rv in regvars:
-                    if rv not in mod2.columns:
-                        continue
-                    b, n_used = gluth_style_subject_beta(rp_amp, mod2, regvar=rv, rt_col=rt_col)
-                    beta_rows.append({
-                        "participant": pa,
-                        "regvar": rv,
-                        "bin_tmin": tmin,
-                        "bin_tmax": tmax,
-                        "beta": b,
-                        "n_trials_used": n_used,
-                        "roi_used": "+".join(roi_used),
-                    })
+                if "moneylevel" in mod2.columns:
+                    for lvl in sorted(pd.unique(mod2["moneylevel"].dropna())):
+                        idx = np.where(mod2["moneylevel"].to_numpy() == lvl)[0]
+                        if len(idx) >= 3:
+                            mean_rows.append({
+                                "participant": pa,
+                                "factor": "moneylevel",
+                                "level": lvl,
+                                "bin_tmin": tmin,
+                                "bin_tmax": tmax,
+                                "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
+                                "n_trials": int(len(idx)),
+                                "chs_used": "+".join(used_chs),
+                                "set_name": set_name,
+                            })
 
-        included.append(pa)
+                # optional 5×5 cell means
+                if ("painlevel" in mod2.columns) and ("moneylevel" in mod2.columns):
+                    for pl in sorted(pd.unique(mod2["painlevel"].dropna())):
+                        for ml in sorted(pd.unique(mod2["moneylevel"].dropna())):
+                            idx = np.where(
+                                (mod2["painlevel"].to_numpy() == pl) &
+                                (mod2["moneylevel"].to_numpy() == ml)
+                            )[0]
+                            if len(idx) >= 3:
+                                mean_rows.append({
+                                    "participant": pa,
+                                    "factor": "pain_x_money",
+                                    "painlevel": pl,
+                                    "moneylevel": ml,
+                                    "bin_tmin": tmin,
+                                    "bin_tmax": tmax,
+                                    "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
+                                    "n_trials": int(len(idx)),
+                                    "chs_used": "+".join(used_chs),
+                                    "set_name": set_name,
+                                })
 
-    # ---- Save files ----
-    trial_df = pd.DataFrame(trial_rows)
-    trial_df.to_csv(rp_outdir / "rp_roi_trial_table_by_bin.csv", index=False)
+            # ---- Gluth-style subject betas (numeric trend) per bin ----
+            if rt_col in mod2.columns:
+                for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
+                    for rv in regvars:
+                        if rv not in mod2.columns:
+                            continue
+                        b, n_used = gluth_style_subject_beta(rp_amp, mod2, regvar=rv, rt_col=rt_col)
+                        beta_rows.append({
+                            "participant": pa,
+                            "regvar": rv,
+                            "bin_tmin": tmin,
+                            "bin_tmax": tmax,
+                            "beta": b,
+                            "n_trials_used": n_used,
+                            "chs_used": "+".join(used_chs),
+                            "set_name": set_name,
+                        })
 
-    means_df = pd.DataFrame(mean_rows)
-    means_df.to_csv(rp_outdir / "rp_roi_condition_means_by_bin.csv", index=False)
+            included.append(pa)
 
-    beta_df = pd.DataFrame(beta_rows)
-    beta_df.to_csv(rp_outdir / "rp_roi_gluth_subject_betas_by_bin.csv", index=False)
+        # ---- Save files for THIS set ----
+        prefix = f"{set_name}__"
 
-    if len(rp_waveforms) > 0:
-        rp_waveforms = np.vstack(rp_waveforms)  # (n_subj, n_times)
-        np.save(rp_outdir / "rp_roi_subject_waveforms.npy", rp_waveforms)
-        np.save(rp_outdir / "rp_roi_times.npy", rp_times)
+        trial_df = pd.DataFrame(trial_rows)
+        trial_df.to_csv(rp_outdir / f"{prefix}rp_trial_table_by_bin.csv", index=False)
 
-    np.save(rp_outdir / "rp_included_subjects.npy", np.array(included, dtype=object))
-    np.save(rp_outdir / "rp_skipped_subjects.npy", np.array(skipped, dtype=object))
+        means_df = pd.DataFrame(mean_rows)
+        means_df.to_csv(rp_outdir / f"{prefix}rp_condition_means_by_bin.csv", index=False)
 
-    # ---- Group stats on betas: one-sample t-test per regvar × bin ----
-    stats_rows = []
-    if len(beta_df) > 0:
-        for (rv, tmin, tmax), sdf in beta_df.groupby(["regvar", "bin_tmin", "bin_tmax"]):
-            betas = sdf["beta"].to_numpy(dtype=float)
-            betas = betas[np.isfinite(betas)]
-            if len(betas) < 8:
-                continue
-            tval, pval = stats.ttest_1samp(betas, 0.0)
-            stats_rows.append({
-                "regvar": rv,
-                "bin_tmin": tmin,
-                "bin_tmax": tmax,
-                "n_subj": int(len(betas)),
-                "mean_beta": float(np.mean(betas)),
-                "sem_beta": float(stats.sem(betas)),
-                "t": float(tval),
-                "p": float(pval),
-            })
+        beta_df = pd.DataFrame(beta_rows)
+        beta_df.to_csv(rp_outdir / f"{prefix}rp_gluth_subject_betas_by_bin.csv", index=False)
 
-    rp_stats = pd.DataFrame(stats_rows)
+        if len(rp_waveforms) > 0:
+            rp_waveforms = np.vstack(rp_waveforms)  # (n_subj, n_times)
+            np.save(rp_outdir / f"{prefix}rp_subject_waveforms.npy", rp_waveforms)
+            np.save(rp_outdir / f"{prefix}rp_times.npy", rp_times)
 
-    # Bonferroni across all tests (regvar × bin)
-    if len(rp_stats) > 0:
-        m = len(rp_stats)
-        rp_stats["p_bonf"] = np.minimum(1.0, rp_stats["p"] * m)
+        np.save(rp_outdir / f"{prefix}included_subjects.npy", np.array(included, dtype=object))
+        np.save(rp_outdir / f"{prefix}skipped_subjects.npy", np.array(skipped, dtype=object))
 
-    rp_stats.to_csv(rp_outdir / "rp_roi_gluth_group_stats_by_bin.csv", index=False)
+        # ---- Group stats on betas: one-sample t-test per regvar × bin ----
+        stats_rows = []
+        if len(beta_df) > 0:
+            for (rv, tmin, tmax), sdf in beta_df.groupby(["regvar", "bin_tmin", "bin_tmax"]):
+                betas = sdf["beta"].to_numpy(dtype=float)
+                betas = betas[np.isfinite(betas)]
+                if len(betas) < 8:
+                    continue
+                tval, pval = stats.ttest_1samp(betas, 0.0)
+                stats_rows.append({
+                    "regvar": rv,
+                    "bin_tmin": tmin,
+                    "bin_tmax": tmax,
+                    "n_subj": int(len(betas)),
+                    "mean_beta": float(np.mean(betas)),
+                    "sem_beta": float(stats.sem(betas)),
+                    "t": float(tval),
+                    "p": float(pval),
+                })
 
-    print("\nSaved:")
-    print(" ", rp_outdir / "rp_roi_trial_table_by_bin.csv")
-    print(" ", rp_outdir / "rp_roi_condition_means_by_bin.csv")
-    print(" ", rp_outdir / "rp_roi_gluth_subject_betas_by_bin.csv")
-    print(" ", rp_outdir / "rp_roi_gluth_group_stats_by_bin.csv")
-    print(" ", rp_outdir / "rp_roi_subject_waveforms.npy")
-    print(" ", rp_outdir / "rp_roi_times.npy")
+        rp_stats = pd.DataFrame(stats_rows)
 
+        # Bonferroni across all tests (regvar × bin) within THIS set
+        if len(rp_stats) > 0:
+            m = len(rp_stats)
+            rp_stats["p_bonf"] = np.minimum(1.0, rp_stats["p"] * m)
 
+        rp_stats.to_csv(rp_outdir / f"{prefix}rp_gluth_group_stats_by_bin.csv", index=False)
+
+        print("\nSaved for", set_name)
+        print(" ", rp_outdir / f"{prefix}rp_trial_table_by_bin.csv")
+        print(" ", rp_outdir / f"{prefix}rp_condition_means_by_bin.csv")
+        print(" ", rp_outdir / f"{prefix}rp_gluth_subject_betas_by_bin.csv")
+        print(" ", rp_outdir / f"{prefix}rp_gluth_group_stats_by_bin.csv")
+        print(" ", rp_outdir / f"{prefix}rp_subject_waveforms.npy")
+        print(" ", rp_outdir / f"{prefix}rp_times.npy")
 
 #elif version == 12:
     # 9 
