@@ -8827,42 +8827,65 @@ elif version == 34:
 
 
 if version == 35:
-    rp_dir = Path(outpath) / stats_subdir 
+    rp_dir = Path(outpath) / stats_subdir  # Zscoring folder
+    rp_dir.mkdir(parents=True, exist_ok=True)
 
-    betas_csv = rp_dir / "rp_roi_gluth_subject_betas_by_bin.csv"
-    stats_csv = rp_dir / "rp_roi_gluth_group_stats_by_bin.csv"
-    wf_npy    = rp_dir / "rp_roi_subject_waveforms.npy"
-    t_npy     = rp_dir / "rp_roi_times.npy"
+    electrode_sets = [
+        "roi_PzCzCPz",
+        "ch_Cz",
+        "ch_C3",
+        "ch_C4",
+    ]
 
-    if not betas_csv.exists():
-        raise FileNotFoundError(f"Missing: {betas_csv}\nCheck rp_dir={rp_dir} and stats_subdir={stats_subdir}")
+    for set_name in electrode_sets:
+        prefix = f"{set_name}__"
 
-    rp_df = pd.read_csv(betas_csv)
-    rp_stats = pd.read_csv(stats_csv) if stats_csv.exists() else None
+        betas_csv = rp_dir / f"{prefix}rp_gluth_subject_betas_by_bin.csv"
+        stats_csv = rp_dir / f"{prefix}rp_gluth_group_stats_by_bin.csv"
+        wf_npy    = rp_dir / f"{prefix}rp_subject_waveforms.npy"
+        t_npy     = rp_dir / f"{prefix}rp_times.npy"
 
+        if not betas_csv.exists():
+            print(f"[PLOT] Missing betas for {set_name}: {betas_csv}")
+            continue
 
-    if wf_npy.exists() and t_npy.exists():
-        wfs = np.load(wf_npy)  
-        times = np.load(t_npy)
+        rp_df = pd.read_csv(betas_csv)
+        rp_stats = pd.read_csv(stats_csv) if stats_csv.exists() else None
 
-        mean = wfs.mean(axis=0) * 1e6
-        sem  = stats.sem(wfs, axis=0) * 1e6
+        # -----------------------
+        # 1) Grand-average waveform
+        # -----------------------
+        if wf_npy.exists() and t_npy.exists():
+            wfs = np.load(wf_npy)   # (n_subj, n_times) in Volts
+            times = np.load(t_npy)  # (n_times,) in seconds
 
-        fig, ax = plt.subplots(figsize=(4, 2.5))
-        ax.plot(times * 1000, mean, linewidth=2)
-        ax.fill_between(times * 1000, mean - sem, mean + sem, alpha=0.3)
-        ax.axvline(0, linestyle="--", color="gray")
-        ax.axhline(0, linestyle="--", color="gray")
-        ax.set_xlabel("Time from response (ms)")
-        ax.set_ylabel("Amplitude (µV)")
-        ax.set_title("Grand-average RP (response-locked, ROI Pz/Cz/CPz)")
-        fig.tight_layout()
-        fig.savefig(opj(outfigpath, f"{fig_prefix}rp_roi_grand_average_waveform.svg"),
-                    dpi=600, bbox_inches="tight")
+            mean = wfs.mean(axis=0) * 1e6
+            sem  = stats.sem(wfs, axis=0) * 1e6
 
-    if rp_stats is not None and len(rp_stats) > 0:
+            fig, ax = plt.subplots(figsize=(4, 2.5))
+            ax.plot(times * 1000, mean, linewidth=2)
+            ax.fill_between(times * 1000, mean - sem, mean + sem, alpha=0.3)
+            ax.axvline(0, linestyle="--", color="gray")
+            ax.axhline(0, linestyle="--", color="gray")
+            ax.set_xlabel("Time from response (ms)")
+            ax.set_ylabel("Amplitude (µV)")
+            ax.set_title(f"Grand-average RP (response-locked): {set_name}")
+            fig.tight_layout()
+            fig.savefig(
+                opj(outfigpath, f"{fig_prefix}{prefix}rp_grand_average_waveform.svg"),
+                dpi=600, bbox_inches="tight"
+            )
+            plt.close(fig)
+        else:
+            print(f"[PLOT] Missing waveform files for {set_name}: {wf_npy} / {t_npy}")
 
-        # create a nice bin label column
+        # -----------------------
+        # 2) Bin-wise beta bars
+        # -----------------------
+        if rp_stats is None or len(rp_stats) == 0:
+            print(f"[PLOT] No rp_stats for {set_name} (missing or empty): {stats_csv}")
+            continue
+
         rp_stats = rp_stats.copy()
         rp_stats["bin_label"] = rp_stats.apply(
             lambda r: f"{r.bin_tmin:.1f}–{r.bin_tmax:.1f}s", axis=1
@@ -8877,29 +8900,30 @@ if version == 35:
             pvals = sdf["p"].to_numpy()
             pbonf = sdf["p_bonf"].to_numpy() if "p_bonf" in sdf.columns else np.full(len(sdf), np.nan)
 
-            fig, ax = plt.subplots(figsize=(4.2, 2.6))
+            fig, ax = plt.subplots(figsize=(4.4, 2.7))
             ax.bar(x, means, yerr=sems, capsize=4)
             ax.axhline(0, linestyle="--", color="gray")
             ax.set_xticks(x)
             ax.set_xticklabels(sdf["bin_label"].to_list())
             ax.set_ylabel("β (trend; z-predictors)")
-            ax.set_title(f"RP ROI (Pz/Cz/CPz): {regvar}")
+            ax.set_title(f"RP betas ({set_name}): {regvar}")
 
-            # annotate p-values above bars
+            # annotate p-values
             for i in range(len(sdf)):
                 txt = f"p={pvals[i]:.3f}"
                 if np.isfinite(pbonf[i]):
                     txt += f"\nbonf={pbonf[i]:.3f}"
                 ax.text(x[i], means[i], txt, ha="center", va="bottom", fontsize=8)
 
-                # optional star if bonferroni significant
                 if np.isfinite(pbonf[i]) and pbonf[i] < 0.05:
                     ax.text(x[i], means[i], "*", ha="center", va="bottom", fontsize=14)
 
             fig.tight_layout()
-            fig.savefig(opj(outfigpath, f"{fig_prefix}rp_roi_bin_betas_{regvar}.svg"),
-                        dpi=600, bbox_inches="tight")
-            
+            fig.savefig(
+                opj(outfigpath, f"{fig_prefix}{prefix}rp_bin_betas_{regvar}.svg"),
+                dpi=600, bbox_inches="tight"
+            )
+            plt.close(fig)
             
             
 # if version == 11:
