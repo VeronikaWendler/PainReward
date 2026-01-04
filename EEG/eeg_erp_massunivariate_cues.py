@@ -8365,6 +8365,46 @@ if version == 35:
 
     print("\n[RP] saved:",
           rp_outdir / "rp_cz_gluth_subject_betas_by_bin.csv")
+    
+    from scipy import stats
+    
+    stats_rows = []
+    if len(rp_df) > 0:
+        for (regvar, tmin, tmax), subdf in rp_df.groupby(["regvar", "bin_tmin", "bin_tmax"]):
+            betas = subdf["beta"].to_numpy(dtype=float)
+            betas = betas[np.isfinite(betas)]
+            if len(betas) < 8:
+                continue
+            tval, pval = stats.ttest_1samp(betas, 0.0)
+            stats_rows.append({
+                "regvar": regvar,
+                "bin_tmin": tmin,
+                "bin_tmax": tmax,
+                "n_subj": len(betas),
+                "mean_beta": float(np.mean(betas)),
+                "sem_beta": float(stats.sem(betas)),
+                "t": float(tval),
+                "p": float(pval),
+            })
+    
+    rp_stats = pd.DataFrame(stats_rows)
+    
+    # Holm correction within each regvar across bins
+    rp_stats["p_holm"] = np.nan
+    for regvar, sdf in rp_stats.groupby("regvar"):
+        pvals = sdf["p"].to_numpy()
+        order = np.argsort(pvals)
+        m = len(pvals)
+        adj = np.empty(m)
+        for i, idx in enumerate(order):
+            adj[idx] = min(1.0, (m - i) * pvals[idx])
+        # enforce monotonicity
+        adj_sorted = np.maximum.accumulate(adj[order])[np.argsort(order)]
+        rp_stats.loc[sdf.index, "p_holm"] = adj_sorted
+    
+    rp_stats.to_csv(rp_outdir / "rp_cz_gluth_group_stats_by_bin.csv", index=False)
+    print("[RP] saved:", rp_outdir / "rp_cz_gluth_group_stats_by_bin.csv")
+
 
 
 
