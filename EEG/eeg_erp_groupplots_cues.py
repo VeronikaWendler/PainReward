@@ -37,7 +37,7 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 32  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 33  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
@@ -363,7 +363,7 @@ elif version == 33:
 elif version == 34:
     base_v33 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
     outpath = opj(base_v33, "v34_RTresid_then_pain_money")  
-    outfigpath = opj(outpathall, "figures/erps_massuni_sv_cuelong/v38_RTresid_pain_money")
+    outfigpath = opj(outpathall, "figures/erps_massuni_sv_cuelong/v39_RTresid_pain_money")
     os.makedirs(outfigpath, exist_ok=True)
 
     
