@@ -8232,7 +8232,7 @@ if version == 35:
     cz_name = "Cz"
     window = (-0.5, -0.1) 
 
-    rp_epo_dirname = "erps_resp_rp"
+    rp_epo_dirname = "erps_resp"
     rp_epo_suffix = "_decision_resp_singletrials-epo.fif"
 
     rp_outdir = Path(outpath) / "Zscoring"
