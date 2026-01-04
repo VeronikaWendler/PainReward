@@ -37,12 +37,12 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 35  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 36  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
 v14_mode = "joint"
-v35_mode = "separate"
+v36_mode = "separate"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -377,7 +377,18 @@ elif version == 35:
     else:
         raise ValueError("v32_mode must be 'joint' or 'separate'")
     os.makedirs(outfigpath, exist_ok=True)
-
+    
+elif version == 36:
+    base_v36 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
+    if v36_mode == "joint":
+        outpath = opj(base_v36, "v36_rp_joint")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v41_rp_joint")
+    elif v36_mode == "separate":
+        outpath = opj(base_v36, "v36_rp_sep")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v41_rp_sep")
+    else:
+        raise ValueError("v32_mode must be 'joint' or 'separate'")
+    os.makedirs(outfigpath, exist_ok=True)
 else:
     print("No Version")
     
@@ -8926,6 +8937,175 @@ if version == 35:
             plt.close(fig)
             
             
+            
+elif version == 36:
+
+    rp_dir = Path(outpath) / stats_subdir  # your Zscoring folder
+    rp_dir.mkdir(parents=True, exist_ok=True)
+
+    bins = [(-0.4, -0.2), (-0.2, -0.1)]
+    electrode_sets = [
+        "roi_PzCzCPz",
+        "ch_Pz",
+        "ch_Cz",
+        "ch_CPz",
+    ]
+
+    means_csv  = rp_dir / "v36_rp_condition_means_by_bin.csv"
+    slopes_csv = rp_dir / "v36_rp_subject_slopes_by_bin.csv"
+    group_csv  = rp_dir / "v36_group_regress_slopes_on_v_by_bin.csv"
+
+    if not slopes_csv.exists():
+        raise FileNotFoundError(f"Missing: {slopes_csv}")
+    if not group_csv.exists():
+        raise FileNotFoundError(f"Missing: {group_csv}")
+
+    slopes_df = pd.read_csv(slopes_csv)
+    group_df  = pd.read_csv(group_csv)
+    means_df  = pd.read_csv(means_csv) if means_csv.exists() else None
+
+    # helper label
+    def bin_label(tmin, tmax):
+        return f"{tmin:.1f}–{tmax:.1f}s"
+
+
+    for set_name in electrode_sets:
+
+        wf_npy = rp_dir / f"v36_{set_name}__rp_subject_waveforms.npy"
+        t_npy  = rp_dir / f"v36_{set_name}__rp_times.npy"
+
+        if not (wf_npy.exists() and t_npy.exists()):
+            print(f"[V36 PLOT] Missing waveform files for {set_name}: {wf_npy} / {t_npy}")
+            continue
+
+        wfs = np.load(wf_npy)   # (n_subj, n_times) in Volts
+        times = np.load(t_npy)  # seconds
+
+        mean = wfs.mean(axis=0) * 1e6
+        sem  = stats.sem(wfs, axis=0) * 1e6
+
+        fig, ax = plt.subplots(figsize=(4, 2.5))
+        ax.plot(times * 1000, mean, linewidth=2)
+        ax.fill_between(times * 1000, mean - sem, mean + sem, alpha=0.3)
+        ax.axvline(0, linestyle="--", color="gray")
+        ax.axhline(0, linestyle="--", color="gray")
+        ax.set_xlabel("Time from response (ms)")
+        ax.set_ylabel("Amplitude (µV)")
+        ax.set_title(f"Grand-average RP (response-locked): {set_name}")
+        fig.tight_layout()
+        fig.savefig(opj(outfigpath, f"{fig_prefix}v36_{set_name}__rp_grand_average_waveform.svg"),
+                    dpi=600, bbox_inches="tight")
+        plt.close(fig)
+
+
+    group_df = group_df.copy()
+    group_df["bin_label"] = group_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
+
+    for set_name in electrode_sets:
+        sdf_set = group_df[group_df["set"] == set_name].copy()
+        if len(sdf_set) == 0:
+            continue
+
+        for dv in sorted(sdf_set["dv"].unique()):
+            sdf = sdf_set[sdf_set["dv"] == dv].sort_values(["bin_tmin", "bin_tmax"])
+
+            x = np.arange(len(sdf))
+            betas = sdf["beta_z"].to_numpy()
+            pvals = sdf["p"].to_numpy()
+            pbonf = sdf["p_bonf"].to_numpy() if "p_bonf" in sdf.columns else np.full(len(sdf), np.nan)
+
+            fig, ax = plt.subplots(figsize=(4.6, 2.7))
+            ax.bar(x, betas, capsize=4)
+            ax.axhline(0, linestyle="--", color="gray")
+            ax.set_xticks(x)
+            ax.set_xticklabels(sdf["bin_label"].to_list())
+            ax.set_ylabel("β (z; slope ~ v)")
+            ax.set_title(f"V36 slope~v ({set_name}): {dv}")
+
+            for i in range(len(sdf)):
+                txt = f"p={pvals[i]:.3f}"
+                if np.isfinite(pbonf[i]):
+                    txt += f"\nbonf={pbonf[i]:.3f}"
+                ax.text(x[i], betas[i], txt, ha="center", va="bottom", fontsize=8)
+
+                if np.isfinite(pbonf[i]) and pbonf[i] < 0.05:
+                    ax.text(x[i], betas[i], "*", ha="center", va="bottom", fontsize=14)
+
+            fig.tight_layout()
+            fig.savefig(opj(outfigpath, f"{fig_prefix}v36_{set_name}__group_beta_{dv}.svg"),
+                        dpi=600, bbox_inches="tight")
+            plt.close(fig)
+
+
+    slopes_df = slopes_df.copy()
+    slopes_df["bin_label"] = slopes_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
+
+    # mapping dv -> predictor column
+    dv_to_pred = {
+        "slope_rp_vs_painlevel": "v_painlevel",
+        "slope_rp_vs_moneylevel": "v_moneylevel",
+    }
+
+    for set_name in electrode_sets:
+        sdf_set = slopes_df[slopes_df["set"] == set_name].copy()
+        if len(sdf_set) == 0:
+            continue
+
+        for (tmin, tmax), sdf_bin in sdf_set.groupby(["bin_tmin", "bin_tmax"]):
+            for dv, pred in dv_to_pred.items():
+
+                if dv not in sdf_bin.columns or pred not in sdf_bin.columns:
+                    continue
+
+                x = sdf_bin[pred].to_numpy(dtype=float)
+                y = sdf_bin[dv].to_numpy(dtype=float)
+                keep = np.isfinite(x) & np.isfinite(y)
+                if keep.sum() < 8:
+                    continue
+
+                # correlation for annotation (simple + transparent)
+                r, p = stats.pearsonr(x[keep], y[keep])
+
+                fig, ax = plt.subplots(figsize=(3.6, 3.0))
+                ax.scatter(x[keep], y[keep])
+                ax.set_xlabel(pred)
+                ax.set_ylabel(dv)
+                ax.set_title(f"{set_name} {bin_label(tmin,tmax)}\nr={r:.2f}, p={p:.3f}")
+
+                fig.tight_layout()
+                fig.savefig(opj(outfigpath, f"{fig_prefix}v36_{set_name}__scatter_{dv}__{tmin:.2f}_{tmax:.2f}.svg"),
+                            dpi=600, bbox_inches="tight")
+                plt.close(fig)
+
+
+    if means_df is not None and len(means_df) > 0:
+        means_df = means_df.copy()
+        means_df["bin_label"] = means_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
+
+        for set_name in electrode_sets:
+            sdf_set = means_df[means_df["set"] == set_name].copy()
+            if len(sdf_set) == 0:
+                continue
+
+            for factor in ["painlevel", "moneylevel"]:
+                sdf_fac = sdf_set[sdf_set["factor"] == factor].copy()
+                if len(sdf_fac) == 0:
+                    continue
+
+                for (tmin, tmax), sdf_bin in sdf_fac.groupby(["bin_tmin", "bin_tmax"]):
+                    # group mean over subjects for each level
+                    g = sdf_bin.groupby("level")["rp_amp_uV"].agg(["mean", "sem"]).reset_index().sort_values("level")
+
+                    fig, ax = plt.subplots(figsize=(4.0, 2.7))
+                    ax.errorbar(g["level"], g["mean"], yerr=g["sem"], marker="o")
+                    ax.axhline(0, linestyle="--", color="gray")
+                    ax.set_xlabel(f"{factor} (level)")
+                    ax.set_ylabel("RP amplitude (µV)")
+                    ax.set_title(f"{set_name} {bin_label(tmin,tmax)}: RP vs {factor}")
+                    fig.tight_layout()
+                    fig.savefig(opj(outfigpath, f"{fig_prefix}v36_{set_name}__curve_{factor}__{tmin:.2f}_{tmax:.2f}.svg"),
+                                dpi=600, bbox_inches="tight")
+                    plt.close(fig)
 # if version == 11:
 #     from scipy.stats import ttest_1samp
 #     from statsmodels.stats.multitest import fdrcorrection
