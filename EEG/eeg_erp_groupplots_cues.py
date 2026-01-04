@@ -37,12 +37,12 @@ layout = BIDSLayout(inpath)
 part = pd.read_csv(opj(inpath, 'participants.tsv'), sep='\t')
 layout = BIDSLayout(outpathall)
 
-version = 34  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
+version = 35  # 1 for decision phase, 2 for passive phase, 3 = decision RT + 3 GLMs
 
 v13_mode = "joint"   # "separate" or "joint"
 v11_mode = "joint"
 v14_mode = "joint"
-v32_mode = "joint"
+v35_mode = "separate"
 
 # noz     - NO_Zscoring      (raw regressors + raw RT)
 # z       - Zscoring         (z-scored regressors + z-scored RT)
@@ -366,7 +366,18 @@ elif version == 34:
     outfigpath = opj(outpathall, "figures/erps_massuni_sv_cuelong/v39_RTresid_pain_money")
     os.makedirs(outfigpath, exist_ok=True)
 
-    
+elif version == 35:
+    base_v35 = opj(outpathall, "statistics_new/erps_massuni_sv_cuelong")
+    if v35_mode == "joint":
+        outpath = opj(base_v35, "v35_rp_joint")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v40_rp_joint")
+    elif v35_mode == "separate":
+        outpath = opj(base_v35, "v35_rp_sep")
+        outfigpath = opj(outpathall, "figures/erps_massuni_drift_sv_subsetOV/v40_rp_sep")
+    else:
+        raise ValueError("v32_mode must be 'joint' or 'separate'")
+    os.makedirs(outfigpath, exist_ok=True)
+
 else:
     print("No Version")
     
@@ -408,8 +419,8 @@ plt.rcParams['font.family'] = 'DejaVu Sans'
 # Regressor bookkeeping – must match massunivariate script
 # -----------------------------------------------------------------------------------------------------------------
 
-regvars = ['painlevel', 'moneylevel', 'interaction']
-regvarsnames = ['Pain', 'Money', 'Interaction']
+regvars = ['painlevel', 'moneylevel', 'sv_pain_para']
+regvarsnames = ['Pain', 'Money', 'SV_pain_para']
 
 # full_regvars = [
 #     'painlevel', 'moneylevel', 'interaction',
@@ -8812,6 +8823,61 @@ elif version == 34:
                 opj(outfigpath, f"{fig_prefix}v33_beta_meanSEM_{reg_beta}_{c}.svg"),
                 dpi=600, bbox_inches="tight"
             )
+
+if version == 35:
+    rp_dir = Path(outpath) / stats_subdir  # same as your outpath_glm
+    betas_csv = rp_dir / "rp_cz_gluth_subject_betas_by_bin.csv"
+    stats_csv = rp_dir / "rp_cz_gluth_group_stats_by_bin.csv"
+    wf_npy = rp_dir / "rp_cz_subject_waveforms.npy"
+    t_npy = rp_dir / "rp_cz_times.npy"
+
+    rp_df = pd.read_csv(betas_csv)
+    rp_stats = pd.read_csv(stats_csv)
+
+    # 1) Grand-average RP waveform at Cz
+    if wf_npy.exists() and t_npy.exists():
+        wfs = np.load(wf_npy)       # (n_subj, n_times)
+        times = np.load(t_npy)      # (n_times,)
+        mean = wfs.mean(axis=0) * 1e6
+        sem = stats.sem(wfs, axis=0) * 1e6
+
+        fig, ax = plt.subplots(figsize=(4, 2.5))
+        ax.plot(times * 1000, mean, linewidth=2)
+        ax.fill_between(times * 1000, mean - sem, mean + sem, alpha=0.3)
+        ax.axvline(0, linestyle="--", color="gray")
+        ax.axhline(0, linestyle="--", color="gray")
+        ax.set_xlabel("Time from response (ms)")
+        ax.set_ylabel("Cz amplitude (µV)")
+        ax.set_title("Grand-average RP at Cz (response-locked)")
+        fig.tight_layout()
+        fig.savefig(opj(outfigpath, f"{fig_prefix}rp_cz_grand_average_waveform.svg"),
+                    dpi=600, bbox_inches="tight")
+
+    for regvar in rp_df["regvar"].unique():
+        sdf = rp_stats[rp_stats["regvar"] == regvar].copy()
+        if len(sdf) == 0:
+            continue
+
+        # x labels
+        sdf["bin_label"] = sdf.apply(lambda r: f"{r.bin_tmin:.1f}–{r.bin_tmax:.1f}s", axis=1)
+
+        fig, ax = plt.subplots(figsize=(4, 2.5))
+        x = np.arange(len(sdf))
+        ax.bar(x, sdf["mean_beta"].values, yerr=sdf["sem_beta"].values, capsize=3)
+        ax.axhline(0, linestyle="--", color="gray")
+        ax.set_xticks(x)
+        ax.set_xticklabels(sdf["bin_label"].values, rotation=0)
+        ax.set_ylabel("β (z-EEG units)")
+        ax.set_title(f"RP @ Cz: {regvar} effect (bins)")
+
+        # mark Holm-significant bins
+        for i, p_holm in enumerate(sdf["p_holm"].values):
+            if np.isfinite(p_holm) and p_holm < 0.05:
+                ax.text(i, sdf["mean_beta"].iloc[i], "*", ha="center", va="bottom", fontsize=14)
+
+        fig.tight_layout()
+        fig.savefig(opj(outfigpath, f"{fig_prefix}rp_cz_bin_betas_{regvar}.svg"),
+                    dpi=600, bbox_inches="tight")
 
 # if version == 11:
 #     from scipy.stats import ttest_1samp
