@@ -8940,37 +8940,39 @@ if version == 35:
             
 elif version == 36:
 
+    import numpy as np
+    import pandas as pd
+    from scipy import stats
+    import matplotlib.pyplot as plt
+    from pathlib import Path
+
     rp_dir = Path(outpath) / stats_subdir  # your Zscoring folder
     rp_dir.mkdir(parents=True, exist_ok=True)
 
-    bins = [(-0.4, -0.2), (-0.2, -0.1)]
     electrode_sets = [
         "roi_PzCzCPz",
         "ch_Pz",
         "ch_Cz",
         "ch_CPz",
+        "ch_C3",
+        "ch_C4",
     ]
 
-    means_csv  = rp_dir / "v36_rp_condition_means_by_bin.csv"
-    slopes_csv = rp_dir / "v36_rp_subject_slopes_by_bin.csv"
-    group_csv  = rp_dir / "v36_group_regress_slopes_on_v_by_bin.csv"
+    subj_csv  = rp_dir / "v36_subject_level_rp_means_by_bin.csv"
+    group_csv = rp_dir / "v36_group_regress_rp_on_v_by_bin.csv"
 
-    if not slopes_csv.exists():
-        raise FileNotFoundError(f"Missing: {slopes_csv}")
+    if not subj_csv.exists():
+        raise FileNotFoundError(f"Missing: {subj_csv}")
     if not group_csv.exists():
         raise FileNotFoundError(f"Missing: {group_csv}")
 
-    slopes_df = pd.read_csv(slopes_csv)
-    group_df  = pd.read_csv(group_csv)
-    means_df  = pd.read_csv(means_csv) if means_csv.exists() else None
+    subj_df  = pd.read_csv(subj_csv)
+    group_df = pd.read_csv(group_csv)
 
-    # helper label
     def bin_label(tmin, tmax):
         return f"{tmin:.1f}–{tmax:.1f}s"
 
-
     for set_name in electrode_sets:
-
         wf_npy = rp_dir / f"v36_{set_name}__rp_subject_waveforms.npy"
         t_npy  = rp_dir / f"v36_{set_name}__rp_times.npy"
 
@@ -8997,115 +8999,109 @@ elif version == 36:
                     dpi=600, bbox_inches="tight")
         plt.close(fig)
 
-
     group_df = group_df.copy()
     group_df["bin_label"] = group_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
 
+    # plot separately for each electrode set AND each predictor
     for set_name in electrode_sets:
         sdf_set = group_df[group_df["set"] == set_name].copy()
         if len(sdf_set) == 0:
             continue
 
-        for dv in sorted(sdf_set["dv"].unique()):
-            sdf = sdf_set[sdf_set["dv"] == dv].sort_values(["bin_tmin", "bin_tmax"])
+        for predictor in sorted(sdf_set["predictor"].unique()):
 
-            x = np.arange(len(sdf))
-            betas = sdf["beta_z"].to_numpy()
-            pvals = sdf["p"].to_numpy()
-            pbonf = sdf["p_bonf"].to_numpy() if "p_bonf" in sdf.columns else np.full(len(sdf), np.nan)
+            sdf_pred = sdf_set[sdf_set["predictor"] == predictor].copy()
+            if len(sdf_pred) == 0:
+                continue
 
-            fig, ax = plt.subplots(figsize=(4.6, 2.7))
-            ax.bar(x, betas, capsize=4)
+            # If you kept both models, we plot separate + joint side-by-side per bin.
+            models = sorted(sdf_pred["model"].unique())  # e.g. ["joint","separate"]
+
+            # order bins
+            bins_sorted = (
+                sdf_pred[["bin_tmin", "bin_tmax", "bin_label"]]
+                .drop_duplicates()
+                .sort_values(["bin_tmin", "bin_tmax"])
+            )
+            bin_labels = bins_sorted["bin_label"].to_list()
+            x = np.arange(len(bin_labels))
+
+            fig, ax = plt.subplots(figsize=(5.2, 2.8))
+            width = 0.35 if len(models) > 1 else 0.6
+
+            for mi, model in enumerate(models):
+                sdf_m = sdf_pred[sdf_pred["model"] == model].merge(
+                    bins_sorted, on=["bin_tmin", "bin_tmax", "bin_label"], how="right"
+                )
+
+                betas = sdf_m["beta_z"].to_numpy(dtype=float)
+                pvals = sdf_m["p"].to_numpy(dtype=float)
+                pbonf = sdf_m["p_bonf"].to_numpy(dtype=float) if "p_bonf" in sdf_m.columns else np.full_like(betas, np.nan)
+
+                # positions
+                offset = (mi - (len(models)-1)/2) * width
+                xpos = x + offset
+
+                ax.bar(xpos, betas, width=width, label=model)
+
+                # annotate p-values
+                for i in range(len(betas)):
+                    if not np.isfinite(betas[i]):
+                        continue
+                    txt = f"p={pvals[i]:.3f}"
+                    if np.isfinite(pbonf[i]):
+                        txt += f"\nbonf={pbonf[i]:.3f}"
+                    ax.text(xpos[i], betas[i], txt, ha="center", va="bottom", fontsize=7)
+
+                    if np.isfinite(pbonf[i]) and pbonf[i] < 0.05:
+                        ax.text(xpos[i], betas[i], "*", ha="center", va="bottom", fontsize=14)
+
             ax.axhline(0, linestyle="--", color="gray")
             ax.set_xticks(x)
-            ax.set_xticklabels(sdf["bin_label"].to_list())
-            ax.set_ylabel("β (z; slope ~ v)")
-            ax.set_title(f"V36 slope~v ({set_name}): {dv}")
-
-            for i in range(len(sdf)):
-                txt = f"p={pvals[i]:.3f}"
-                if np.isfinite(pbonf[i]):
-                    txt += f"\nbonf={pbonf[i]:.3f}"
-                ax.text(x[i], betas[i], txt, ha="center", va="bottom", fontsize=8)
-
-                if np.isfinite(pbonf[i]) and pbonf[i] < 0.05:
-                    ax.text(x[i], betas[i], "*", ha="center", va="bottom", fontsize=14)
-
+            ax.set_xticklabels(bin_labels)
+            ax.set_ylabel("β (standardized)")
+            ax.set_title(f"V36: RP_mean_uV ~ {predictor}\n{set_name}")
+            ax.legend(frameon=False)
             fig.tight_layout()
-            fig.savefig(opj(outfigpath, f"{fig_prefix}v36_{set_name}__group_beta_{dv}.svg"),
+            fig.savefig(opj(outfigpath, f"{fig_prefix}v36_{set_name}__betas_{predictor}.svg"),
                         dpi=600, bbox_inches="tight")
             plt.close(fig)
 
 
-    slopes_df = slopes_df.copy()
-    slopes_df["bin_label"] = slopes_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
+    # pick only predictors that exist in subj_df
+    predictors_in_subj = [c for c in ["v_painlevel_subj", "v_moneylevel_subj"] if c in subj_df.columns]
 
-    # mapping dv -> predictor column
-    dv_to_pred = {
-        "slope_rp_vs_painlevel": "v_painlevel",
-        "slope_rp_vs_moneylevel": "v_moneylevel",
-    }
+    subj_df = subj_df.copy()
+    subj_df["bin_label"] = subj_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
 
     for set_name in electrode_sets:
-        sdf_set = slopes_df[slopes_df["set"] == set_name].copy()
+        sdf_set = subj_df[subj_df["set"] == set_name].copy()
         if len(sdf_set) == 0:
             continue
 
         for (tmin, tmax), sdf_bin in sdf_set.groupby(["bin_tmin", "bin_tmax"]):
-            for dv, pred in dv_to_pred.items():
-
-                if dv not in sdf_bin.columns or pred not in sdf_bin.columns:
-                    continue
+            for pred in predictors_in_subj:
 
                 x = sdf_bin[pred].to_numpy(dtype=float)
-                y = sdf_bin[dv].to_numpy(dtype=float)
+                y = sdf_bin["rp_mean_uV"].to_numpy(dtype=float)
                 keep = np.isfinite(x) & np.isfinite(y)
+
                 if keep.sum() < 8:
                     continue
 
-                # correlation for annotation (simple + transparent)
                 r, p = stats.pearsonr(x[keep], y[keep])
 
-                fig, ax = plt.subplots(figsize=(3.6, 3.0))
+                fig, ax = plt.subplots(figsize=(3.6, 3.1))
                 ax.scatter(x[keep], y[keep])
                 ax.set_xlabel(pred)
-                ax.set_ylabel(dv)
+                ax.set_ylabel("RP mean (µV)")
                 ax.set_title(f"{set_name} {bin_label(tmin,tmax)}\nr={r:.2f}, p={p:.3f}")
-
                 fig.tight_layout()
-                fig.savefig(opj(outfigpath, f"{fig_prefix}v36_{set_name}__scatter_{dv}__{tmin:.2f}_{tmax:.2f}.svg"),
+                fig.savefig(opj(outfigpath,
+                                f"{fig_prefix}v36_{set_name}__scatter_rpmean__{pred}__{tmin:.2f}_{tmax:.2f}.svg"),
                             dpi=600, bbox_inches="tight")
                 plt.close(fig)
 
-
-    if means_df is not None and len(means_df) > 0:
-        means_df = means_df.copy()
-        means_df["bin_label"] = means_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
-
-        for set_name in electrode_sets:
-            sdf_set = means_df[means_df["set"] == set_name].copy()
-            if len(sdf_set) == 0:
-                continue
-
-            for factor in ["painlevel", "moneylevel"]:
-                sdf_fac = sdf_set[sdf_set["factor"] == factor].copy()
-                if len(sdf_fac) == 0:
-                    continue
-
-                for (tmin, tmax), sdf_bin in sdf_fac.groupby(["bin_tmin", "bin_tmax"]):
-                    # group mean over subjects for each level
-                    g = sdf_bin.groupby("level")["rp_amp_uV"].agg(["mean", "sem"]).reset_index().sort_values("level")
-
-                    fig, ax = plt.subplots(figsize=(4.0, 2.7))
-                    ax.errorbar(g["level"], g["mean"], yerr=g["sem"], marker="o")
-                    ax.axhline(0, linestyle="--", color="gray")
-                    ax.set_xlabel(f"{factor} (level)")
-                    ax.set_ylabel("RP amplitude (µV)")
-                    ax.set_title(f"{set_name} {bin_label(tmin,tmax)}: RP vs {factor}")
-                    fig.tight_layout()
-                    fig.savefig(opj(outfigpath, f"{fig_prefix}v36_{set_name}__curve_{factor}__{tmin:.2f}_{tmax:.2f}.svg"),
-                                dpi=600, bbox_inches="tight")
-                    plt.close(fig)
 # if version == 11:
 #     from scipy.stats import ttest_1samp
 #     from statsmodels.stats.multitest import fdrcorrection
