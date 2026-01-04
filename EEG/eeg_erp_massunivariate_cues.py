@@ -621,6 +621,25 @@ def gluth_style_subject_beta(rp_amp, mod2, regvar, rt_col="rt"):
     return float(beta[1]), int(len(y))
 
 
+def extract_bin_amplitudes_roi(epo, roi_chs=("Pz", "Cz", "CPz"), bins=((-0.4,-0.2), (-0.2,-0.1)), min_chs=1):
+    present = [ch for ch in roi_chs if ch in epo.ch_names]
+    if len(present) < min_chs:
+        raise ValueError(f"ROI channels not found. Wanted {roi_chs}, found {present}")
+
+    e = epo.copy().pick_channels(present)
+    data = e.get_data()      # (n_trials, n_ch, n_times)
+    times = e.times
+
+    out = {}  # (tmin, tmax) -> (n_trials,)
+    for (tmin, tmax) in bins:
+        tidx = np.where((times >= tmin) & (times <= tmax))[0]
+        if len(tidx) < 3:
+            raise ValueError(f"Too few samples in bin {(tmin, tmax)}")
+        out[(tmin, tmax)] = data[:, :, tidx].mean(axis=2).mean(axis=1)  # mean over time then channels
+
+    return out, present
+
+
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Massunivariate Regression with 3 GLMs
 #
@@ -8196,12 +8215,12 @@ elif version == 34:
 
 
 
-
 if version == 35:
-    regvars  = ["painlevel", "moneylevel"]   
-    window   = (-0.5, -0.1)
+
+    regvars  = ["painlevel", "moneylevel"]
+    bins     = [(-0.4, -0.2), (-0.2, -0.1)]   
     rt_col   = "rt"
-    roi_chs  = ("FCz", "Cz", "CPz")
+    roi_chs  = ("Pz", "Cz", "CPz")
 
     rp_epo_dirname = "erps_resp_rp"
     rp_epo_suffix  = "_decision_resp_rp_singletrials-epo.fif"
@@ -8209,16 +8228,17 @@ if version == 35:
     rp_outdir = Path(outpath) / "Zscoring"
     rp_outdir.mkdir(parents=True, exist_ok=True)
 
-    trial_rows = []   # for R mixed model
-    mean_rows  = []   # ERP style condition means
-    beta_rows  = []   # Gluth-style subject betas (numeric trend)
-    rp_waveforms = []
-    rp_times = None
+    # outputs
+    trial_rows   = []   # for R mixed model: one row per TRIAL × BIN
+    mean_rows    = []   # ERP-style per subject means (per BIN)
+    beta_rows    = []   # Gluth-style subject betas (numeric trend) per BIN
+    rp_waveforms = []   # per subject ROI-mean waveform (for RP presence plot)
+    rp_times     = None
 
     included, skipped = [], []
 
     for pa in part:
-        print(f"\n[RP single-window ROI] {pa}")
+        print(f"\n[RP ROI bins] {pa}")
 
         epo_path = os.path.join(basepath, pa, "eeg", rp_epo_dirname, f"{pa}{rp_epo_suffix}")
         if not os.path.exists(epo_path):
@@ -8231,7 +8251,7 @@ if version == 35:
         # behavioral alignment
         mod2 = trial_map[trial_map["participant_id"] == pa].copy()
 
-        # safety: epochs might have no metadata
+        # align by trialsnum if possible
         if epo.metadata is not None and ("trialsnum" in epo.metadata.columns) and ("trialsnum" in mod2.columns):
             keep = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
             epo = epo[keep]
@@ -8250,97 +8270,121 @@ if version == 35:
             skipped.append(pa)
             continue
 
-        # ---- RP amplitude per trial in window, ROI-averaged ----
-        rp_amp, roi_used = extract_window_amplitude_roi(epo, roi_chs=roi_chs, window=window, min_chs=1)
+        # ---- ROI RP amplitudes per trial per bin ----
+        rp_amp_by_bin, roi_used = extract_bin_amplitudes_roi(
+            epo,
+            roi_chs=roi_chs,
+            bins=bins,
+            min_chs=1
+        )
 
-        ev = epo.copy().pick_channels(list(roi_used)).average()
-        rp_waveforms.append(ev.data.mean(axis=0))   # mean across ROI channels
-        rp_times = ev.times if rp_times is None else rp_times
+        # ---- store subject-average ROI waveform (RP presence) ----
+        ev_roi = epo.copy().pick_channels(list(roi_used)).average()
+        # average across ROI channels -> (n_times,)
+        subj_wave = ev_roi.data.mean(axis=0)
+        rp_waveforms.append(subj_wave)
+        rp_times = ev_roi.times if rp_times is None else rp_times
 
-        # ---- Trial-level export (for R LMM) ----
-        for i in range(len(epo)):
-            row = {
-                "participant": pa,
-                "trial_index": i,
-                "rp_amp_uV": float(rp_amp[i] * 1e6),
-                "rt": float(mod2.iloc[i][rt_col]) if rt_col in mod2.columns else np.nan,
-                "roi_used": "+".join(roi_used),
-            }
-            for rv in regvars:
-                row[rv] = mod2.iloc[i][rv] if rv in mod2.columns else np.nan
-            trial_rows.append(row)
+        # ---- Trial-level export (for R LMM): one row per trial × bin ----
+        for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
+            for i in range(len(epo)):
+                row = {
+                    "participant": pa,
+                    "trial_index": i,
+                    "bin_tmin": tmin,
+                    "bin_tmax": tmax,
+                    "rp_amp_uV": float(rp_amp[i] * 1e6),
+                    "rt": float(mod2.iloc[i][rt_col]) if rt_col in mod2.columns else np.nan,
+                    "roi_used": "+".join(roi_used),
+                }
+                for rv in regvars:
+                    row[rv] = mod2.iloc[i][rv] if rv in mod2.columns else np.nan
+                trial_rows.append(row)
 
-        # ---- ERP-style means (per subject) ----
-        # painlevel means
-        if "painlevel" in mod2.columns:
-            for lvl in sorted(pd.unique(mod2["painlevel"].dropna())):
-                idx = np.where(mod2["painlevel"].to_numpy() == lvl)[0]
-                if len(idx) >= 3:
-                    mean_rows.append({
-                        "participant": pa,
-                        "factor": "painlevel",
-                        "level": lvl,
-                        "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
-                        "n_trials": int(len(idx)),
-                        "roi_used": "+".join(roi_used),
-                    })
+        # ---- ERP-style condition means (per subject × bin) ----
+        for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
 
-        # moneylevel means
-        if "moneylevel" in mod2.columns:
-            for lvl in sorted(pd.unique(mod2["moneylevel"].dropna())):
-                idx = np.where(mod2["moneylevel"].to_numpy() == lvl)[0]
-                if len(idx) >= 3:
-                    mean_rows.append({
-                        "participant": pa,
-                        "factor": "moneylevel",
-                        "level": lvl,
-                        "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
-                        "n_trials": int(len(idx)),
-                        "roi_used": "+".join(roi_used),
-                    })
-
-        # optional 5x5 cell means
-        if ("painlevel" in mod2.columns) and ("moneylevel" in mod2.columns):
-            for pl in sorted(pd.unique(mod2["painlevel"].dropna())):
-                for ml in sorted(pd.unique(mod2["moneylevel"].dropna())):
-                    idx = np.where((mod2["painlevel"].to_numpy() == pl) & (mod2["moneylevel"].to_numpy() == ml))[0]
+            # pain means
+            if "painlevel" in mod2.columns:
+                for lvl in sorted(pd.unique(mod2["painlevel"].dropna())):
+                    idx = np.where(mod2["painlevel"].to_numpy() == lvl)[0]
                     if len(idx) >= 3:
                         mean_rows.append({
                             "participant": pa,
-                            "factor": "pain_x_money",
-                            "painlevel": pl,
-                            "moneylevel": ml,
+                            "factor": "painlevel",
+                            "level": lvl,
+                            "bin_tmin": tmin,
+                            "bin_tmax": tmax,
                             "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
                             "n_trials": int(len(idx)),
                             "roi_used": "+".join(roi_used),
                         })
 
-        # ---- Gluth-style subject betas (numeric trend) ----
-        for rv in regvars:
-            if rv not in mod2.columns or rt_col not in mod2.columns:
-                continue
-            b, n_used = gluth_style_subject_beta(rp_amp, mod2, regvar=rv, rt_col=rt_col)
-            beta_rows.append({
-                "participant": pa,
-                "regvar": rv,
-                "window_tmin": window[0],
-                "window_tmax": window[1],
-                "beta": b,
-                "n_trials_used": n_used,
-                "roi_used": "+".join(roi_used),
-            })
+            # money means
+            if "moneylevel" in mod2.columns:
+                for lvl in sorted(pd.unique(mod2["moneylevel"].dropna())):
+                    idx = np.where(mod2["moneylevel"].to_numpy() == lvl)[0]
+                    if len(idx) >= 3:
+                        mean_rows.append({
+                            "participant": pa,
+                            "factor": "moneylevel",
+                            "level": lvl,
+                            "bin_tmin": tmin,
+                            "bin_tmax": tmax,
+                            "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
+                            "n_trials": int(len(idx)),
+                            "roi_used": "+".join(roi_used),
+                        })
+
+            # optional 5×5 cell means
+            if ("painlevel" in mod2.columns) and ("moneylevel" in mod2.columns):
+                for pl in sorted(pd.unique(mod2["painlevel"].dropna())):
+                    for ml in sorted(pd.unique(mod2["moneylevel"].dropna())):
+                        idx = np.where(
+                            (mod2["painlevel"].to_numpy() == pl) &
+                            (mod2["moneylevel"].to_numpy() == ml)
+                        )[0]
+                        if len(idx) >= 3:
+                            mean_rows.append({
+                                "participant": pa,
+                                "factor": "pain_x_money",
+                                "painlevel": pl,
+                                "moneylevel": ml,
+                                "bin_tmin": tmin,
+                                "bin_tmax": tmax,
+                                "rp_amp_uV": float(np.mean(rp_amp[idx]) * 1e6),
+                                "n_trials": int(len(idx)),
+                                "roi_used": "+".join(roi_used),
+                            })
+
+        # ---- Gluth-style subject betas (numeric trend) per bin ----
+        if rt_col in mod2.columns:
+            for (tmin, tmax), rp_amp in rp_amp_by_bin.items():
+                for rv in regvars:
+                    if rv not in mod2.columns:
+                        continue
+                    b, n_used = gluth_style_subject_beta(rp_amp, mod2, regvar=rv, rt_col=rt_col)
+                    beta_rows.append({
+                        "participant": pa,
+                        "regvar": rv,
+                        "bin_tmin": tmin,
+                        "bin_tmax": tmax,
+                        "beta": b,
+                        "n_trials_used": n_used,
+                        "roi_used": "+".join(roi_used),
+                    })
 
         included.append(pa)
 
     # ---- Save files ----
     trial_df = pd.DataFrame(trial_rows)
-    trial_df.to_csv(rp_outdir / "rp_roi_trial_table_single_window.csv", index=False)
+    trial_df.to_csv(rp_outdir / "rp_roi_trial_table_by_bin.csv", index=False)
 
     means_df = pd.DataFrame(mean_rows)
-    means_df.to_csv(rp_outdir / "rp_roi_condition_means_single_window.csv", index=False)
+    means_df.to_csv(rp_outdir / "rp_roi_condition_means_by_bin.csv", index=False)
 
     beta_df = pd.DataFrame(beta_rows)
-    beta_df.to_csv(rp_outdir / "rp_roi_gluth_subject_betas_single_window.csv", index=False)
+    beta_df.to_csv(rp_outdir / "rp_roi_gluth_subject_betas_by_bin.csv", index=False)
 
     if len(rp_waveforms) > 0:
         rp_waveforms = np.vstack(rp_waveforms)  # (n_subj, n_times)
@@ -8350,17 +8394,19 @@ if version == 35:
     np.save(rp_outdir / "rp_included_subjects.npy", np.array(included, dtype=object))
     np.save(rp_outdir / "rp_skipped_subjects.npy", np.array(skipped, dtype=object))
 
-    # ---- Group stats on betas (one-sample t-test) ----
-    rp_stats = []
+    # ---- Group stats on betas: one-sample t-test per regvar × bin ----
+    stats_rows = []
     if len(beta_df) > 0:
-        for rv, sdf in beta_df.groupby("regvar"):
+        for (rv, tmin, tmax), sdf in beta_df.groupby(["regvar", "bin_tmin", "bin_tmax"]):
             betas = sdf["beta"].to_numpy(dtype=float)
             betas = betas[np.isfinite(betas)]
             if len(betas) < 8:
                 continue
             tval, pval = stats.ttest_1samp(betas, 0.0)
-            rp_stats.append({
+            stats_rows.append({
                 "regvar": rv,
+                "bin_tmin": tmin,
+                "bin_tmax": tmax,
                 "n_subj": int(len(betas)),
                 "mean_beta": float(np.mean(betas)),
                 "sem_beta": float(stats.sem(betas)),
@@ -8368,22 +8414,22 @@ if version == 35:
                 "p": float(pval),
             })
 
-    rp_stats = pd.DataFrame(rp_stats)
+    rp_stats = pd.DataFrame(stats_rows)
 
-    # Bonferroni across regvars (ONE window)
+    # Bonferroni across all tests (regvar × bin)
     if len(rp_stats) > 0:
         m = len(rp_stats)
         rp_stats["p_bonf"] = np.minimum(1.0, rp_stats["p"] * m)
 
-    rp_stats.to_csv(rp_outdir / "rp_roi_gluth_group_stats_single_window.csv", index=False)
+    rp_stats.to_csv(rp_outdir / "rp_roi_gluth_group_stats_by_bin.csv", index=False)
 
     print("\nSaved:")
-    print(" ", rp_outdir / "rp_roi_trial_table_single_window.csv")
-    print(" ", rp_outdir / "rp_roi_condition_means_single_window.csv")
-    print(" ", rp_outdir / "rp_roi_gluth_subject_betas_single_window.csv")
-    print(" ", rp_outdir / "rp_roi_gluth_group_stats_single_window.csv")
-
-
+    print(" ", rp_outdir / "rp_roi_trial_table_by_bin.csv")
+    print(" ", rp_outdir / "rp_roi_condition_means_by_bin.csv")
+    print(" ", rp_outdir / "rp_roi_gluth_subject_betas_by_bin.csv")
+    print(" ", rp_outdir / "rp_roi_gluth_group_stats_by_bin.csv")
+    print(" ", rp_outdir / "rp_roi_subject_waveforms.npy")
+    print(" ", rp_outdir / "rp_roi_times.npy")
 
 
 
