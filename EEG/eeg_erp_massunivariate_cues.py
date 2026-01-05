@@ -11401,7 +11401,6 @@ elif version == 45:
     electrode_sets = {
         "roi_CzCPzCP2CP1C2C1FC1FC2FCz": roi_chs,
 
-        # single-channel "ch_" versions for each ROI electrode
         "ch_Cz":  ("Cz",),
         "ch_CPz": ("CPz",),
         "ch_CP2": ("CP2",),
@@ -11417,10 +11416,10 @@ elif version == 45:
     # a regressors (subject-level, constant within subject)
     a_pain_col  = "a_painlevel_subj"
     a_money_col = "a_moneylevel_subj"
-    a_int_col   = "a_interaction_subj"   # <-- assumes this exists in the a-model trial_map_a
+    a_int_col   = "a_interaction_subj"    
     predictors  = [a_pain_col, a_money_col, a_int_col]
 
-    # RT covariate
+    # RT covariate (computed from matched trial rows)
     rt_col = "rt"
     rt_summary = "median"  # "median" or "mean"
 
@@ -11435,12 +11434,6 @@ elif version == 45:
     # HELPERS
     # -----------------------
     def ols_with_t(X, y):
-        """
-        OLS + t-tests.
-        X: (n, p) with intercept
-        y: (n,)
-        returns: beta, tvals, pvals, df_resid
-        """
         X = np.asarray(X, float)
         y = np.asarray(y, float)
 
@@ -11469,10 +11462,6 @@ elif version == 45:
         return stats.zscore(x, nan_policy="omit")
 
     def group_regress_with_cov(y, x, cov):
-        """
-        y ~ z(x) + z(cov) (+ intercept)
-        Returns t, p, beta_z, n (for x)
-        """
         y = np.asarray(y, float)
         x = np.asarray(x, float)
         cov = np.asarray(cov, float)
@@ -11488,18 +11477,17 @@ elif version == 45:
         return float(tvals[1]), float(pvals[1]), float(beta[1]), n
 
     def group_regress_joint3_with_cov(y, x1, x2, x3, cov):
-        """
-        y ~ z(x1) + z(x2) + z(x3) + z(cov) (+ intercept)
-        Returns stats for x1, x2, x3 (unique effects):
-          t1,p1,b1, t2,p2,b2, t3,p3,b3, n
-        """
         y = np.asarray(y, float)
         x1 = np.asarray(x1, float)
         x2 = np.asarray(x2, float)
         x3 = np.asarray(x3, float)
         cov = np.asarray(cov, float)
 
-        keep = np.isfinite(y) & np.isfinite(x1) & np.isfinite(x2) & np.isfinite(x3) & np.isfinite(cov)
+        keep = (
+            np.isfinite(y) &
+            np.isfinite(x1) & np.isfinite(x2) & np.isfinite(x3) &
+            np.isfinite(cov)
+        )
         y = y[keep]; x1 = x1[keep]; x2 = x2[keep]; x3 = x3[keep]; cov = cov[keep]
         n = len(y)
         if n < 8:
@@ -11516,7 +11504,6 @@ elif version == 45:
                 float(tvals[3]), float(pvals[3]), float(beta[3]), n)
 
     def fdr_bh(pvals):
-        """Benjamini-Hochberg FDR. Returns adjusted p-values aligned to input order."""
         pvals = np.asarray(pvals, float)
         out = np.full_like(pvals, np.nan)
         keep = np.isfinite(pvals)
@@ -11528,7 +11515,6 @@ elif version == 45:
         ranked = p[order]
         m = len(ranked)
         q = ranked * m / (np.arange(m) + 1)
-
         q = np.minimum.accumulate(q[::-1])[::-1]
         q = np.clip(q, 0, 1)
 
@@ -11538,7 +11524,6 @@ elif version == 45:
         return out
 
     def p_adjust_bonf(pvals):
-        """Bonferroni over all finite p-values."""
         pvals = np.asarray(pvals, float)
         out = np.full_like(pvals, np.nan)
         keep = np.isfinite(pvals)
@@ -11549,7 +11534,19 @@ elif version == 45:
         return out
 
     # -----------------------
-    # MAIN LOOP (subject-level extraction)
+    needed_a_cols = [a_pain_col, a_money_col, a_int_col]
+    missing_in_mod_data_a = [c for c in needed_a_cols if c not in mod_data_a.columns]
+    if len(missing_in_mod_data_a):
+        raise ValueError(f"[V45] mod_data_a missing columns: {missing_in_mod_data_a}")
+
+    a_subj = (
+        mod_data_a
+        .copy()
+        .assign(participant=lambda d: d["participant"].astype(str))
+        .groupby("participant", as_index=False)[needed_a_cols]
+        .mean(numeric_only=True)
+    )
+
     # -----------------------
     subj_rows = []
     wf_store = {}
@@ -11566,12 +11563,8 @@ elif version == 45:
             continue
 
         epo = mne.read_epochs(epo_path, preload=True)
+        mod2 = trial_map[trial_map["participant_id"] == pa].copy()
 
-        # IMPORTANT: a-model map (must exist in your script)
-        # e.g., trial_map_a built from mod_data_a
-        mod2 = trial_map_a[trial_map_a["participant_id"] == pa].copy()
-
-        # Align by trialsnum if possible
         if epo.metadata is not None and ("trialsnum" in epo.metadata.columns) and ("trialsnum" in mod2.columns):
             keep = epo.metadata["trialsnum"].isin(mod2["trialsnum"])
             epo = epo[keep]
@@ -11579,7 +11572,6 @@ elif version == 45:
         else:
             mod2 = mod2.reset_index(drop=True).iloc[:len(epo)].copy()
 
-        # Drop bad trials
         if epo.metadata is not None and "badtrial" in epo.metadata.columns:
             good = np.where(epo.metadata["badtrial"].to_numpy() == 0)[0]
             epo = epo[good]
@@ -11590,19 +11582,16 @@ elif version == 45:
             skipped.append(pa)
             continue
 
-        # require predictors exist
-        missing_cols = [c for c in predictors if c not in mod2.columns]
-        if len(missing_cols):
-            print("  missing cols:", missing_cols)
+        a_row = a_subj[a_subj["participant"] == str(pa)]
+        if len(a_row) != 1:
+            print("  missing a_*_subj in mod_data_a for participant:", pa)
             skipped.append(pa)
             continue
 
-        # subject-level predictors: take first row (constant by design)
-        a_pain  = float(mod2[a_pain_col].iloc[0])
-        a_money = float(mod2[a_money_col].iloc[0])
-        a_int   = float(mod2[a_int_col].iloc[0])
+        a_pain  = float(a_row[a_pain_col].iloc[0])
+        a_money = float(a_row[a_money_col].iloc[0])
+        a_int   = float(a_row[a_int_col].iloc[0])
 
-        # subject-level RT summary
         rt_vals = mod2[rt_col].to_numpy(dtype=float) if rt_col in mod2.columns else np.array([])
         rt_vals = rt_vals[np.isfinite(rt_vals)]
         rt_subj = (float(np.median(rt_vals)) if rt_summary == "median" else float(np.mean(rt_vals))) if len(rt_vals) else np.nan
@@ -11620,7 +11609,6 @@ elif version == 45:
 
             any_set_used = True
 
-            # store waveform for presence plot
             ev = epo.copy().pick_channels(list(used_chs)).average()
             wf_store.setdefault(set_name, []).append(ev.data.mean(axis=0))
             times_store[set_name] = ev.times
@@ -11653,15 +11641,12 @@ elif version == 45:
     np.save(rp_outdir / "v45_included_subjects.npy", np.array(included, dtype=object))
     np.save(rp_outdir / "v45_skipped_subjects.npy", np.array(skipped, dtype=object))
 
-    # save waveforms per set
     for set_name, wfs in wf_store.items():
         wfs = np.vstack(wfs)
         np.save(rp_outdir / f"v45_{set_name}__rp_subject_waveforms.npy", wfs)
         np.save(rp_outdir / f"v45_{set_name}__rp_times.npy", times_store[set_name])
 
-    # -----------------------
-    # GROUP-LEVEL REGRESSIONS
-    # -----------------------
+
     group_rows = []
 
     if len(subj_df) > 0:
@@ -11669,7 +11654,7 @@ elif version == 45:
             y = sdf["rp_mean_uV"].to_numpy(dtype=float)
             rt_cov = sdf["rt_subj"].to_numpy(dtype=float)
 
-            # separate + RT (one predictor at a time)
+            # separate + RT
             for pred in predictors:
                 t1, p1, b1, n1 = group_regress_with_cov(
                     y=y,
@@ -11683,7 +11668,7 @@ elif version == 45:
                     "n_subj": n1, "beta_z": b1, "t": t1, "p": p1
                 })
 
-            # joint + RT (unique effects): pain + money + interaction + RT
+            # joint + RT
             jt1, jp1, jb1, jt2, jp2, jb2, jt3, jp3, jb3, nj = group_regress_joint3_with_cov(
                 y=y,
                 x1=sdf[a_pain_col].to_numpy(dtype=float),
@@ -11723,6 +11708,7 @@ elif version == 45:
     print("\n[V45] Saved:")
     print(" ", rp_outdir / "v45_subject_level_rp_means_by_bin.csv")
     print(" ", rp_outdir / "v45_group_regress_rp_on_a_by_bin.csv")
+
 
 #elif version == 12:
     # 9 
