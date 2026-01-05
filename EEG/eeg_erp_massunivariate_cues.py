@@ -10726,10 +10726,17 @@ elif version == 42:
 
 
 
-
 elif version == 43:
 
+    import numpy as np
+    import pandas as pd
+    from scipy import stats
+    from pathlib import Path
+    import os
+    import mne
 
+    # -----------------------
+    # SETTINGS
     # -----------------------
     bins = [(-0.4, -0.2), (-0.2, -0.1)]
 
