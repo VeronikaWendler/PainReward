@@ -1,28 +1,37 @@
 #!/bin/bash
-#SBATCH --partition=compute                 # CPU partition (on MacLeod, not sure about Maxwell)
-#SBATCH --cpus-per-task=6                   # number of CPU cores for chains
-#SBATCH --mem=100G                          # total memory for the job
-#SBATCH -o logs/slurm.%j.out                # STDOUT goes to this file
-#SBATCH -e logs/slurm.%j.err                # STDERR goes to this file
-#SBATCH --mail-type=ALL                     # email when job ends or fails
-#SBATCH --mail-user=u04vw21@abdn.ac.uk      # university email (still Aberdeen)
+#SBATCH --job-name=hddm_run
+#SBATCH --partition=compute
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=100G
+#SBATCH --time=24:00:00
+#SBATCH --output=logs/slurm.%j.out
+#SBATCH --error=logs/slurm.%j.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=<your_bham_email_here>
 
-#Singularity module 
-module load singularity/3.8.5
+set -euo pipefail
+mkdir -p logs
 
-export PYTHONUNBUFFERED=1                     # prints appear immediatelyy
-export MPLCONFIGDIR=/tmp/mplcache
+# Modules
+module purge
+module load Singularity   
 
-
-# path for container and workspace
-IMAGE=$HOME/containers/hddm_latest.sif
-PROJECT=$HOME/sharedscratch/PainReward_ULaval
-
-export PROJECT_DIR=/workspace
+# Env
+export PYTHONUNBUFFERED=1
 export MPLBACKEND=Agg
+export MPLCONFIGDIR="${TMPDIR:-/tmp}/mplcache"
+mkdir -p "$MPLCONFIGDIR"
+
+# Paths 
+IMAGE="$HOME/containers/hddm_latest.sif"
+PROJECT="$HOME/projects/PainReward"   
+
+# container workspace mountpoint
+export PROJECT_DIR=/workspace
 
 singularity exec \
-    --bind ${PROJECT}:/workspace \
-    ${IMAGE} \
-    python /workspace/Hddm_Docker_August_24/DDM_EEG_load.py
+  --bind "${PROJECT}:/workspace" \
+  --bind "${TMPDIR:-/tmp}:/tmp" \
+  "${IMAGE}" \
+  python /workspace/Hddm_Docker_August_24/DDM_EEG_load.py
 
