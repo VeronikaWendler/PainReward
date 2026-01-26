@@ -38,7 +38,7 @@ export OUT_DIR="/data/derivatives"
 apptainer exec \
   --bind "${PROJECT}:${PROJECT_DIR}" \
   --bind "${DATA_ROOT}:${DATA_DIR}" \
-  --bind "$HOME/pydeps_mne_icalabel:/pydeps" \
+  --bind "$HOME/pydeps_icalabel_only:/pydeps" \
   --env PYTHONPATH="/pydeps" \
   "${IMAGE}" \
   python "${PROJECT_DIR}/EEG/eeg_preprocess.py"
