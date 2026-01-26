@@ -1,9 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=eeg_clean
-#SBATCH --partition=compute
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=180G
+#SBATCH --job-name=eeg_prep
 #SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=128G
 #SBATCH --output=logs/eeg_%j.out
 #SBATCH --error=logs/eeg_%j.err
 #SBATCH --mail-type=ALL
