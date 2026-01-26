@@ -14,7 +14,7 @@ mkdir -p logs
 
 # Modules for BEAR
 module purge
-module load Singularity   # on BEAR 
+module load bb-singularity-conf/live
 
 # Environment 
 export PYTHONUNBUFFERED=1
@@ -35,7 +35,7 @@ export DATA_DIR="/data"
 export OUT_DIR="/data/derivatives"
 
 # bind code to /workspace, bind data to /data
-singularity exec \
+apptainer exec \
   --bind "${PROJECT}:${PROJECT_DIR}" \
   --bind "${DATA_ROOT}:${DATA_DIR}" \
   "${IMAGE}" \
