@@ -39,7 +39,7 @@ apptainer exec \
   --bind "${PROJECT}:${PROJECT_DIR}" \
   --bind "${DATA_ROOT}:${DATA_DIR}" \
   --bind "$HOME/pydeps:/pydeps" \
-  --env PYTHONPATH="/pydeps:${PYTHONPATH}" \
+  --env PYTHONPATH="/pydeps:${PYTHONPATH-}" \
   "${IMAGE}" \
   python "${PROJECT_DIR}/EEG/eeg_preprocess.py"
 
