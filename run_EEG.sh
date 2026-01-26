@@ -11,6 +11,7 @@
 #SBATCH --mail-user=VAW508@student.bham.ac.uk
 
 set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
 mkdir -p logs
 
 # Modules for BEAR
@@ -25,14 +26,20 @@ mkdir -p "$MPLCONFIGDIR"
 
 # need to get the mne image still
 IMAGE="$HOME/containers/mne_latest.sif"
-PROJECT="$HOME/projects/PainReward"   
+PROJECT="$HOME/projects/PainReward"  
 
-# Inside container
-export PROJECT_DIR=/workspace
+# your big data lives in project RDS
+DATA_ROOT="/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata"
 
-# Run
+#inside-container paths
+export PROJECT_DIR="/workspace"
+export DATA_DIR="/data"   
+export OUT_DIR="/data/derivatives"
+
+# bind code to /workspace, bind data to /data
 singularity exec \
-  --bind "${PROJECT}:/workspace" \
+  --bind "${PROJECT}:${PROJECT_DIR}" \
+  --bind "${DATA_ROOT}:${DATA_DIR}" \
   "${IMAGE}" \
-  python /workspace/EEG/eeg_erp_groupplots_cues.py
+  python "${PROJECT_DIR}/EEG/eeg_preprocess.py"
 

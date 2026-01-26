@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Author: michel-pierre.coll
+Author: michel-pierre.coll (modified by V.Wendler)
 Date: 2023-01-24
 Project: painreward
 Description: Cleans eeg data
 
 Description (for both passive and decision task):
+- sets the path structure on the cluster (large data files are in rds whereas the repository is in the home folder path)
 - Loads data
 - Removes bad channels (flagged in visual inspection)
 - Plot events and timing
@@ -16,6 +17,7 @@ Description (for both passive and decision task):
 - Save cleaned continous data
 """
 
+# libraries
 import seaborn as sns
 import pandas as pd
 import mne
@@ -32,8 +34,21 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 from statsmodels.distributions.empirical_distribution import ECDF
 from pathlib import Path
 
+# directories for the cluster
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
-basepath = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"
+basepath = Path(os.getenv("DATA_DIR", PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"))
+outpath = Path(os.getenv("OUT_DIR", basepath / "derivatives"))
+outpath.mkdir(parents=True, exist_ok=True)
+basepath = str(basepath)
+outpath = str(outpath)
+
+# checking if the paths worked
+print("PROJECT_DIR =", PROJECT_DIR)
+print("basepath    =", basepath)
+print("outpath     =", outpath)
+print("basepath exists?", os.path.exists(basepath))
+print("n items in basepath:", len(os.listdir(basepath)) if os.path.exists(basepath) else "NA")
+
 
 def ensure_dir(path):
     Path(path).mkdir(parents=True, exist_ok=True)
@@ -47,8 +62,8 @@ import numba
 numba.config.CACHE_ENABLE = False
 
 
-outpath = opj(basepath, "derivatives")
-os.makedirs(outpath, exist_ok=True)
+#outpath = opj(basepath, "derivatives")
+#os.makedirs(outpath, exist_ok=True)
 
 # List participants
 part = [p for p in os.listdir(opj(basepath)) if "sub" in p]
