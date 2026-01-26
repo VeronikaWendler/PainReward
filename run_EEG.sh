@@ -1,4 +1,3 @@
-# BEAR compatible version
 #!/bin/bash
 #SBATCH --job-name=eeg_clean
 #SBATCH --partition=compute
