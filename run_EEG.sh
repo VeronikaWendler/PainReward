@@ -16,8 +16,10 @@ mkdir -p logs
 module purge
 module load bb-singularity-conf/live
 
+
 # Environment 
 export PYTHONUNBUFFERED=1
+export PYTHONNOUSERSITE=1
 export MPLBACKEND=Agg
 export MPLCONFIGDIR="${TMPDIR:-/tmp}/mplcache"
 mkdir -p "$MPLCONFIGDIR"
@@ -35,11 +37,14 @@ export DATA_DIR="/data"
 export OUT_DIR="/data/derivatives"
 
 # bind code to /workspace, bind data to /data
-apptainer exec \
+apptainer exec --cleanenv \
   --bind "${PROJECT}:${PROJECT_DIR}" \
   --bind "${DATA_ROOT}:${DATA_DIR}" \
   --bind "$HOME/pydeps_icalabel_only:/pydeps" \
   --env PYTHONPATH="/pydeps" \
+  --env PROJECT_DIR="/workspace" \
+  --env DATA_DIR="/data" \
+  --env OUT_DIR="/data/derivatives" \
   "${IMAGE}" \
   python "${PROJECT_DIR}/EEG/eeg_preprocess.py"
 
