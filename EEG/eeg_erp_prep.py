@@ -28,7 +28,7 @@ import re
 
 
 # set the version to run (either decision or passive phase)
-version = 2    # 1 = decision, 2 = passive
+version = 1    # 1 = decision, 2 = passive
 
 # this defines cue-locking or response-locking
 # what to lock to: 'cue' (off+) or 'response'
