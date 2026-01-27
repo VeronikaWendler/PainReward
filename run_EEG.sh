@@ -46,5 +46,5 @@ apptainer exec --cleanenv \
   --env DATA_DIR="/data" \
   --env OUT_DIR="/data/derivatives" \
   "${IMAGE}" \
-  python "${PROJECT_DIR}/EEG/eeg_preprocess.py"
+  python "${PROJECT_DIR}/EEG/eeg_erp_prep.py"
 

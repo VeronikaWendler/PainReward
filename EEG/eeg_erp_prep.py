@@ -24,30 +24,31 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from statsmodels.distributions.empirical_distribution import ECDF
 from pathlib import Path
+import re
 
 
 # set the version to run (either decision or passive phase)
 version = 1    # 1 = decision, 2 = passive
 
+# this defines cue-locking or response-locking
 # what to lock to: 'cue' (off+) or 'response'
 lock_type = 'cue_long'       # or 'response'
 
-erp_mode = None           # Gluth 2013 = classic_rp
+erp_mode = None           # if set to classic_rp, then also make sure to copy parts of the prep. pipeline from the classic ERP potential paper from Gluth 2013 = classic_rp
 
 # Set bids directory
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
-basepath = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"
+basepath = Path(os.getenv("DATA_DIR", PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"))
+
 def ensure_dir(path):
     Path(path).mkdir(parents=True, exist_ok=True)
-import re
-from pathlib import Path
-import os
+
 layout = BIDSLayout(basepath)
 # disable Numba JIT caching & compilation
 #os.environ["NUMBA_DISABLE_JIT"] = "1"
 import numba
 numba.config.CACHE_ENABLE = False
-outpath = opj(basepath, "derivatives")
+outpath = Path(os.getenv("OUT_DIR", basepath / "derivatives"))
 os.makedirs(outpath, exist_ok=True)
 # List participants
 part = [p for p in os.listdir(opj(basepath)) if "sub" in p]
@@ -100,6 +101,9 @@ if version == 1 and lock_type == "response" and erp_mode != "classic_rp":
 if version == 1 and lock_type == "cue_long":
     param["erpbaseline"] = -0.2
     param["erpepochend"] = 1.4
+
+# I should print what exactly is being chosen
+
 #-----------------------------------------------------------------------------------------------------------------------
 # epoching erps
 # reject_stats = pd.DataFrame(data={'part': part, 'perc_removed_cues': 9999,
