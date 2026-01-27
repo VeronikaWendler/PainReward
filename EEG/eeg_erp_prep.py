@@ -28,11 +28,11 @@ import re
 
 
 # set the version to run (either decision or passive phase)
-version = 1    # 1 = decision, 2 = passive
+version = 2    # 1 = decision, 2 = passive
 
 # this defines cue-locking or response-locking
 # what to lock to: 'cue' (off+) or 'response'
-lock_type = 'cue_long'       # or 'response'
+lock_type = 'cue'       # cue or cue_long or response
 
 erp_mode = None           # if set to classic_rp, then also make sure to copy parts of the prep. pipeline from the classic ERP potential paper from Gluth 2013 = classic_rp
 
@@ -134,11 +134,10 @@ else:
     count_col = "Resp_any"
 
 
-
-reject_stats = pd.DataFrame(data={
-    'part': part,
-    'perc_removed_cues': 9999,
-    'perc_removed_shocks': 9999,
+reject_stats = pd.DataFrame({
+    "part": part,
+    "perc_removed_cues": 9999.0,    
+    "perc_removed_shocks": 9999.0,   
     count_col: 0,
 })
 
@@ -321,8 +320,11 @@ for p in part:
 
     fig = mne.viz.plot_drop_log(erp_cues.drop_log, show=False)
     report.add_figure(fig, title='Drop log', section='Drop log')
-    reject_stats.loc[reject_stats.part == p,
-                     reject_stats.columns == 'perc_removed_cues'] = ((125 - len(erp_cues)) / 125 * 100)
+    # reject_stats.loc[reject_stats.part == p,
+    #                  reject_stats.columns == 'perc_removed_cues'] = ((125 - len(erp_cues)) / 125 * 100)
+    
+    reject_stats.loc[reject_stats["part"] == p, "perc_removed_cues"] = ((125 - len(erp_cues)) / 125) * 100.0
+
         
     if lock_type == 'cue':
         # number of off+ trials kept
