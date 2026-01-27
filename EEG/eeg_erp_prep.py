@@ -34,7 +34,7 @@ version = 1    # 1 = decision, 2 = passive
 # what to lock to: 'cue' (off+) or 'response'
 lock_type = 'response'       # cue or cue_long or response
 
-erp_mode = 'classic_rp'           # if set to classic_rp, then also make sure to copy parts of the prep. pipeline from the classic ERP potential paper from Gluth 2013 = classic_rp
+erp_mode = ''           # if set to classic_rp, then also make sure to copy parts of the prep. pipeline from the classic ERP potential paper from Gluth 2013 = classic_rp
 
 # Set bids directory
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
