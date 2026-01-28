@@ -28,7 +28,7 @@ mkdir -p "$MPLCONFIGDIR"
 IMAGE="$HOME/containers/mne_latest.sif"
 PROJECT="$HOME/projects/PainReward"  
 
-# your big data lives in project RDS
+# big data lives in project RDS
 DATA_ROOT="/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata"
 
 #inside-container paths
