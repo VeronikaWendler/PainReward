@@ -25,7 +25,7 @@ export MPLCONFIGDIR="${TMPDIR:-/tmp}/mplcache"
 mkdir -p "$MPLCONFIGDIR"
 
 # need to get the mne image still
-IMAGE="$HOME/containers/mne_latest.sif"
+IMAGE="$HOME/containers/hddm_latest.sif"
 PROJECT="$HOME/projects/PainReward"  
 
 # big data lives in project RDS
