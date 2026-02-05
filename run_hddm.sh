@@ -1,37 +1,50 @@
 #!/bin/bash
-#SBATCH --job-name=hddm_run
-#SBATCH --partition=compute
-#SBATCH --cpus-per-task=6
-#SBATCH --mem=100G
+#SBATCH --job-name=eeg_prep
 #SBATCH --time=24:00:00
-#SBATCH --output=logs/slurm.%j.out
-#SBATCH --error=logs/slurm.%j.err
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=128G
+#SBATCH --output=logs/eeg_%j.out
+#SBATCH --error=logs/eeg_%j.err
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=<your_bham_email_here>
+#SBATCH --mail-user=VAW508@student.bham.ac.uk
+
 
 set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
 mkdir -p logs
 
-# Modules
+# Modules for BEAR
 module purge
-module load Singularity   
+module load bb-singularity-conf/live
 
-# Env
+
+# Environment 
 export PYTHONUNBUFFERED=1
+export PYTHONNOUSERSITE=1
 export MPLBACKEND=Agg
 export MPLCONFIGDIR="${TMPDIR:-/tmp}/mplcache"
 mkdir -p "$MPLCONFIGDIR"
 
-# Paths 
-IMAGE="$HOME/containers/hddm_latest.sif"
-PROJECT="$HOME/projects/PainReward"   
+# need to get the mne image still
+IMAGE="$HOME/containers/mne_latest.sif"
+PROJECT="$HOME/projects/PainReward"  
 
-# container workspace mountpoint
-export PROJECT_DIR=/workspace
+# big data lives in project RDS
+DATA_ROOT="/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata"
 
-singularity exec \
-  --bind "${PROJECT}:/workspace" \
-  --bind "${TMPDIR:-/tmp}:/tmp" \
+#inside-container paths
+export PROJECT_DIR="/workspace"
+export DATA_DIR="/data"   
+export OUT_DIR="/data/derivatives"
+
+# bind code to /workspace, bind data to /data
+apptainer exec --cleanenv \
+  --bind "${PROJECT}:${PROJECT_DIR}" \
+  --bind "${DATA_ROOT}:${DATA_DIR}" \
+  --bind "$HOME/pydeps_icalabel_only:/pydeps" \
+  --env PYTHONPATH="/pydeps" \
+  --env PROJECT_DIR="/workspace" \
+  --env DATA_DIR="/data" \
+  --env OUT_DIR="/data/derivatives" \
   "${IMAGE}" \
-  python /workspace/Hddm_Docker_August_24/DDM_EEG_load.py
-
+  python "${PROJECT_DIR}/EEG/eeg_erp_prep.py"

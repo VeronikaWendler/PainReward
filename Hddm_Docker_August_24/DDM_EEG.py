@@ -101,9 +101,16 @@ start_version = 9
 started = False
 
 # dir
-PROJECT_DIR   = pathlib.Path(os.getenv("PROJECT_DIR", "/workspace")).resolve()
-BASE_MODEL_DIR = PROJECT_DIR / "Hddm_Docker_August_24/models_dir"
-FIG_DIR_ROOT   = PROJECT_DIR / "Hddm_Docker_August_24/figures_dir"
+PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace")).resolve()
+
+BASE_MODEL_DIR = Path(os.getenv("MODEL_DIR", (PROJECT_DIR / "Hddm_Docker_August_24/models_dir").as_posix())).resolve()
+FIG_DIR_ROOT   = Path(os.getenv("FIG_DIR",   (PROJECT_DIR / "Hddm_Docker_August_24/figures_dir").as_posix())).resolve()
+
+def ensure_dir(path: Path):
+    path.mkdir(parents=True, exist_ok=True)
+
+ensure_dir(BASE_MODEL_DIR)
+ensure_dir(FIG_DIR_ROOT)
 
 
 # reporting function
@@ -115,15 +122,15 @@ def quick_report(data, phase, version, model_name, phase_key):
     print(f"N trials            : {len(data):,}")
     print(f"Participants        : {sorted(data['subj_idx'].unique())}")
 
-    fig, ax = plt.subplots(figsize=(6,4))
-    for _, d in data.groupby('subj_idx'):
-        d['rt'] = d['choice_resp.rt']
-        d['rt'].hist(bins=20, histtype='step', ax=ax, alpha=.4)
-    ax.set(
-        title=f"RT distribution – {phase} v{version}",
-        xlabel="RT (s)",
-        ylabel="count"
-    )
+    # fig, ax = plt.subplots(figsize=(6,4))
+    # for _, d in data.groupby('subj_idx'):
+    #     d['rt'] = d['choice_resp.rt']
+    #     d['rt'].hist(bins=20, histtype='step', ax=ax, alpha=.4)
+    # ax.set(
+    #     title=f"RT distribution – {phase} v{version}",
+    #     xlabel="RT (s)",
+    #     ylabel="count")
+    
     plt.show()
 
 # function to clean bits of the data that have not been cleaned yet, for instance remaining NAN's and so on
@@ -209,27 +216,18 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
             a_reg = {'model': 'a ~ 1 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [a_reg] 
             #this model (NR 4) doesn't work and fails to find starting values   
-        elif version == 4:  # drift rate is dependent on the the sv_pain_para
-            a_reg = {'model': 'a ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [a_reg]
-        elif version == 5:  # drift rate is dependent on the the sv_pain_para
-            z_reg = {'model': 'z ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [z_reg]
-        elif version == 6:  # drift rate is dependent on the the sv_pain_para
-            z_reg = {'model': 'z ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [z_reg]
-        elif version == 7:  # drift rate is dependent on the the sv_pain_para
-            t_reg = {'model': 't ~ 1 + sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [t_reg]    
-        elif version == 8:  # drift rate is dependent on the the sv_pain_para
-            t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
-            reg_descr = [t_reg]       
         elif version == 9:
-            v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+            v_reg = {'model': 'v ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
             reg_descr = [v_reg]
         elif version == 10:
-            a_reg = {'model': 'a ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+            a_reg = {'model': 'a ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
             reg_descr = [a_reg]
+        # elif version == 11:
+        #     v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+        #     reg_descr = [v_reg]
+        # elif version == 12:
+        #     a_reg = {'model': 'a ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+        #     reg_descr = [a_reg]
         else:
             raise ValueError(f"Is this version correct ? ")   
         

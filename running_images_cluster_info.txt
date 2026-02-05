@@ -1,5 +1,4 @@
-# Steps involved in getting the images running on the cluster (HDDM & MNE)
-
+# Steps involved in getting the images running on the Macleod cluster in Aberdeen (HDDM & MNE) -----------------------------------------------------------
 
 # go to https://remote.abdn.ac.uk/vdesk/webtop.eui?webtop=/Common/remote.abnd.ac.uk_Azure_SP_Access_Profile-RemoteAccess_SSL_Webtop_Full&webtop_type=webtop_full
 # and log into macleod1
@@ -18,6 +17,8 @@ singularity pull mne_latest.sif docker://ghcr.io/mne-tools/mne-python-plot:lates
 # Pull the prebuilt HDDM image
 singularity pull hddm_latest.sif docker://hcp4715/hddm:latest
 
+#---------------------------------------------------------------------------------------------------------------------------------------------------
 
+# steps involved in running the programs on the BEAR cluster
 
 
