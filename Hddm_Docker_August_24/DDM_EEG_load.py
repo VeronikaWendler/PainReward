@@ -40,13 +40,7 @@ from statsmodels.distributions.empirical_distribution import ECDF
 from hddm.simulators.hddm_dataset_generators import simulator_h_c
 
 from pathlib import Path
-
-PROJECT_DIR = pathlib.Path(os.getenv("PROJECT_DIR", "/workspace"))
-
-def ensure_dir(path):
-    Path(path).mkdir(parents=True, exist_ok=True)
 import re
-from pathlib import Path
 
 import os
 # disable _all_ Numba JIT caching & compilation
@@ -87,10 +81,24 @@ else:
 
 phase = phase_key    
 
-PROJECT_DIR   = pathlib.Path(os.getenv("PROJECT_DIR", "/workspace")).resolve()
+PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace")).resolve()
 
-BASE_MODEL_DIR = PROJECT_DIR / "Hddm_Docker_August_24/models_dir"
-FIG_DIR_ROOT   = PROJECT_DIR / "Hddm_Docker_August_24/figures_dir"
+def ensure_dir(p: Path):
+    p.mkdir(parents=True, exist_ok=True)
+
+# prefer RDS output dirs if provided by SLURM wrapper
+MODEL_DIR    = Path(os.getenv("MODEL_DIR", str(PROJECT_DIR / "Hddm_Docker_August_24/models_dir"))).resolve()
+FIG_DIR_ROOT = Path(os.getenv("FIG_DIR",   str(PROJECT_DIR / "Hddm_Docker_August_24/figures_dir"))).resolve()
+LOG_DIR      = Path(os.getenv("LOG_DIR",   str(PROJECT_DIR / "Hddm_Docker_August_24/logs"))).resolve()
+
+ensure_dir(MODEL_DIR)
+ensure_dir(FIG_DIR_ROOT)
+ensure_dir(LOG_DIR)
+
+print("PROJECT_DIR:", PROJECT_DIR)
+print("MODEL_DIR:", MODEL_DIR)
+print("FIG_DIR_ROOT:", FIG_DIR_ROOT)
+print("LOG_DIR:", LOG_DIR)
 
 model_base_name = "painreward_behavioural_data_"
 
@@ -183,8 +191,12 @@ ax  = fig.add_subplot(111, xlabel='RT', ylabel='count', title='RT distributions'
 for _, subj_data in data.groupby('subj_idx'):
     subj_data.rt.hist(bins=20, histtype='step', ax=ax)
 # instead of plt.show():
-fig.savefig((FIG_DIR_ROOT / f"{model_base_name}{model_name}" / "diagnostics" / "rt_distributions.pdf").as_posix(),
-            bbox_inches="tight")
+#fig.savefig((FIG_DIR_ROOT / f"{model_base_name}{model_name}" / "diagnostics" / "rt_distributions.pdf").as_posix(),
+#            bbox_inches="tight")
+
+rt_dir = FIG_DIR_ROOT / f"{model_base_name}{model_name}" / "diagnostics"
+ensure_dir(rt_dir)
+fig.savefig((rt_dir / "rt_distributions.pdf").as_posix(), bbox_inches="tight")
 plt.close(fig)
 
 
@@ -197,7 +209,7 @@ def ensure_dir(directory):
         os.makedirs(directory)
 
 # model dir:
-model_dir = BASE_MODEL_DIR
+model_dir = MODEL_DIR
 ensure_dir(model_dir)
 
 def sanitize_infdata(infdata):
@@ -1001,7 +1013,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
     
 
 
-model_dir = BASE_MODEL_DIR
+model_dir = MODEL_DIR
 ensure_dir(model_dir)
 
 
