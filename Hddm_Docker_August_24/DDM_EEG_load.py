@@ -340,10 +340,10 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
             t_reg = {'model': 't ~ 0 + sv_pain_para', 'link_func': lambda x: x}
             reg_descr = [t_reg]       
         elif version == 9:
-            v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+            v_reg = {'model': 'v ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
             reg_descr = [v_reg]
         elif version == 10:
-            a_reg = {'model': 'a ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
+            a_reg = {'model': 'a ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
             reg_descr = [a_reg]
         else:
             raise ValueError(f"Is this version correct ? ")  
@@ -353,7 +353,7 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
         m = hddm.models.HDDMRegressor(data, 
                                     reg_descr,
                                     p_outlier=.05, 
-                                    include=['a', 't', 'v', 'z'],   #'z'
+                                    include=['a', 't', 'v'],   #'z'
                                     depends_on=depends_on,
                                     group_only_regressors=False,
                                     keep_regressor_trace=True
@@ -660,8 +660,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                                   't', 
                                   'v_Intercept',
                                   'v_painlevel',
-                                  'v_moneylevel',
-                                  'v_painlevel:moneylevel'
+                                  'v_moneylevel'
                                   ]
             params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
             titles = ['Threshold',
@@ -670,7 +669,6 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                       'v_Intercept',
                       'v_painlevel',
                       'v_moneylevel',
-                      'v_painlevel:moneylevel'
                       ]
         elif version == 10:
             params_of_interest = ['a',
@@ -678,8 +676,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                                   't', 
                                   'a_Intercept',
                                   'a_painlevel',
-                                  'a_moneylevel',
-                                  'a_painlevel:moneylevel'
+                                  'a_moneylevel'
                                   ]
             params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
             titles = ['Threshold',
@@ -687,8 +684,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                       'Non-dec. time',
                       'a_Intercept',
                       'a_painlevel',
-                      'a_moneylevel',
-                      'a_painlevel:moneylevel'
+                      'a_moneylevel'
                       ]
         else:
             raise ValueError(f"Invalid version {version}")
@@ -1113,7 +1109,115 @@ def z_sv_pain_para_contributions(models, data):
 
     return data_with_z_sv_pain_para
 
-# for mod 9
+# # for mod 9 (old)
+# def v_pain_money_interaction_contributions(models, data):
+
+#     combined = kabuki.utils.concat_models(models)
+#     data_out = data.copy()
+
+#     # allocate space
+#     cols = [
+#         "v_intercept_subj", 
+#         "v_painlevel_subj", 
+#         "v_moneylevel_subj",
+#         "v_interaction_subj",
+#         "v_intercept_contrib",
+#         "v_pain_contrib",
+#         "v_money_contrib",
+#         "v_interaction_contrib",
+#         "v_full_trial"
+#     ]
+#     for c in cols:
+#         data_out[c] = np.nan
+
+#     for subj in data['subj_idx'].unique():
+#         subj_mask = data_out['subj_idx'] == subj
+#         subj_data = data_out.loc[subj_mask]
+
+#         # Subject-specific posterior means
+#         b0 = combined.nodes_db.loc[f"v_Intercept_subj.{subj}", "node"].trace().mean()
+#         b1 = combined.nodes_db.loc[f"v_painlevel_subj.{subj}", "node"].trace().mean()
+#         b2 = combined.nodes_db.loc[f"v_moneylevel_subj.{subj}", "node"].trace().mean()
+#         b3 = combined.nodes_db.loc[f"v_painlevel:moneylevel_subj.{subj}", "node"].trace().mean()
+
+#         # stable subject-level params
+#         data_out.loc[subj_mask, "v_intercept_subj"] = b0
+#         data_out.loc[subj_mask, "v_painlevel_subj"] = b1
+#         data_out.loc[subj_mask, "v_moneylevel_subj"] = b2
+#         data_out.loc[subj_mask, "v_interaction_subj"] = b3
+
+#         # trial level contributions
+#         data_out.loc[subj_mask, "v_intercept_contrib"] = b0
+#         data_out.loc[subj_mask, "v_pain_contrib"] = b1 * subj_data["painlevel"]
+#         data_out.loc[subj_mask, "v_money_contrib"] = b2 * subj_data["moneylevel"]
+#         data_out.loc[subj_mask, "v_interaction_contrib"] = b3 * (subj_data["painlevel"] * subj_data["moneylevel"])
+
+#         # full drift per trial
+#         data_out.loc[subj_mask, "v_full_trial"] = (
+#             data_out.loc[subj_mask, "v_intercept_contrib"]
+#             + data_out.loc[subj_mask, "v_pain_contrib"]
+#             + data_out.loc[subj_mask, "v_money_contrib"]
+#             + data_out.loc[subj_mask, "v_interaction_contrib"]
+#         )
+
+#     return data_out
+
+# # for mod 10 (old)
+# def a_pain_money_interaction_contributions(models, data):
+
+#     combined = kabuki.utils.concat_models(models)
+#     data_out = data.copy()
+
+#     # allocate space
+#     cols = [
+#         "a_intercept_subj", 
+#         "a_painlevel_subj", 
+#         "a_moneylevel_subj",
+#         "a_interaction_subj",
+#         "a_intercept_contrib",
+#         "a_pain_contrib",
+#         "a_money_contrib",
+#         "a_interaction_contrib",
+#         "a_full_trial"
+#     ]
+#     for c in cols:
+#         data_out[c] = np.nan
+
+#     for subj in data['subj_idx'].unique():
+#         subj_mask = data_out['subj_idx'] == subj
+#         subj_data = data_out.loc[subj_mask]
+
+#         # Subject-specific posterior means
+#         b0 = combined.nodes_db.loc[f"a_Intercept_subj.{subj}", "node"].trace().mean()
+#         b1 = combined.nodes_db.loc[f"a_painlevel_subj.{subj}", "node"].trace().mean()
+#         b2 = combined.nodes_db.loc[f"a_moneylevel_subj.{subj}", "node"].trace().mean()
+#         b3 = combined.nodes_db.loc[f"a_painlevel:moneylevel_subj.{subj}", "node"].trace().mean()
+
+#         # stable subject-level params
+#         data_out.loc[subj_mask, "a_intercept_subj"] = b0
+#         data_out.loc[subj_mask, "a_painlevel_subj"] = b1
+#         data_out.loc[subj_mask, "a_moneylevel_subj"] = b2
+#         data_out.loc[subj_mask, "a_interaction_subj"] = b3
+
+#         # trial level contributions
+#         data_out.loc[subj_mask, "a_intercept_contrib"] = b0
+#         data_out.loc[subj_mask, "a_pain_contrib"] = b1 * subj_data["painlevel"]
+#         data_out.loc[subj_mask, "a_money_contrib"] = b2 * subj_data["moneylevel"]
+#         data_out.loc[subj_mask, "a_interaction_contrib"] = b3 * (subj_data["painlevel"] * subj_data["moneylevel"])
+
+#         # full drift per trial
+#         data_out.loc[subj_mask, "a_full_trial"] = (
+#             data_out.loc[subj_mask, "a_intercept_contrib"]
+#             + data_out.loc[subj_mask, "a_pain_contrib"]
+#             + data_out.loc[subj_mask, "a_money_contrib"]
+#             + data_out.loc[subj_mask, "a_interaction_contrib"]
+#         )
+
+#     return data_out
+
+
+
+# for mod 9 
 def v_pain_money_interaction_contributions(models, data):
 
     combined = kabuki.utils.concat_models(models)
@@ -1124,11 +1228,9 @@ def v_pain_money_interaction_contributions(models, data):
         "v_intercept_subj", 
         "v_painlevel_subj", 
         "v_moneylevel_subj",
-        "v_interaction_subj",
         "v_intercept_contrib",
         "v_pain_contrib",
         "v_money_contrib",
-        "v_interaction_contrib",
         "v_full_trial"
     ]
     for c in cols:
@@ -1142,31 +1244,27 @@ def v_pain_money_interaction_contributions(models, data):
         b0 = combined.nodes_db.loc[f"v_Intercept_subj.{subj}", "node"].trace().mean()
         b1 = combined.nodes_db.loc[f"v_painlevel_subj.{subj}", "node"].trace().mean()
         b2 = combined.nodes_db.loc[f"v_moneylevel_subj.{subj}", "node"].trace().mean()
-        b3 = combined.nodes_db.loc[f"v_painlevel:moneylevel_subj.{subj}", "node"].trace().mean()
 
         # stable subject-level params
         data_out.loc[subj_mask, "v_intercept_subj"] = b0
         data_out.loc[subj_mask, "v_painlevel_subj"] = b1
         data_out.loc[subj_mask, "v_moneylevel_subj"] = b2
-        data_out.loc[subj_mask, "v_interaction_subj"] = b3
 
         # trial level contributions
         data_out.loc[subj_mask, "v_intercept_contrib"] = b0
         data_out.loc[subj_mask, "v_pain_contrib"] = b1 * subj_data["painlevel"]
         data_out.loc[subj_mask, "v_money_contrib"] = b2 * subj_data["moneylevel"]
-        data_out.loc[subj_mask, "v_interaction_contrib"] = b3 * (subj_data["painlevel"] * subj_data["moneylevel"])
 
         # full drift per trial
         data_out.loc[subj_mask, "v_full_trial"] = (
             data_out.loc[subj_mask, "v_intercept_contrib"]
             + data_out.loc[subj_mask, "v_pain_contrib"]
             + data_out.loc[subj_mask, "v_money_contrib"]
-            + data_out.loc[subj_mask, "v_interaction_contrib"]
         )
 
     return data_out
 
-# for mod 10
+# for mod 10 
 def a_pain_money_interaction_contributions(models, data):
 
     combined = kabuki.utils.concat_models(models)
@@ -1177,11 +1275,9 @@ def a_pain_money_interaction_contributions(models, data):
         "a_intercept_subj", 
         "a_painlevel_subj", 
         "a_moneylevel_subj",
-        "a_interaction_subj",
         "a_intercept_contrib",
         "a_pain_contrib",
         "a_money_contrib",
-        "a_interaction_contrib",
         "a_full_trial"
     ]
     for c in cols:
@@ -1195,30 +1291,25 @@ def a_pain_money_interaction_contributions(models, data):
         b0 = combined.nodes_db.loc[f"a_Intercept_subj.{subj}", "node"].trace().mean()
         b1 = combined.nodes_db.loc[f"a_painlevel_subj.{subj}", "node"].trace().mean()
         b2 = combined.nodes_db.loc[f"a_moneylevel_subj.{subj}", "node"].trace().mean()
-        b3 = combined.nodes_db.loc[f"a_painlevel:moneylevel_subj.{subj}", "node"].trace().mean()
 
         # stable subject-level params
         data_out.loc[subj_mask, "a_intercept_subj"] = b0
         data_out.loc[subj_mask, "a_painlevel_subj"] = b1
         data_out.loc[subj_mask, "a_moneylevel_subj"] = b2
-        data_out.loc[subj_mask, "a_interaction_subj"] = b3
 
         # trial level contributions
         data_out.loc[subj_mask, "a_intercept_contrib"] = b0
         data_out.loc[subj_mask, "a_pain_contrib"] = b1 * subj_data["painlevel"]
         data_out.loc[subj_mask, "a_money_contrib"] = b2 * subj_data["moneylevel"]
-        data_out.loc[subj_mask, "a_interaction_contrib"] = b3 * (subj_data["painlevel"] * subj_data["moneylevel"])
 
         # full drift per trial
         data_out.loc[subj_mask, "a_full_trial"] = (
             data_out.loc[subj_mask, "a_intercept_contrib"]
             + data_out.loc[subj_mask, "a_pain_contrib"]
             + data_out.loc[subj_mask, "a_money_contrib"]
-            + data_out.loc[subj_mask, "a_interaction_contrib"]
         )
 
     return data_out
-
 
 
 # # for model NR2
@@ -1435,10 +1526,10 @@ else:
             sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 't_sv_pain_para.csv' ))
         elif version == 9:
             sv_contribute = v_pain_money_interaction_contributions(models, data)
-            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'v_pain_money_interaction.csv' ))
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'v_pain_money.csv' ))
         elif version == 10:
             sv_contribute = a_pain_money_interaction_contributions(models, data)
-            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'a_pain_money_interaction.csv' ))
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'a_pain_money.csv' ))
         else:
             print('None')
             
