@@ -46,4 +46,4 @@ apptainer exec --cleanenv \
   --env OUT_DIR="${OUT_DIR}" \
   --env HDDM_DIR="${HDDM_DIR}" \
   "${IMAGE}" \
-  python "${PROJECT_DIR}/EEG/eeg_erp_rp.py"
+  python "${PROJECT_DIR}/EEG/eeg_erp_groupplots_rp.py"
