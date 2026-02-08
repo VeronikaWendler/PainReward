@@ -62,7 +62,7 @@ if not os.path.exists(outpath):
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
 # ---- versions / output routing ----
-version = 4
+version = 3
 v1_mode = "joint"
 v2_mode = "joint"
 v3_mode = "joint"
@@ -369,7 +369,7 @@ if version in [1, 2, 3, 4]:
     if version in [1, 2]:
         bins = [(-0.4, -0.2), (-0.2, -0.1)]          # original: two bins
     elif version in [3, 4]:
-        bins = [(-0.40, -0.05)]                      # new: one long bin
+        bins = [(-0.80, -0.05)]                      # new: one long bin
     else:
         raise ValueError("version must be 1-4")
 
