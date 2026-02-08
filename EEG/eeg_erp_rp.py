@@ -68,25 +68,22 @@ v2_mode = "joint"
 v3_mode = "joint"
 v4_mode = "joint"
 
-# base output root: OUT_DIR/erps_massuni_sv_cuelong
-base_root = Path(outpath) / "erps_massuni_sv_cuelong"
-base_root.mkdir(parents=True, exist_ok=True)
+base_root = opj(outpath, "erps_massuni_sv_cuelong")
+os.makedirs(base_root, exist_ok=True)
 
 if version == 1:
-    outpath = base_root / "v1_rp_drift_joint"
+    outpath = opj(base_root, "v1_rp_drift_joint")
 elif version == 2:
-    outpath = base_root / "v2_rp_boundary_joint"
+    outpath = opj(base_root, "v2_rp_boundary_joint")
 elif version == 3:
-    outpath = base_root / "v3_rp_drift_joint_longwindow"
+    outpath = opj(base_root, "v3_rp_drift_joint_longwindow")
 elif version == 4:
-    outpath = base_root / "v4_rp_boundary_joint_longwindow"
+    outpath = opj(base_root, "v4_rp_boundary_joint_longwindow")
 else:
     raise ValueError("version must be 1, 2, 3, or 4")
 
-outpath.mkdir(parents=True, exist_ok=True)
+os.makedirs(outpath, exist_ok=True)
 
-print(f"[INFO] base_root: {base_root} (exists={base_root.exists()})")
-print(f"[INFO] outpath:   {outpath} (exists={outpath.exists()})")
 
 
 # participants
@@ -289,7 +286,7 @@ if version in [1,2,3,4]:
     for p in part:
         df = beh_df[beh_df["participant"] == p]
         
-        if version in [1,2]:
+        if version in [1,2,3,4]:
             epo = mne.read_epochs(
                 opj(basepath, "derivatives", p, "eeg", "erps_resp_rp",
                     f"{p}_decision_resp_rp_singletrials-epo.fif"),
