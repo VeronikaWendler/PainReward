@@ -61,30 +61,27 @@ if not os.path.exists(outpath):
 #----
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 2
-v1_mode = "joint" 
-v2_mode = "joint" 
+version = 3
+v1_mode = "joint"
+v2_mode = "joint"
+v3_mode = "joint"
+v4_mode = "joint"
 
-
+base_root = opj(outpath, "erps_massuni_sv_cuelong")
+os.makedirs(base_root, exist_ok=True)
 
 if version == 1:
-    base_v1 = opj(outpath, "erps_massuni_sv_cuelong")
-    os.makedirs(base_v1, exist_ok=True)
-    if v1_mode == "joint":
-        outpath = opj(base_v1, "v1_rp_drift_joint")
-    else:
-        raise ValueError("v1_mode must be 'joint' ")
-    os.makedirs(outpath, exist_ok=True)  
+    outpath = opj(base_root, "v1_rp_drift_joint")
 elif version == 2:
-    base_v2 = opj(outpath, "erps_massuni_sv_cuelong")
-    os.makedirs(base_v2, exist_ok=True)
-    if v2_mode == "joint":
-        outpath = opj(base_v2, "v2_rp_boundary_joint")
-    else:
-        raise ValueError("v2_mode must be 'joint' ")
-    os.makedirs(outpath, exist_ok=True)  
+    outpath = opj(base_root, "v2_rp_boundary_joint")
+elif version == 3:
+    outpath = opj(base_root, "v3_rp_drift_joint_longwindow")
+elif version == 4:
+    outpath = opj(base_root, "v4_rp_boundary_joint_longwindow")
 else:
-    print("no version")
+    raise ValueError("version must be 1, 2, 3, or 4")
+
+os.makedirs(outpath, exist_ok=True)
 
 
 # participants
@@ -134,19 +131,20 @@ for _df in [mod_data, mod_data_a]:
 
 # -----------------------
 # predictor columns based on version
-if version == 1:
+if version in [1, 3]:   # drift (v)
     beh_df = mod_data
     pred1_col = "v_painlevel_subj"
     pred2_col = "v_moneylevel_subj"
-    out_prefix = "v1"
-elif version == 2:
+    out_prefix = "v1" if version == 1 else "v3"
+
+elif version in [2, 4]: # boundary (a)
     beh_df = mod_data_a
     pred1_col = "a_painlevel_subj"
     pred2_col = "a_moneylevel_subj"
-    out_prefix = "v2"
-else:
-    raise ValueError("version must be 1 or 2")
+    out_prefix = "v2" if version == 2 else "v4"
 
+else:
+    raise ValueError("version must be 1, 2, 3, or 4")
 
 # Subjects in EEG 
 # EEG participants from participants.tsv
@@ -281,7 +279,7 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1,2]:
+if version in [1,2,3,4]:
     filtered_data = []
     for p in part:
         df = beh_df[beh_df["participant"] == p]
@@ -358,7 +356,7 @@ if version in [1,2]:
 
 #----------------------------------------------------------------------------------------
 
-if version in [1,2]:
+if version in [1, 2, 3, 4]:
 
     # -----------------------
     # Only JOINT model + RT covariate
@@ -366,7 +364,13 @@ if version in [1,2]:
     # Two RP bins/windows
     # -----------------------
 
-    bins = [(-0.4, -0.2), (-0.2, -0.1)]
+    if version in [1, 2]:
+        bins = [(-0.4, -0.2), (-0.2, -0.1)]          # original: two bins
+    elif version in [3, 4]:
+        bins = [(-0.50, -0.05)]                      # new: one long bin
+    else:
+        raise ValueError("version must be 1-4")
+
 
     # False: FDR across both bins together (within each predictor)
     # True: FDR separately within each bin (across electrode sets)

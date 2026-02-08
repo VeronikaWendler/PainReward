@@ -28,19 +28,32 @@ layout = BIDSLayout(basepath)
 # -----------------------
 # CONFIG
 # -----------------------
-version = 2                 # 1=v, 2=a
+version = 3                 # 1=v, 2=a
 stats_subdir = "Zscoring"   
 
 if version == 1:
     out_prefix = "v1"
     pred1_col, pred2_col = "v_painlevel_subj", "v_moneylevel_subj"
     analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "v1_rp_drift_joint"
+
 elif version == 2:
     out_prefix = "v2"
     pred1_col, pred2_col = "a_painlevel_subj", "a_moneylevel_subj"
     analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "v2_rp_boundary_joint"
+
+elif version == 3:
+    out_prefix = "v3"
+    pred1_col, pred2_col = "v_painlevel_subj", "v_moneylevel_subj"
+    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "v3_rp_drift_joint_longwindow"
+
+elif version == 4:
+    out_prefix = "v4"
+    pred1_col, pred2_col = "a_painlevel_subj", "a_moneylevel_subj"
+    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "v4_rp_boundary_joint_longwindow"
+
 else:
-    raise ValueError("version must be 1 or 2")
+    raise ValueError("version must be 1, 2, 3, or 4")
+
 
 rp_dir = analysis_dir / stats_subdir
 if not rp_dir.exists():
