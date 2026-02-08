@@ -28,7 +28,7 @@ layout = BIDSLayout(basepath)
 # -----------------------
 # CONFIG
 # -----------------------
-version = 4                 # 1=v, 2=a
+version = 3                 # 1=v, 2=a
 stats_subdir = "Zscoring"   
 
 if version == 1:
@@ -79,8 +79,9 @@ group_df = pd.read_csv(group_csv)
 
 electrode_sets = sorted(subj_df["set"].unique())
 
+
 def bin_label(tmin, tmax):
-    return f"{tmin:.1f}–{tmax:.1f}s"
+    return f"{tmin:.2f}–{tmax:.2f}s"
 
 subj_df["bin_label"]  = subj_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
 group_df["bin_label"] = group_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
