@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=eeg_erp_rp
+#SBATCH --job-name=eeg_erp_rp_groupplots
 #SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
@@ -46,4 +46,4 @@ apptainer exec --cleanenv \
   --env OUT_DIR="${OUT_DIR}" \
   --env HDDM_DIR="${HDDM_DIR}" \
   "${IMAGE}" \
-  python "${PROJECT_DIR}/EEG/eeg_erp_rp.py"
+  python "${PROJECT_DIR}/EEG/eeg_erp_groupplots_rp.py"
