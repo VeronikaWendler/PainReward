@@ -61,27 +61,32 @@ if not os.path.exists(outpath):
 #----
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
+# ---- versions / output routing ----
 version = 3
 v1_mode = "joint"
 v2_mode = "joint"
 v3_mode = "joint"
 v4_mode = "joint"
 
-base_root = opj(outpath, "erps_massuni_sv_cuelong")
-os.makedirs(base_root, exist_ok=True)
+# base output root: OUT_DIR/erps_massuni_sv_cuelong
+base_root = Path(outpath) / "erps_massuni_sv_cuelong"
+base_root.mkdir(parents=True, exist_ok=True)
 
 if version == 1:
-    outpath = opj(base_root, "v1_rp_drift_joint")
+    outpath = base_root / "v1_rp_drift_joint"
 elif version == 2:
-    outpath = opj(base_root, "v2_rp_boundary_joint")
+    outpath = base_root / "v2_rp_boundary_joint"
 elif version == 3:
-    outpath = opj(base_root, "v3_rp_drift_joint_longwindow")
+    outpath = base_root / "v3_rp_drift_joint_longwindow"
 elif version == 4:
-    outpath = opj(base_root, "v4_rp_boundary_joint_longwindow")
+    outpath = base_root / "v4_rp_boundary_joint_longwindow"
 else:
     raise ValueError("version must be 1, 2, 3, or 4")
 
-os.makedirs(outpath, exist_ok=True)
+outpath.mkdir(parents=True, exist_ok=True)
+
+print(f"[INFO] base_root: {base_root} (exists={base_root.exists()})")
+print(f"[INFO] outpath:   {outpath} (exists={outpath.exists()})")
 
 
 # participants
