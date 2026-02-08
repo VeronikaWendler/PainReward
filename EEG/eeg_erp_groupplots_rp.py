@@ -115,6 +115,7 @@ for set_name in electrode_sets:
         if sdf.empty:
             continue
 
+        # order bins
         bins_sorted = (
             sdf[["bin_tmin", "bin_tmax", "bin_label"]]
             .drop_duplicates()
@@ -124,32 +125,51 @@ for set_name in electrode_sets:
 
         x = np.arange(len(bins_sorted))
         betas = sdf["beta_z"].to_numpy(float)
+        tvals = sdf["t"].to_numpy(float)
         pvals = sdf["p"].to_numpy(float)
         pfdr  = sdf["p_fdr_bh"].to_numpy(float) if has_fdr else np.full_like(pvals, np.nan)
 
-        fig, ax = plt.subplots(figsize=(6.2, 3.4))
-        ax.bar(x, betas, width=0.6)
+        # compute SE(beta) from beta/t 
+        se = np.full_like(betas, np.nan)
+        ok = np.isfinite(betas) & np.isfinite(tvals) & (np.abs(tvals) > 1e-12)
+        se[ok] = np.abs(betas[ok] / tvals[ok])
+
+        fig, ax = plt.subplots(figsize=(6.6, 3.6))
+
+        ax.bar(
+            x, betas, width=0.6,
+            yerr=se, capsize=4, ecolor="black"
+        )
+
         ax.axhline(0, linestyle="--", color="gray")
         ax.set_xticks(x)
         ax.set_xticklabels(bins_sorted["bin_label"].to_list())
         ax.set_ylabel("β (standardized)")
         ax.set_title(f"{out_prefix.upper()} RP_mean_uV ~ {predictor}\n{set_name} (joint + RT)")
 
+        # annotate and star based on FDR 
         for i in range(len(betas)):
             if not np.isfinite(betas[i]):
                 continue
-            txt = f"p={pvals[i]:.3f}"
-            if np.isfinite(pfdr[i]):
-                txt += f"\nFDR={pfdr[i]:.3f}"
-            ax.text(x[i], betas[i], txt, ha="center", va="bottom", fontsize=8)
 
-            # star criterion: prefer FDR, else raw p
-            sig = (np.isfinite(pfdr[i]) and pfdr[i] < 0.05) if has_fdr else (np.isfinite(pvals[i]) and pvals[i] < 0.05)
+            if has_fdr and np.isfinite(pfdr[i]):
+                txt = f"p={pvals[i]:.3f}\nFDR={pfdr[i]:.3f}"
+                sig = pfdr[i] < 0.05
+            else:
+                txt = f"p={pvals[i]:.3f}"
+                sig = np.isfinite(pvals[i]) and (pvals[i] < 0.05)
+
+            y_text = betas[i]
+            if np.isfinite(se[i]):
+                y_text = betas[i] + np.sign(betas[i]) * (se[i] + 0.05)
+            ax.text(x[i], y_text, txt, ha="center", va="bottom", fontsize=8)
+
             if sig:
-                ax.text(x[i], betas[i], "*", ha="center", va="bottom", fontsize=16)
+                ax.text(x[i], y_text, "*", ha="center", va="bottom", fontsize=16)
 
         fig.tight_layout()
-        fig.savefig(outfigpath / f"{out_prefix}_{set_name}__betas_{predictor}.svg", dpi=600, bbox_inches="tight")
+        fig.savefig(outfigpath / f"{out_prefix}_{set_name}__betas_{predictor}.svg",
+                    dpi=600, bbox_inches="tight")
         plt.close(fig)
 
 # -------------------------
