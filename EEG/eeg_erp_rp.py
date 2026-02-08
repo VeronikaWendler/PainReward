@@ -61,7 +61,7 @@ if not os.path.exists(outpath):
 #----
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-version = 1
+version = 2
 v1_mode = "joint" 
 v2_mode = "joint" 
 
