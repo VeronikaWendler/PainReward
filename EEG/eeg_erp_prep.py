@@ -28,11 +28,11 @@ import re
 
 
 # set the version to run (either decision or passive phase)
-version = 1    # 1 = decision, 2 = passive
+version = 2    # 1 = decision, 2 = passive
 
 # this defines cue-locking or response-locking
 # what to lock to: 'cue' (off+) or 'response'
-lock_type = 'response'       # cue or cue_long or response
+lock_type = 'cue'       # cue or cue_long or response
 
 erp_mode = ''           # if set to classic_rp, then also make sure to copy parts of the prep. pipeline from the classic ERP potential paper from Gluth 2013 = classic_rp
 
@@ -141,6 +141,7 @@ reject_stats = pd.DataFrame({
     count_col: 0,
 })
 
+reject_stats["n_target"] = 0
 
 
 for p in part:
@@ -249,8 +250,17 @@ for p in part:
     else:
         raise ValueError("lock_type must be 'cue' or 'response'")
 
-    
-    
+    # Number of events for epoching
+    n_target = len(events_epoch)
+
+    reject_stats.loc[reject_stats["part"] == p, "n_target"] = n_target
+
+    if n_target == 0:
+        raise RuntimeError(
+            f"{p}: n_target=0. No events found for epoching. "
+            f"Check events.tsv trial_type values (is it really 'off+' in passive?)."
+        )
+
     # events_c = events_c[events_c['trial_type'] != 'DIN7']
     # events_c = events_c[events_c['trial_type'] != 'RSTR']
     # valid_trial_types = ["off+", "DIN8", "res+", "fix+", "fee+", "fee-", "fix+", "cdow", "shk-"]
@@ -323,7 +333,8 @@ for p in part:
     # reject_stats.loc[reject_stats.part == p,
     #                  reject_stats.columns == 'perc_removed_cues'] = ((125 - len(erp_cues)) / 125 * 100)
     
-    reject_stats.loc[reject_stats["part"] == p, "perc_removed_cues"] = ((125 - len(erp_cues)) / 125) * 100.0
+    #reject_stats.loc[reject_stats["part"] == p, "perc_removed_cues"] = ((125 - len(erp_cues)) / 125) * 100.0
+    reject_stats.loc[reject_stats["part"] == p, "perc_removed_cues"] = ((n_target - len(erp_cues)) / n_target) * 100.0
 
         
     if lock_type == 'cue':
@@ -456,9 +467,14 @@ for p in part:
         
     #
     # Single trials for cues
-    events_c['trialsnum'] = range(1, 126)
-    events_c['trials_name'] = ['trial_' + str(s).zfill(3)
-                               for s in range(1, 126)]
+    #events_c['trialsnum'] = range(1, 126)
+    #events_c['trials_name'] = ['trial_' + str(s).zfill(3)
+    #                           for s in range(1, 126)]
+    # Make trial numbers match the actual number of events used for epoching
+    n_trials = len(events_c)
+    events_c["trialsnum"] = np.arange(1, n_trials + 1)
+    events_c["trials_name"] = [f"trial_{i:03d}" for i in range(1, n_trials + 1)]
+
     events_c['participant_id'] = p
     events_cues = np.asarray(events_c[['sample', 'empty', 'trialsnum']])
     trials_dict = dict()
@@ -509,6 +525,7 @@ for p in part:
     plt.close('all')
     #-------------------------------------------------------------------------------------------
 
+
 # Save rejection stats
 if version == 1 and lock_type == "cue":
     reject_stats["perc_removed_all"] = (1 - reject_stats[count_col] / 125) * 100
@@ -530,10 +547,13 @@ elif version == 1 and lock_type == "response":
     print(f"Saved decision response ERP rejection stats{suffix}.")
 
 elif version == 2:
-    reject_stats["perc_removed_all"] = (1 - reject_stats[["Off+"]].sum(axis=1) / 125) * 100
+    mask = reject_stats["n_target"] > 0
+    reject_stats.loc[mask, "perc_removed_all"] = (1 - reject_stats.loc[mask, count_col] / reject_stats.loc[mask, "n_target"]) * 100
+    reject_stats.loc[~mask, "perc_removed_all"] = np.nan
     reject_stats.to_csv(opj(outpath, "passive_erps_rejectionstats.csv"), index=False)
     reject_stats.describe().to_csv(opj(outpath, "passive_erps_rejectionstats_desc.csv"))
     print("Saved passive ERP rejection stats.")
+
 
 else:
     print("No version")
