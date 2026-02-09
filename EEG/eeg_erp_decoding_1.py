@@ -72,6 +72,7 @@ N_SPLITS = 5
 N_PERM = 5000
 ALPHA_CLUSTER = 0.05
 CHANCE = 0.5
+KEY_TRIALNUM = "trialsnum"
 
 # downsample for speed
 RESAMPLE_SFREQ = 256  # set None to keep original
@@ -107,8 +108,16 @@ def load_passive_beh(sub: str) -> pd.DataFrame:
     beh_path = RAW_DIR / sub / "eeg" / f"{sub}{BEH_SUFFIX}"
     if not beh_path.exists():
         raise FileNotFoundError(f"Missing beh.tsv for {sub}: {beh_path}")
+
     beh = pd.read_csv(beh_path, sep="\t")
-    return beh.reset_index(drop=True)
+
+    if "fixcross.started" in beh.columns:
+        beh = beh[~beh["fixcross.started"].isna()].copy()
+
+    beh = beh.reset_index(drop=True)
+    beh[KEY_TRIALNUM] = np.arange(1, len(beh) + 1)
+    return beh
+
 
 
 def _coerce_int_series(s: pd.Series) -> pd.Series:
@@ -134,7 +143,23 @@ def merge_beh_into_epochs(epo: mne.Epochs, beh: pd.DataFrame, sub: str) -> mne.E
     if (COL_COND in md.columns) and (COL_LEVEL in md.columns):
         print(f"{sub}: epochs.metadata already contains {COL_COND}+{COL_LEVEL} (no merge needed)")
         return epo
+    
+    if (KEY_TRIALNUM in md.columns) and (KEY_TRIALNUM in beh.columns):
+        merged = md.merge(
+            beh[[KEY_TRIALNUM, COL_COND, COL_LEVEL]],
+            on=KEY_TRIALNUM,
+            how="left",
+            validate="1:1",
+        )
 
+        if merged[COL_COND].isna().any() or merged[COL_LEVEL].isna().any():
+            md.head(50).to_csv(DEBUG_DIR / f"{sub}_epo_md_head.csv", index=False)
+            beh.head(50).to_csv(DEBUG_DIR / f"{sub}_beh_head.csv", index=False)
+            raise ValueError(f"{sub}: trialsnum-merge produced unlabeled epochs.")
+
+        epo.metadata = merged
+        print(f"{sub}: merged beh into epochs using '{KEY_TRIALNUM}'")
+        return epo
 
     for col in [COL_COND, COL_LEVEL]:
         if col not in beh.columns:
