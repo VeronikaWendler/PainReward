@@ -218,11 +218,35 @@ for p in part:
     else:
         print("No version")
         
-    subject_i = p.split('-')[-1]
-    # Load trial info in scr data
-    events = pd.read_csv(layout.get(subject=subject_i, extension='tsv',
-                                    suffix='events',
-                                    return_type='filename')[0], sep='\t')
+
+    subject_i = p.split("-")[-1]
+
+    task = "passive" if version == 2 else "decision"
+    events_matches = layout.get(
+        subject=subject_i,
+        task=task,
+        suffix="events",
+        extension=".tsv",
+        return_type="filename",
+        )
+
+    if len(events_matches) == 0:
+        raise RuntimeError(f"{p}: No events.tsv found for task='{task}' (subject={subject_i}).")
+
+    if len(events_matches) > 1:
+        print(f"{p}: WARNING: multiple events.tsv found for task='{task}':")
+        for f in events_matches:
+            print("   ", f)
+
+    events_fname = events_matches[0]
+    print(f"{p}: loading events from {events_fname}")
+
+    events = pd.read_csv(events_fname, sep="\t")
+
+    print(
+        f"{p}: trial_type unique (first 50):",
+        sorted(events["trial_type"].dropna().astype(str).unique())[:50],
+    )
   
     # Drop unused channels
     chans_to_drop = [c for c in ['HEOGL', 'HEOGR', 'VEOGL',
