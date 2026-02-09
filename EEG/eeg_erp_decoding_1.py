@@ -14,7 +14,7 @@ Optional (recommended once):
 - Decode stimulus type: money vs pain (sanity check that pipeline works)
 
 Outputs:
-  derivatives/statistics_new/mvpa_passive_step1/
+  derivatives/statistics/mvpa_passive_step1/
 """
 
 from __future__ import annotations
@@ -38,20 +38,29 @@ from scipy import stats
 # -----------------------------
 # Paths 
 # -----------------------------
-PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
+DATA_DIR = Path(os.getenv("DATA_DIR", "")).expanduser()
+OUT_BASE = Path(os.getenv("OUT_DIR", "")).expanduser()
 
-RAW_DIR = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"
+if not DATA_DIR:
+    raise RuntimeError("DATA_DIR env var is not set. In SLURM you export DATA_DIR=/pr/...")
+
+RAW_DIR = DATA_DIR
 DERIV_DIR = RAW_DIR / "derivatives"
 
+# output folder (use OUT_DIR if provided, else default under derivatives)
+if OUT_BASE and OUT_BASE.exists():
+    OUT_DIR = OUT_BASE / "statistics" / "mvpa_passive_step1"
+else:
+    OUT_DIR = DERIV_DIR / "statistics" / "mvpa_passive_step1"
+
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+DEBUG_DIR = OUT_DIR / "debug"
+DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+
+# epochs/beh locations relative to subject folder
 EPO_DIR = Path("eeg") / "erps_passive"
 EPO_SUFFIX = "_passive_cues_singletrials-epo.fif"
 BEH_SUFFIX = "_task-passive_beh.tsv"
-
-OUT_DIR = DERIV_DIR / "statistics_new" / "mvpa_passive_step1"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-DEBUG_DIR = OUT_DIR / "debug"
-DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 # -----------------------------
 # Decoding params
@@ -96,17 +105,7 @@ def load_passive_beh(sub: str) -> pd.DataFrame:
     beh_path = RAW_DIR / sub / "eeg" / f"{sub}{BEH_SUFFIX}"
     if not beh_path.exists():
         raise FileNotFoundError(f"Missing beh.tsv for {sub}: {beh_path}")
-
     beh = pd.read_csv(beh_path, sep="\t")
-
-    # Mirror your preprocessing exclusion (if present)
-    if "fixcross.started" in beh.columns:
-        beh = beh[~beh["fixcross.started"].isna()].copy()
-
-    # normalize condition casing
-    if COL_COND in beh.columns:
-        beh[COL_COND] = beh[COL_COND].astype(str).str.lower()
-
     return beh.reset_index(drop=True)
 
 
