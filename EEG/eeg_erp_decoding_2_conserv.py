@@ -34,6 +34,7 @@ from mne.decoding import SlidingEstimator, cross_val_multiscore
 from mne.stats import permutation_cluster_1samp_test
 from scipy import stats
 from tqdm.auto import tqdm
+import json
 
 
 # -----------------------------
@@ -362,7 +363,8 @@ def subject_decode(
         groups=groups if isinstance(cv, GroupKFold) else None,
         n_jobs=1
     )
-    return scores.mean(axis=0)
+    cv_used = "GroupKFold" if isinstance(cv, GroupKFold) else "StratifiedKFold"
+    return scores.mean(axis=0), cv_used
 
 
 
@@ -521,11 +523,147 @@ def alignment_sanity_check(md: pd.DataFrame, sub: str, log):
             f"Could be block design, but double-check merge. "
             f"Saved {preview_path.name}")
 
+def save_group_summaries(
+    *,
+    tag: str,
+    scores_all: np.ndarray,      # (n_subj, n_times)
+    times: np.ndarray,           # (n_times,)
+    included: list[str],
+    stats_out: dict,
+    out_dir: Path,
+    alpha: float = 0.05,
+):
+    """
+    Save summary stats that are useful for reports + later analyses.
+    Produces:
+      - {tag}_grand_mean_sem.csv
+      - {tag}_sig_timepoints.csv
+      - {tag}_cluster_table.csv
+      - {tag}_summary.json
+    """
+    mean = scores_all.mean(axis=0)
+    sem = scores_all.std(axis=0, ddof=1) / np.sqrt(scores_all.shape[0])
+
+    # ---- timecourse summary ----
+    df_tc = pd.DataFrame({
+        "time_s": times,
+        "mean_auc": mean,
+        "sem_auc": sem,
+        "mean_above_chance": mean - CHANCE,
+        "T_obs": stats_out["T_obs"],
+        "p_map": stats_out["p_map"],
+        "sig": stats_out["p_map"] < alpha,
+    })
+    df_tc.to_csv(out_dir / f"{tag}_grand_mean_sem.csv", index=False)
+
+    # ---- peak stats ----
+    peak_idx = int(np.argmax(mean))
+    peak_auc = float(mean[peak_idx])
+    peak_time = float(times[peak_idx])
+
+    peak_t_idx = int(np.argmax(stats_out["T_obs"]))
+    peak_t = float(stats_out["T_obs"][peak_t_idx])
+    peak_t_time = float(times[peak_t_idx])
+
+    # ---- cluster table ----
+    clusters = stats_out["clusters"]
+    cluster_pv = stats_out["cluster_pv"]
+
+    rows = []
+    for i, (mask, p) in enumerate(zip(clusters, cluster_pv)):
+        mask = np.asarray(mask, dtype=bool)
+        if not mask.any():
+            continue
+
+        t_start = float(times[np.where(mask)[0][0]])
+        t_end = float(times[np.where(mask)[0][-1]])
+        dur_ms = (t_end - t_start) * 1000.0
+
+        # effect metrics inside cluster
+        eff = (scores_all[:, mask] - CHANCE)  # (n_subj, n_cluster_times)
+        mean_eff = float(eff.mean())
+        # sign is based on mean effect (positive=above chance)
+        sign = "pos" if mean_eff >= 0 else "neg"
+
+        # cluster mass: sum of T_obs within cluster (common reporting stat)
+        cl_mass = float(stats_out["T_obs"][mask].sum())
+        cl_max_t = float(stats_out["T_obs"][mask].max())
+        cl_min_t = float(stats_out["T_obs"][mask].min())
+
+        rows.append({
+            "cluster": i,
+            "p_value": float(p),
+            "sign": sign,
+            "t_start_s": t_start,
+            "t_end_s": t_end,
+            "duration_ms": dur_ms,
+            "cluster_mass_sumT": cl_mass,
+            "cluster_maxT": cl_max_t,
+            "cluster_minT": cl_min_t,
+            "cluster_mean_effect_auc_minus_chance": mean_eff,
+        })
+
+    df_cl = pd.DataFrame(rows).sort_values("p_value") if len(rows) else pd.DataFrame(
+        columns=[
+            "cluster","p_value","sign","t_start_s","t_end_s","duration_ms",
+            "cluster_mass_sumT","cluster_maxT","cluster_minT",
+            "cluster_mean_effect_auc_minus_chance"
+        ]
+    )
+    df_cl.to_csv(out_dir / f"{tag}_cluster_table.csv", index=False)
+
+    # ---- simple significant timepoints file (nice for later overlays) ----
+    df_sig = df_tc.loc[:, ["time_s", "p_map", "sig"]].copy()
+    df_sig.to_csv(out_dir / f"{tag}_sig_timepoints.csv", index=False)
+
+    # ---- metadata JSON ----
+    meta = {
+        "tag": tag,
+        "n_subjects": int(scores_all.shape[0]),
+        "n_times": int(scores_all.shape[1]),
+        "chance_auc": float(CHANCE),
+        "alpha_cluster": float(alpha),
+        "tfce_or_threshold": stats_out.get("t_thresh", None),
+        "peak_auc": peak_auc,
+        "peak_time_s": peak_time,
+        "peak_T_obs": peak_t,
+        "peak_T_time_s": peak_t_time,
+        "n_clusters": int(len(cluster_pv)),
+        "min_cluster_p": float(np.min(cluster_pv)) if len(cluster_pv) else 1.0,
+        "included_subjects": included,
+    }
+    with open(out_dir / f"{tag}_summary.json", "w") as f:
+        json.dump(meta, f, indent=2)
+
+def append_subject_summary(
+    records: list[dict],
+    *,
+    sub: str,
+    which: str,
+    shuffle: bool,
+    md_used: pd.DataFrame,
+    y: np.ndarray,
+    groups: np.ndarray | None,
+    cv_used: str,
+):
+    rec = {
+        "subject": sub,
+        "which": which,
+        "shuffle": bool(shuffle),
+        "n_trials": int(len(y)),
+        "n_low": int(np.sum(y == 0)) if which in ("money","pain") else None,
+        "n_high": int(np.sum(y == 1)) if which in ("money","pain") else None,
+        "n_classes": int(len(np.unique(y))),
+        "has_blocks": bool(groups is not None),
+        "n_blocks": int(len(np.unique(groups))) if groups is not None else None,
+        "cv": cv_used,
+    }
+    records.append(rec)
 
 
 def run(which: str, shuffle: bool = False):
     try:
-        from tqdm.auto import tqdm  
+        from tqdm.auto import tqdm
     except Exception:
         tqdm = None
 
@@ -542,6 +680,9 @@ def run(which: str, shuffle: bool = False):
     scores_all, included, skipped = [], [], []
     times_ref = None
 
+    # subject-level summary rows
+    subj_records: list[dict] = []
+
     pbar = subs
     if tqdm is not None:
         pbar = tqdm(
@@ -553,7 +694,6 @@ def run(which: str, shuffle: bool = False):
         )
 
     for sub in pbar:
-        # show which subject we're on
         if tqdm is not None:
             try:
                 pbar.set_postfix_str(sub)
@@ -579,7 +719,6 @@ def run(which: str, shuffle: bool = False):
             md = epo.metadata.reset_index(drop=True)
             alignment_sanity_check(md, sub=sub, log=log)
 
-
             if md[COL_COND].isna().any() or md[COL_LEVEL].isna().any():
                 n_nan_cond = int(md[COL_COND].isna().sum())
                 n_nan_level = int(md[COL_LEVEL].isna().sum())
@@ -596,7 +735,6 @@ def run(which: str, shuffle: bool = False):
                 md.head(50).to_csv(DEBUG_DIR / f"{sub}_md_aftermerge_head.csv", index=False)
                 raise RuntimeError(f"{sub}: unexpected condition labels found: {bad_cond}")
 
-            # lightweight per-subject info (won’t destroy tqdm)
             log(f"{sub}: n_epochs={len(epo)} n_beh={len(beh)}")
 
             # ---------- resample ----------
@@ -613,10 +751,10 @@ def run(which: str, shuffle: bool = False):
 
             save_trial_counts(md_used, sub=sub, which=which)
 
+            # ---------- groups for block-wise CV ----------
             groups = None
             if KEY_BLOCK in md_used.columns:
                 groups = md_used[KEY_BLOCK].to_numpy()
-
 
             # ---------- time-axis consistency ----------
             if times_ref is None:
@@ -626,18 +764,28 @@ def run(which: str, shuffle: bool = False):
                     raise RuntimeError("Time axis mismatch across subjects.")
 
             # ---------- decode ----------
-            scores = subject_decode(X, y, shuffle=shuffle, groups=groups)
-            scores_all.append(scores)
+            scores_1d, cv_used = subject_decode(X, y, shuffle=shuffle, groups=groups)
+            scores_all.append(scores_1d)
             included.append(sub)
 
-            # update postfix with something useful
+            append_subject_summary(
+                subj_records,
+                sub=sub,
+                which=which,
+                shuffle=shuffle,
+                md_used=md_used,
+                y=y,
+                groups=groups,
+                cv_used=cv_used,
+            )
+
             if tqdm is not None:
                 try:
-                    pbar.set_postfix_str(f"{sub} | trials={len(y)}")
+                    pbar.set_postfix_str(f"{sub} | trials={len(y)} | {cv_used}")
                 except Exception:
                     pass
 
-            log(f"Included {sub} ({which}{'_shuf' if shuffle else ''}): trials={len(y)}")
+            log(f"Included {sub} ({which}{'_shuf' if shuffle else ''}): trials={len(y)} | cv={cv_used}")
 
         except Exception as e:
             skipped.append((sub, str(e)))
@@ -647,12 +795,13 @@ def run(which: str, shuffle: bool = False):
     if len(scores_all) < 8:
         raise RuntimeError(f"Too few subjects included for group stats ({which}): n={len(scores_all)}")
 
-    scores_all = np.stack(scores_all, axis=0)
+    scores_all = np.stack(scores_all, axis=0)  # (n_subj, n_times)
     times = times_ref
 
     stats_out = group_cluster(scores_all, times)
 
     tag = f"passive_{which}" + ("_shuffle" if shuffle else "")
+
     np.savez(
         OUT_DIR / f"{tag}_group_results.npz",
         scores_by_subj=scores_all,
@@ -679,18 +828,32 @@ def run(which: str, shuffle: bool = False):
         out_png=OUT_DIR / f"{tag}_group_plot.png",
     )
 
+    pd.DataFrame(subj_records).to_csv(OUT_DIR / f"{tag}_subject_summary.csv", index=False)
+
+    save_group_summaries(
+        tag=tag,
+        scores_all=scores_all,
+        times=times,
+        included=included,
+        stats_out=stats_out,
+        out_dir=OUT_DIR,
+        alpha=ALPHA_CLUSTER,
+    )
+
     min_p = float(np.min(stats_out["cluster_pv"])) if len(stats_out["cluster_pv"]) else 1.0
-    log(f"\nDONE {which}{'_shuffle' if shuffle else ''}: included n={len(included)}, min cluster p={min_p:.6f}")
+    log(f"\nFinished {which}{'_shuffle' if shuffle else ''}: included n={len(included)}, min cluster p={min_p:.6f}")
+
+
 
 
 def main():
     mne.set_log_level("WARNING")
 
-    # Step 1 main analyses
+    # Step 1 main analyses #
     run("money", shuffle=False)
     run("pain", shuffle=False)
 
-    # sanity check money vs pain
+    # sanity check money vs pain    
     if RUN_STIMTYPE_SANITY:
         run("stimtype", shuffle=False)
 
