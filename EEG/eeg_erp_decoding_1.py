@@ -38,9 +38,7 @@ from scipy import stats
 # -----------------------------
 # Paths 
 # -----------------------------
-# -----------------------------
-# Paths (robust env handling)
-# -----------------------------
+
 DATA_DIR_STR = os.getenv("DATA_DIR", "").strip()
 OUT_DIR_STR = os.getenv("OUT_DIR", "").strip()
 
@@ -132,9 +130,11 @@ def merge_beh_into_epochs(epo: mne.Epochs, beh: pd.DataFrame, sub: str) -> mne.E
         raise ValueError(f"{sub}: epochs has no metadata at all; cannot merge beh.")
 
     md = epo.metadata.reset_index(drop=True).copy()
-
+    
     if (COL_COND in md.columns) and (COL_LEVEL in md.columns):
+        print(f"{sub}: epochs.metadata already contains {COL_COND}+{COL_LEVEL} (no merge needed)")
         return epo
+
 
     for col in [COL_COND, COL_LEVEL]:
         if col not in beh.columns:
@@ -173,15 +173,19 @@ def merge_beh_into_epochs(epo: mne.Epochs, beh: pd.DataFrame, sub: str) -> mne.E
                 "Likely keys don't align between events-derived metadata and beh.tsv."
             )
 
+    
         epo.metadata = merged
+        print(f"{sub}: merged beh into epochs using KEYS ({KEY_BLOCK}, {KEY_TRIAL})")
         return epo
-
+    
     if len(md) == len(beh):
         merged = md.copy()
         merged[COL_COND] = beh[COL_COND].to_numpy()
         merged[COL_LEVEL] = beh[COL_LEVEL].to_numpy()
         epo.metadata = merged
+        print(f"{sub}: merged beh into epochs by ORDER (len match: {len(md)})")
         return epo
+
 
     md.head(50).to_csv(DEBUG_DIR / f"{sub}_epo_md_head.csv", index=False)
     beh.head(50).to_csv(DEBUG_DIR / f"{sub}_beh_head.csv", index=False)
@@ -398,8 +402,38 @@ def run(which: str, shuffle: bool = False):
             epo = load_passive_epochs(sub)
             beh = load_passive_beh(sub)
             epo = merge_beh_into_epochs(epo, beh, sub=sub)
+            
+            # drop bad trials 
+            if epo.metadata is None:
+                raise RuntimeError(f"{sub}: metadata is None after merge (should never happen).")
+            
+            if "badtrial" in epo.metadata.columns:
+                n_bad = int(epo.metadata["badtrial"].fillna(0).astype(int).sum())
+                if n_bad > 0:
+                    epo = epo.copy()[epo.metadata["badtrial"].fillna(0).astype(int) == 0]
+                    print(f"{sub}: dropped bad trials for MVPA: {n_bad} removed, {len(epo)} kept")
+            else:
+                print(f"{sub}: WARNING no 'badtrial' column found in epochs.metadata (not dropping trials)")
+            
+            md = epo.metadata  
+            
+            
+            if md[COL_COND].isna().any() or md[COL_LEVEL].isna().any():
+                n_nan_cond = int(md[COL_COND].isna().sum())
+                n_nan_level = int(md[COL_LEVEL].isna().sum())
+                md.head(50).to_csv(DEBUG_DIR / f"{sub}_md_aftermerge_head.csv", index=False)
+                raise RuntimeError(
+                    f"{sub}: NaNs in merged labels. "
+                    f"{COL_COND} NaNs={n_nan_cond}, {COL_LEVEL} NaNs={n_nan_level}. "
+                    f"Saved {sub}_md_aftermerge_head.csv"
+                )
+            
+            cond_vals = set(md[COL_COND].astype(str).str.lower().unique())
+            bad_cond = cond_vals - {COND_MONEY, COND_PAIN}
+            if bad_cond:
+                md.head(50).to_csv(DEBUG_DIR / f"{sub}_md_aftermerge_head.csv", index=False)
+                raise RuntimeError(f"{sub}: unexpected condition labels found: {bad_cond}")
 
-            md = epo.metadata
             print(sub, "n_epochs", len(epo), "n_beh", len(beh))
             print(md[["condition", "level"]].head())
             print("condition counts:", md["condition"].value_counts(dropna=False).to_dict())
