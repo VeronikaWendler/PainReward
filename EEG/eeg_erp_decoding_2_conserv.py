@@ -366,6 +366,42 @@ def subject_decode(
     cv_used = "GroupKFold" if isinstance(cv, GroupKFold) else "StratifiedKFold"
     return scores.mean(axis=0), cv_used
 
+def _cluster_to_bool_mask(cl, n_times: int) -> np.ndarray | None:
+    if isinstance(cl, (tuple, list)):
+        if len(cl) == 0:
+            return None
+        if len(cl) == 1:
+            return _cluster_to_bool_mask(cl[0], n_times)
+        return _cluster_to_bool_mask(cl[0], n_times)
+
+    if isinstance(cl, slice):
+        m = np.zeros(n_times, dtype=bool)
+        m[cl] = True
+        return m
+
+    arr = np.asarray(cl)
+
+    if arr.dtype == bool:
+        arr = arr.squeeze()
+        if arr.ndim == 1 and arr.size == n_times:
+            return arr
+        arr = arr.ravel()
+        if arr.size == n_times:
+            return arr
+        return None
+    try:
+        idx = arr.astype(int).ravel()
+    except Exception:
+        return None
+
+    if idx.size == 0:
+        return None
+    if np.any(idx < 0) or np.any(idx >= n_times):
+        return None
+
+    m = np.zeros(n_times, dtype=bool)
+    m[idx] = True
+    return m
 
 
 def group_cluster(scores_by_subj: np.ndarray, times: np.ndarray):
@@ -425,24 +461,23 @@ def group_cluster(scores_by_subj: np.ndarray, times: np.ndarray):
 
 
     p_map = np.ones(len(times), dtype=float)
+    clusters_fixed = []
+    
     for cl, p in zip(clusters, cluster_pv):
-        cl = np.asarray(cl, dtype=bool).squeeze()
-        if cl.ndim != 1:
-            cl = cl.ravel()
-        if cl.size != len(times):
+        m = _cluster_to_bool_mask(cl, len(times))
+        clusters_fixed.append(m)  
+        if m is None or not m.any():
             continue
-        p_map[cl] = np.minimum(p_map[cl], p)
-
-
+        p_map[m] = np.minimum(p_map[m], p)
+    
     return dict(
         T_obs=T_obs,
-        clusters=clusters,
+        clusters=clusters_fixed,  
         cluster_pv=cluster_pv,
         p_map=p_map,
         t_thresh=t_thresh_used,
     )
-
-
+    
 
 def plot_group(scores_by_subj: np.ndarray, times: np.ndarray, p_map: np.ndarray, title: str, out_png: Path):
     mean = scores_by_subj.mean(axis=0)
@@ -546,7 +581,6 @@ def save_group_summaries(
 ):
     """
     Save summary stats that are useful for reports + later analyses.
-    Produces:
       - {tag}_grand_mean_sem.csv
       - {tag}_sig_timepoints.csv
       - {tag}_cluster_table.csv
@@ -597,18 +631,12 @@ def save_group_summaries(
 
     rows = []
     for i, (mask, p) in enumerate(zip(clusters, cluster_pv)):
-        mask = np.asarray(mask, dtype=bool).squeeze()
-        if mask.ndim != 1:
-            mask = mask.ravel()
-        
-        # TFCE / some MNE versions can give weird-shaped masks; enforce correctness
-        if mask.size != scores_all.shape[1]:
-            raise RuntimeError(
-                f"{tag}: cluster mask length mismatch: mask.size={mask.size} "
-                f"but n_times={scores_all.shape[1]}. mask.shape={mask.shape}"
-            )
+        mask = _cluster_to_bool_mask(mask, scores_all.shape[1])
+        if mask is None:
+            continue
         if not mask.any():
             continue
+
 
         t_start = float(times[np.where(mask)[0][0]])
         t_end = float(times[np.where(mask)[0][-1]])
