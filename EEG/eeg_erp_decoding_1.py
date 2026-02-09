@@ -38,17 +38,21 @@ from scipy import stats
 # -----------------------------
 # Paths 
 # -----------------------------
-DATA_DIR = Path(os.getenv("DATA_DIR", "")).expanduser()
-OUT_BASE = Path(os.getenv("OUT_DIR", "")).expanduser()
+# -----------------------------
+# Paths (robust env handling)
+# -----------------------------
+DATA_DIR_STR = os.getenv("DATA_DIR", "").strip()
+OUT_DIR_STR = os.getenv("OUT_DIR", "").strip()
 
-if not DATA_DIR:
-    raise RuntimeError("DATA_DIR env var is not set. In SLURM you export DATA_DIR=/pr/...")
+if DATA_DIR_STR == "":
+    raise RuntimeError("DATA_DIR env var is not set. In SLURM export DATA_DIR=/pr/...")
 
-RAW_DIR = DATA_DIR
+RAW_DIR = Path(DATA_DIR_STR).expanduser()
 DERIV_DIR = RAW_DIR / "derivatives"
 
-# output folder (use OUT_DIR if provided, else default under derivatives)
-if OUT_BASE and OUT_BASE.exists():
+# Output folder
+if OUT_DIR_STR != "":
+    OUT_BASE = Path(OUT_DIR_STR).expanduser()
     OUT_DIR = OUT_BASE / "statistics" / "mvpa_passive_step1"
 else:
     OUT_DIR = DERIV_DIR / "statistics" / "mvpa_passive_step1"
@@ -394,6 +398,13 @@ def run(which: str, shuffle: bool = False):
             epo = load_passive_epochs(sub)
             beh = load_passive_beh(sub)
             epo = merge_beh_into_epochs(epo, beh, sub=sub)
+
+            md = epo.metadata
+            print(sub, "n_epochs", len(epo), "n_beh", len(beh))
+            print(md[["condition", "level"]].head())
+            print("condition counts:", md["condition"].value_counts(dropna=False).to_dict())
+            print("level counts:", md["level"].value_counts(dropna=False).to_dict())
+
 
             if RESAMPLE_SFREQ is not None:
                 epo = epo.copy().resample(RESAMPLE_SFREQ, npad="auto")

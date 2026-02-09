@@ -36,7 +36,10 @@ lock_type = 'cue'       # cue or cue_long or response
 # Passive uses 'fix+'; decision uses 'off+'
 
 DECISION_CUE_EVENT = "off+"
-PASSIVE_CUE_EVENTS = ["rew1", "rew2", "rew3", "rew4", "rew5"]
+PASSIVE_CUE_EVENTS = [
+    "rew1", "rew2", "rew3", "rew4", "rew5",
+    "shk1", "shk2", "shk3", "shk4", "shk5",
+]
 
 if lock_type in ["cue", "cue_long"]:
     count_col = "n_cue_kept"
@@ -271,21 +274,23 @@ for p in part:
     
     if lock_type in ["cue", "cue_long"]:
         cue_events = PASSIVE_CUE_EVENTS if version == 2 else [DECISION_CUE_EVENT]
+        present = set(events_c["trial_type"].dropna().astype(str).unique())
+        cue_events_present = [ev for ev in cue_events if ev in present]
 
-        present = set(events_c["trial_type"].astype(str).unique())
-        if not any(ev in present for ev in cue_events):
+        if len(cue_events_present) == 0:
             raise RuntimeError(
                 f"{p}: none of expected cue events found.\n"
-                f"Expected one of: {cue_events}\n"
+                f"Expected any of: {cue_events}\n"
                 f"Found (first 40): {sorted(list(present))[:40]}"
             )
 
-        events_c = events_c[events_c["trial_type"].isin(cue_events)].copy()
+        events_c = events_c[events_c["trial_type"].isin(cue_events_present)].copy()
         events_c = events_c.sort_values("sample").reset_index(drop=True)
-        events_id = {ev: i + 1 for i, ev in enumerate(cue_events)}  # rew1->1, ..., rew5->5
+        events_id = {ev: i + 1 for i, ev in enumerate(cue_events_present)}
         events_c["cue_num"] = events_c["trial_type"].map(events_id).astype(int)
 
         events_epoch = np.asarray(events_c[["sample", "empty", "cue_num"]])
+
 
     elif lock_type == "response":
         events_id = {"resp_any": 3}
