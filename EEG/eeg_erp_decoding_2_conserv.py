@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, GroupKFold
 
 from mne.decoding import SlidingEstimator, cross_val_multiscore
 from mne.stats import permutation_cluster_1samp_test
@@ -44,7 +44,7 @@ DATA_DIR_STR = os.getenv("DATA_DIR", "").strip()
 OUT_DIR_STR = os.getenv("OUT_DIR", "").strip()
 
 if DATA_DIR_STR == "":
-    raise RuntimeError("DATA_DIR env var is not set. In SLURM export DATA_DIR=/pr/...")
+    raise RuntimeError("DATA_DIR env var not set")
 
 RAW_DIR = Path(DATA_DIR_STR).expanduser()
 DERIV_DIR = RAW_DIR / "derivatives"
@@ -52,9 +52,9 @@ DERIV_DIR = RAW_DIR / "derivatives"
 # Output folder
 if OUT_DIR_STR != "":
     OUT_BASE = Path(OUT_DIR_STR).expanduser()
-    OUT_DIR = OUT_BASE / "statistics" / "mvpa_passive_step1"
+    OUT_DIR = OUT_BASE / "statistics" / "mvpa_passive_step1_conserv"
 else:
-    OUT_DIR = DERIV_DIR / "statistics" / "mvpa_passive_step1"
+    OUT_DIR = DERIV_DIR / "statistics" / "mvpa_passive_step1_conserv"
 
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 DEBUG_DIR = OUT_DIR / "debug"
@@ -126,28 +126,24 @@ def _coerce_int_series(s: pd.Series) -> pd.Series:
 
 
 def merge_beh_into_epochs(epo: mne.Epochs, beh: pd.DataFrame, sub: str) -> mne.Epochs:
-    """
-    Ensure epo.metadata contains condition + level from beh.tsv.
-
-    Strategy:
-      1) If epochs metadata already has condition+level, keep them
-      2) Else try merge on (blocks.thisN, trials.thisN) if present in BOTH.
-      3) Else fallback: order-based assignment if lengths match exactly.
-
-    We write debug CSVs if something fails.
-    """
     if epo.metadata is None:
         raise ValueError(f"{sub}: epochs has no metadata at all; cannot merge beh.")
 
     md = epo.metadata.reset_index(drop=True).copy()
-    
+
     if (COL_COND in md.columns) and (COL_LEVEL in md.columns):
         print(f"{sub}: epochs.metadata already contains {COL_COND}+{COL_LEVEL} (no merge needed)")
         return epo
-    
+
     if (KEY_TRIALNUM in md.columns) and (KEY_TRIALNUM in beh.columns):
+        cols_to_add = [KEY_TRIALNUM, COL_COND, COL_LEVEL]
+
+        for extra in [KEY_BLOCK, KEY_TRIAL]:
+            if extra in beh.columns:
+                cols_to_add.append(extra)
+
         merged = md.merge(
-            beh[[KEY_TRIALNUM, COL_COND, COL_LEVEL]],
+            beh[cols_to_add],
             on=KEY_TRIALNUM,
             how="left",
             validate="1:1",
@@ -199,19 +195,24 @@ def merge_beh_into_epochs(epo: mne.Epochs, beh: pd.DataFrame, sub: str) -> mne.E
                 "Likely keys don't align between events-derived metadata and beh.tsv."
             )
 
-    
         epo.metadata = merged
         print(f"{sub}: merged beh into epochs using KEYS ({KEY_BLOCK}, {KEY_TRIAL})")
         return epo
-    
+
+    # ---- final fallback: order merge only if lengths match ----
     if len(md) == len(beh):
         merged = md.copy()
         merged[COL_COND] = beh[COL_COND].to_numpy()
         merged[COL_LEVEL] = beh[COL_LEVEL].to_numpy()
+
+        # carry block/trial if possible
+        for extra in [KEY_BLOCK, KEY_TRIAL]:
+            if extra in beh.columns:
+                merged[extra] = beh[extra].to_numpy()
+
         epo.metadata = merged
         print(f"{sub}: merged beh into epochs by ORDER (len match: {len(md)})")
         return epo
-
 
     md.head(50).to_csv(DEBUG_DIR / f"{sub}_epo_md_head.csv", index=False)
     beh.head(50).to_csv(DEBUG_DIR / f"{sub}_beh_head.csv", index=False)
@@ -222,6 +223,7 @@ def merge_beh_into_epochs(epo: mne.Epochs, beh: pd.DataFrame, sub: str) -> mne.E
         f"- keys '{KEY_BLOCK}'/'{KEY_TRIAL}' not present in BOTH epochs.metadata and beh.tsv\n"
         "See debug CSVs in OUT_DIR/debug for columns present in each."
     )
+
 
 
 def make_binary_labels(level: np.ndarray) -> np.ndarray:
@@ -310,9 +312,16 @@ def select_trials_stimtype(epo: mne.Epochs) -> tuple[np.ndarray, np.ndarray, np.
     return X, y, times, md_f
 
 
-def subject_decode(X: np.ndarray, y: np.ndarray, shuffle: bool = False) -> np.ndarray:
+def subject_decode(
+    X: np.ndarray,
+    y: np.ndarray,
+    shuffle: bool = False,
+    groups: np.ndarray | None = None,
+) -> np.ndarray:
     """
-    Option 1: keep all trials; handle imbalance via class_weight='balanced'
+    Time-resolved decoding with CV.
+    Prefer GroupKFold if groups (e.g., blocks) are available -> more conservative.
+    Falls back to StratifiedKFold otherwise.
     """
     rng = np.random.default_rng(RANDOM_STATE)
     y_use = rng.permutation(y) if shuffle else y
@@ -323,42 +332,103 @@ def subject_decode(X: np.ndarray, y: np.ndarray, shuffle: bool = False) -> np.nd
             solver="liblinear",
             max_iter=2000,
             random_state=RANDOM_STATE,
-            class_weight="balanced",   
+            class_weight="balanced",
         )
     )
 
     time_decod = SlidingEstimator(clf, scoring="roc_auc")
-    cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
 
-    scores = cross_val_multiscore(time_decod, X, y_use, cv=cv, n_jobs=1)
-    return scores.mean(axis=0)  # (n_times,)
+    # choose CV 
+    cv = None
+    if groups is not None:
+        groups = np.asarray(groups)
+        # drop missing groups if any
+        ok = ~pd.isna(groups)
+        if ok.sum() == len(groups):
+            n_groups = len(np.unique(groups))
+            if n_groups >= 2:
+                # cannot have more splits than groups
+                n_splits = min(N_SPLITS, n_groups)
+                cv = GroupKFold(n_splits=n_splits)
+
+    if cv is None:
+        cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
+
+    scores = cross_val_multiscore(
+        time_decod,
+        X,
+        y_use,
+        cv=cv,
+        groups=groups if isinstance(cv, GroupKFold) else None,
+        n_jobs=1
+    )
+    return scores.mean(axis=0)
+
 
 
 def group_cluster(scores_by_subj: np.ndarray, times: np.ndarray):
     """
     Cluster permutation test on (AUC - 0.5) across time.
+    Tries TFCE first (threshold dict). Falls back if not supported.
     """
     X = scores_by_subj - CHANCE  # (n_subj, n_times)
 
-    p_form = 0.01
-    t_thresh = stats.t.ppf(1 - p_form / 2, df=X.shape[0] - 1)
+    # TFCE settings
+    tfce_thresh = dict(start=0.0, step=0.2)
 
-    T_obs, clusters, cluster_pv, H0 = permutation_cluster_1samp_test(
-        X,
-        n_permutations=N_PERM,
-        threshold=t_thresh,
-        tail=0,
-        out_type="mask",
-        n_jobs=1,
-        seed=RANDOM_STATE,
-        buffer_size=None,
-    )
+    try:
+        T_obs, clusters, cluster_pv, H0 = permutation_cluster_1samp_test(
+            X,
+            n_permutations=N_PERM,
+            threshold=tfce_thresh,   # TFCE
+            tail=0,
+            out_type="mask",
+            n_jobs=1,
+            seed=RANDOM_STATE,
+            buffer_size=None,
+        )
+        t_thresh_used = "tfce"
+    except Exception as e:
+        try:
+            T_obs, clusters, cluster_pv, H0 = permutation_cluster_1samp_test(
+                X,
+                n_permutations=N_PERM,
+                threshold=None,
+                tail=0,
+                out_type="mask",
+                n_jobs=1,
+                seed=RANDOM_STATE,
+                buffer_size=None,
+            )
+            t_thresh_used = "threshold=None"
+        except Exception:
+            # original parametric cluster-forming threshold
+            p_form = 0.01
+            t_thresh = stats.t.ppf(1 - p_form / 2, df=X.shape[0] - 1)
+            T_obs, clusters, cluster_pv, H0 = permutation_cluster_1samp_test(
+                X,
+                n_permutations=N_PERM,
+                threshold=t_thresh,
+                tail=0,
+                out_type="mask",
+                n_jobs=1,
+                seed=RANDOM_STATE,
+                buffer_size=None,
+            )
+            t_thresh_used = float(t_thresh)
 
     p_map = np.ones(len(times), dtype=float)
     for cl, p in zip(clusters, cluster_pv):
         p_map[cl] = np.minimum(p_map[cl], p)
 
-    return dict(T_obs=T_obs, clusters=clusters, cluster_pv=cluster_pv, p_map=p_map, t_thresh=t_thresh)
+    return dict(
+        T_obs=T_obs,
+        clusters=clusters,
+        cluster_pv=cluster_pv,
+        p_map=p_map,
+        t_thresh=t_thresh_used,
+    )
+
 
 
 def plot_group(scores_by_subj: np.ndarray, times: np.ndarray, p_map: np.ndarray, title: str, out_png: Path):
@@ -410,6 +480,47 @@ def save_trial_counts(md_used: pd.DataFrame, sub: str, which: str):
         )
 
     tab.to_csv(OUT_DIR / f"{sub}_passive_{which}_trial_counts.csv", index=False)
+
+
+def alignment_sanity_check(md: pd.DataFrame, sub: str, log):
+    """
+    Quick checks to catch obvious misalignment after merge.
+    Saves first 20 merged rows for visual inspection.
+    Warns on suspicious temporal structure (e.g., condition almost monotonic).
+    """
+    preview_path = DEBUG_DIR / f"{sub}_merged_preview20.csv"
+    md.head(20).to_csv(preview_path, index=False)
+
+    if COL_COND not in md.columns:
+        log(f"{sub}: alignment check skipped (no '{COL_COND}' in metadata).")
+        return
+
+    cond = md[COL_COND].astype(str).str.lower().to_numpy()
+    keep = np.isin(cond, [COND_MONEY, COND_PAIN])
+    cond = cond[keep]
+
+    if len(cond) < 20:
+        log(f"{sub}: alignment check skipped (too few labeled trials)")
+        return
+
+    # how often does condition change from one trial to the next?
+    switches = np.mean(cond[1:] != cond[:-1])
+
+    half = len(cond) // 2
+    early_m = np.mean(cond[:half] == COND_MONEY)
+    late_m = np.mean(cond[half:] == COND_MONEY)
+    diff = abs(early_m - late_m)
+
+    if switches < 0.05:
+        log(f"{sub}: WARNING condition switch-rate is very low ({switches:.3f}). "
+            f"Could be real block structure, but also can indicate misalignment. "
+            f"Saved {preview_path.name}")
+
+    if diff > 0.70:
+        log(f"{sub}: WARNING strong early/late condition split (|early_m-late_m|={diff:.2f}). "
+            f"Could be block design, but double-check merge. "
+            f"Saved {preview_path.name}")
+
 
 
 def run(which: str, shuffle: bool = False):
@@ -466,6 +577,8 @@ def run(which: str, shuffle: bool = False):
                 log(f"{sub}: WARNING no 'badtrial' column found in epochs.metadata (not dropping trials)")
 
             md = epo.metadata.reset_index(drop=True)
+            alignment_sanity_check(md, sub=sub, log=log)
+
 
             if md[COL_COND].isna().any() or md[COL_LEVEL].isna().any():
                 n_nan_cond = int(md[COL_COND].isna().sum())
@@ -500,6 +613,11 @@ def run(which: str, shuffle: bool = False):
 
             save_trial_counts(md_used, sub=sub, which=which)
 
+            groups = None
+            if KEY_BLOCK in md_used.columns:
+                groups = md_used[KEY_BLOCK].to_numpy()
+
+
             # ---------- time-axis consistency ----------
             if times_ref is None:
                 times_ref = times
@@ -508,7 +626,7 @@ def run(which: str, shuffle: bool = False):
                     raise RuntimeError("Time axis mismatch across subjects.")
 
             # ---------- decode ----------
-            scores = subject_decode(X, y, shuffle=shuffle)
+            scores = subject_decode(X, y, shuffle=shuffle, groups=groups)
             scores_all.append(scores)
             included.append(sub)
 
