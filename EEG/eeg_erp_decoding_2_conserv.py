@@ -419,9 +419,20 @@ def group_cluster(scores_by_subj: np.ndarray, times: np.ndarray):
             )
             t_thresh_used = float(t_thresh)
 
+    # p_map = np.ones(len(times), dtype=float)
+    # for cl, p in zip(clusters, cluster_pv):
+    #     p_map[cl] = np.minimum(p_map[cl], p)
+
+
     p_map = np.ones(len(times), dtype=float)
     for cl, p in zip(clusters, cluster_pv):
+        cl = np.asarray(cl, dtype=bool).squeeze()
+        if cl.ndim != 1:
+            cl = cl.ravel()
+        if cl.size != len(times):
+            continue
         p_map[cl] = np.minimum(p_map[cl], p)
+
 
     return dict(
         T_obs=T_obs,
@@ -544,6 +555,19 @@ def save_group_summaries(
     mean = scores_all.mean(axis=0)
     sem = scores_all.std(axis=0, ddof=1) / np.sqrt(scores_all.shape[0])
 
+    n = scores_all.shape[0]
+    tcrit = stats.t.ppf(0.975, df=n - 1)  # 95% CI (two-sided)
+    ci95_low = mean - tcrit * sem
+    ci95_high = mean + tcrit * sem
+
+    p_map = np.asarray(stats_out["p_map"]).squeeze()
+    if p_map.ndim != 1:
+        p_map = p_map.ravel()
+    if p_map.size == 1:
+        p_map = np.full(times.shape, float(p_map))
+    if p_map.size != times.size:
+        raise RuntimeError(f"{tag}: p_map length mismatch: {p_map.size} vs times {times.size}")
+
     # ---- timecourse summary ----
     df_tc = pd.DataFrame({
         "time_s": times,
@@ -551,8 +575,10 @@ def save_group_summaries(
         "sem_auc": sem,
         "mean_above_chance": mean - CHANCE,
         "T_obs": stats_out["T_obs"],
-        "p_map": stats_out["p_map"],
-        "sig": stats_out["p_map"] < alpha,
+        "p_map": p_map,
+        "sig": p_map < alpha,
+        "ci95_low_auc": ci95_low,
+        "ci95_high_auc": ci95_high,
     })
     df_tc.to_csv(out_dir / f"{tag}_grand_mean_sem.csv", index=False)
 
@@ -571,7 +597,16 @@ def save_group_summaries(
 
     rows = []
     for i, (mask, p) in enumerate(zip(clusters, cluster_pv)):
-        mask = np.asarray(mask, dtype=bool)
+        mask = np.asarray(mask, dtype=bool).squeeze()
+        if mask.ndim != 1:
+            mask = mask.ravel()
+        
+        # TFCE / some MNE versions can give weird-shaped masks; enforce correctness
+        if mask.size != scores_all.shape[1]:
+            raise RuntimeError(
+                f"{tag}: cluster mask length mismatch: mask.size={mask.size} "
+                f"but n_times={scores_all.shape[1]}. mask.shape={mask.shape}"
+            )
         if not mask.any():
             continue
 
