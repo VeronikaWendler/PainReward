@@ -33,6 +33,17 @@ version = 2    # 1 = decision, 2 = passive
 # this defines cue-locking or response-locking
 # what to lock to: 'cue' (off+) or 'response'
 lock_type = 'cue'       # cue or cue_long or response
+# Passive uses 'fix+'; decision uses 'off+'
+
+DECISION_CUE_EVENT = "off+"
+PASSIVE_CUE_EVENTS = ["rew1", "rew2", "rew3", "rew4", "rew5"]
+
+if lock_type in ["cue", "cue_long"]:
+    count_col = "n_cue_kept"
+else:
+    count_col = "Resp_any"
+
+
 
 erp_mode = ''           # if set to classic_rp, then also make sure to copy parts of the prep. pipeline from the classic ERP potential paper from Gluth 2013 = classic_rp
 
@@ -42,6 +53,10 @@ basepath = Path(os.getenv("DATA_DIR", PROJECT_DIR / "EEG" / "PainReward_sub-001-
 
 def ensure_dir(path):
     Path(path).mkdir(parents=True, exist_ok=True)
+
+def safe_tag(s: str) -> str:
+    return s.replace("+", "plus").replace("-", "minus")
+
 
 layout = BIDSLayout(basepath)
 # disable Numba JIT caching & compilation
@@ -128,10 +143,6 @@ if version == 1 and lock_type == "cue_long":
 # else:
 #     count_col = 'Resp_any'  # number of response-locked epochs kept
 
-if lock_type in ["cue", "cue_long"]:
-    count_col = "Off+"
-else:
-    count_col = "Resp_any"
 
 
 reject_stats = pd.DataFrame({
@@ -235,20 +246,32 @@ for p in part:
 
     
     if lock_type in ["cue", "cue_long"]:
-         # CUE-LOCKED (existing behaviour)
-        events_id = {"off+": 2}
-        events_c = events_c[events_c['trial_type'] == 'off+']
-        events_c['cue_num'] = events_c['trial_type'].map(events_id)
-        events_epoch = np.asarray(events_c[['sample', 'empty', 'cue_num']])
-    
-    elif lock_type == 'response':
-        # RESPONSE-LOCKED: any response event (accept, reject, miss)
-        events_id = {"resp_any": 3}   # arbitrary code, just one condition
-        events_c = events_c[events_c['trial_type'].isin(['res+', 'res-', 'resm'])]
-        events_c['cue_num'] = events_id['resp_any']
-        events_epoch = np.asarray(events_c[['sample', 'empty', 'cue_num']])
+        cue_events = PASSIVE_CUE_EVENTS if version == 2 else [DECISION_CUE_EVENT]
+
+        present = set(events_c["trial_type"].astype(str).unique())
+        if not any(ev in present for ev in cue_events):
+            raise RuntimeError(
+                f"{p}: none of expected cue events found.\n"
+                f"Expected one of: {cue_events}\n"
+                f"Found (first 40): {sorted(list(present))[:40]}"
+            )
+
+        events_c = events_c[events_c["trial_type"].isin(cue_events)].copy()
+        events_c = events_c.sort_values("sample").reset_index(drop=True)
+        events_id = {ev: i + 1 for i, ev in enumerate(cue_events)}  # rew1->1, ..., rew5->5
+        events_c["cue_num"] = events_c["trial_type"].map(events_id).astype(int)
+
+        events_epoch = np.asarray(events_c[["sample", "empty", "cue_num"]])
+
+    elif lock_type == "response":
+        events_id = {"resp_any": 3}
+        events_c = events_c[events_c["trial_type"].isin(["res+", "res-", "resm"])].copy()
+        events_c["cue_num"] = 3
+        events_epoch = np.asarray(events_c[["sample", "empty", "cue_num"]])
+
     else:
         raise ValueError("lock_type must be 'cue' or 'response'")
+
 
     # Number of events for epoching
     n_target = len(events_epoch)
@@ -258,7 +281,7 @@ for p in part:
     if n_target == 0:
         raise RuntimeError(
             f"{p}: n_target=0. No events found for epoching. "
-            f"Check events.tsv trial_type values (is it really 'off+' in passive?)."
+            f"Check events.tsv trial_type values. Expected one of {cue_events}."
         )
 
     # events_c = events_c[events_c['trial_type'] != 'DIN7']
@@ -336,13 +359,13 @@ for p in part:
     #reject_stats.loc[reject_stats["part"] == p, "perc_removed_cues"] = ((125 - len(erp_cues)) / 125) * 100.0
     reject_stats.loc[reject_stats["part"] == p, "perc_removed_cues"] = ((n_target - len(erp_cues)) / n_target) * 100.0
 
-        
-    if lock_type == 'cue':
-        # number of off+ trials kept
-        reject_stats.loc[reject_stats.part == p, count_col] = len(erp_cues['off+'])
-    else:
-        # number of response-locked epochs kept
+    
+    if lock_type == "cue":
         reject_stats.loc[reject_stats.part == p, count_col] = len(erp_cues)
+    else:
+        reject_stats.loc[reject_stats.part == p, count_col] = len(erp_cues)
+
+
 
     # reject_stats.loc[reject_stats.part == p, reject_stats.columns == 'dIN8'] = len(erp_cues['DIN8'])
     # reject_stats.loc[reject_stats.part == p, reject_stats.columns == 'Res+'] = len(erp_cues['res+'])
@@ -439,18 +462,25 @@ for p in part:
                                    exclude=['HEOGL', 'HEOGR', 'VEOGL'],
                                    ts_args={'time_unit': 'ms'},
                                    topomap_args={'time_unit': 'ms'}))
-            evokeds[cond].save(opj(outdir, p + '_passive_' + cond
-                                   + '_ave.fif'), overwrite=True)
-        report.add_figure(figs_butter,
-                          section='ERPs for cues off+',
-                          title='Butterfly plots for cues off+')
+            tag = safe_tag(cond)
+            evokeds[cond].save(opj(outdir, f"{p}_passive_{tag}_ave.fif"), overwrite=True)
+
+        report.add_figure(
+            figs_butter,
+            section=f"ERPs for cues ({' + '.join(cue_events)})",
+            title=f"Butterfly plots for cues ({' + '.join(cue_events)})",
+            )
+
+
         
         print("ERPs for cues off+ for Version 2")
         # Adding plot_image
         #off_fig = mne.viz.plot_image(evokeds['off+'], show=False)
-        off_fig = evokeds['off+'].plot_image(picks="eeg")
-        report.add_figure(off_fig, section='ERPs for cues off+', title='plot_image for off+')
-        # Plot some channels and add to report
+        first_cond = list(evokeds.keys())[0]
+        cue_fig = evokeds[first_cond].plot_image(picks="eeg")
+        report.add_figure(cue_fig, section="ERPs for cues", title=f"plot_image for {first_cond}")
+
+        # Plot some channels and add to  report
         chans_to_plot = ['Fz', 'FCz', 'POz', 'Cz', 'CPz', 'Pz', 'Oz' ]
         
         figs_chan = []                                                          
@@ -459,7 +489,7 @@ for p in part:
             figs_chan.append(mne.viz.plot_compare_evokeds(evokeds, picks=pick,
                                                           show=False)[0])
         report.add_figure(figs_chan,
-                          section='ERPs for cues off+', title='Cues/chans')
+                          section='ERPs for cues', title='Cues/chans')
         
         report.save(opj(outdir,  p + '_passive_erps_report.html'),
                     open_browser=False, overwrite=True)
