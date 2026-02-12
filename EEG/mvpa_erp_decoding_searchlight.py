@@ -1,31 +1,30 @@
 # -*- coding: utf-8 -*-
-"""
-Step 2 (Passive): Spatio-temporal SEARCHLIGHT decoding (accuracy + regression)
 
-Like Step 1, but searchlight (channel neighborhoods + temporal neighborhoods).
+#Spatio-temporal SEARCHLIGHT decoding (accuracy + regression)
+#searchlight (channel neighborhoods + temporal neighborhoods).
 
-Analyses:
-- Binary (accuracy):
-    * money low (20/40) vs high (80/100), drop 60
-    * pain  low (20/40) vs high (80/100), drop 60 (control)
-- Stimulus type (accuracy):
-    * pain vs money across all passive trials (sanity)
-- Regression (Ridge; scoring = Pearson r):
-    * money levels (20/40/60/80/100), keep 60
-    * pain  levels (20/40/60/80/100), keep 60 (control)
+#Analyses:
+#- Binary (accuracy):
+#    * money low (20/40) vs high (80/100), drop 60
+#    * pain  low (20/40) vs high (80/100), drop 60 (control)
+#- Stimulus type (accuracy):
+#    * pain vs money across all passive trials (sanity)
+#- Regression (Ridge; scoring = Pearson r):
+#    * money levels (20/40/60/80/100), keep 60
+#    * pain  levels (20/40/60/80/100), keep 60 (control)
 
-Multiple comparisons:
-- Within each analysis, group-level spatio-temporal cluster permutation test
-  using channel×time adjacency (TFCE if available). This controls family-wise error
-  across all channel×time tests within that analysis.
+#Multiple comparisons:
+#- Within each analysis, group-level spatio-temporal cluster permutation test
+#  using channel×time adjacency (TFCE corrected). This controls family-wise error
+#  across all channel×time tests within that analysis.
 
-Outputs (per analysis):
-- npz with subject maps, T_obs, p_map, cluster p-values, parameters
-- csv: subject-level mean timecourses (optional)
-- figures: topomaps at key timepoints with sig masks
-- json summary + cluster table
+#Outputs (per analysis):
+#- npz with subject maps, T_obs, p_map, cluster p-values, parameters
+#- csv: subject-level mean timecourses (optional)
+#- figures: topomaps at key timepoints with sig masks
+#- json summary + cluster table
 
-"""
+
 
 from __future__ import annotations
 import os
@@ -83,7 +82,7 @@ N_SPLITS = 5
 N_PERM = 5000
 ALPHA_CLUSTER = 0.05
 
-# Resample like Step 1 (recommended for speed + uniform dt)
+# Resample like in Bruera and Poesio (2025)
 RESAMPLE_SFREQ = 256  # None to keep original
 
 # Searchlight radii (researcher-ish defaults)
@@ -104,10 +103,10 @@ COND_MONEY = "m"
 COND_PAIN = "p"
 
 # Which analyses to run
-RUN_BINARY = True
+RUN_BINARY = False
 RUN_STIMTYPE = True
 RUN_REGRESSION = True
-RUN_SHUFFLE = True  # for each analysis run a shuffled-label control
+RUN_SHUFFLE = True  
 
 CHANCE_ACC = 0.5
 CHANCE_R = 0.0  # for correlation score
@@ -699,6 +698,221 @@ def plot_sig_channel_fraction(
     fig.savefig(out_path, dpi=300)
     plt.close(fig)
 
+
+def _robust_vlim(x: np.ndarray, lo=5.0, hi=95.0, symmetric=False):
+    """Robust color limits from percentiles; optional symmetric limits around 0."""
+    x = np.asarray(x).ravel()
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return None
+    v0 = float(np.percentile(x, lo))
+    v1 = float(np.percentile(x, hi))
+    if symmetric:
+        m = max(abs(v0), abs(v1))
+        return (-m, m)
+    # avoid degenerate vlim
+    if np.isclose(v0, v1):
+        eps = 1e-6
+        v0, v1 = v0 - eps, v1 + eps
+    return (v0, v1)
+
+
+def plot_topomap_field(
+    info: mne.Info,
+    data_ch: np.ndarray,
+    *,
+    mask: np.ndarray | None,
+    title: str,
+    out_path: Path,
+    vlim: tuple[float, float] | None = None,
+    cmap: str | None = None,
+    sensors: bool = True,
+    contours: int = 6,
+    colorbar_label: str | None = None,
+):
+    """Topomap with optional significance dots + contour lines + colorbar."""
+    fig, ax = plt.subplots(figsize=(3.0, 2.8))
+
+    im, cn = mne.viz.plot_topomap(
+        data_ch,
+        pos=info,
+        mask=mask,
+        show=False,
+        axes=ax,
+        contours=contours,      
+        sensors=sensors,        
+        outlines="head",
+        extrapolate="head",
+        vlim=vlim,
+        cmap=cmap,
+        mask_params=dict(
+            marker="o",
+            markerfacecolor="w",
+            markeredgecolor="k",
+            linewidth=0,
+            markersize=3,
+        ),
+    )
+
+    cbar = fig.colorbar(im, ax=ax, shrink=0.85, pad=0.05)
+    if colorbar_label is not None:
+        cbar.set_label(colorbar_label)
+
+    ax.set_title(title, pad=2)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def p_to_signed_logp(p: np.ndarray, sign: np.ndarray, eps: float = 1e-300) -> np.ndarray:
+    """
+    Convert p-values to signed -log10(p), using sign from T (or effect).
+    Useful to show strength + direction while still being driven by corrected p_map.
+    """
+    p = np.asarray(p, dtype=float)
+    sign = np.asarray(sign, dtype=float)
+    p = np.clip(p, eps, 1.0)
+    return np.sign(sign) * (-np.log10(p))
+
+def top_percent_mask(values: np.ndarray, top_pct: float = 20.0) -> np.ndarray:
+    """Return boolean mask selecting the top_pct largest |values|."""
+    v = np.asarray(values, float)
+    v = np.abs(v)
+    thr = np.nanpercentile(v, 100.0 - top_pct)
+    return v >= thr
+
+
+def plot_wta_topomap(
+    info: mne.Info,
+    data_ch: np.ndarray,
+    *,
+    wta_mask: np.ndarray,
+    title: str,
+    out_path: Path,
+    vlim: tuple[float, float] | None = None,
+    colorbar_label: str | None = None,
+):
+    """Plot full gradient, but highlight only the 'winners' as marked sensors."""
+    plot_topomap_field(
+        info,
+        data_ch,
+        mask=wta_mask,                 # winners shown as special dots
+        title=title,
+        out_path=out_path,
+        vlim=vlim,
+        contours=6,
+        colorbar_label=colorbar_label,
+        sensors=True,
+    )
+
+def plot_topos_bundle(
+    *,
+    figs_dir: Path,
+    tag: str,
+    analysis_name: str,
+    mode: str,
+    kept_info: mne.Info,
+    times_stat: np.ndarray,
+    chance: float,
+    mean_stat: np.ndarray,   # (n_ch, n_tstat) mean score
+    T_obs: np.ndarray,       # (n_tstat, n_ch)
+    p_map: np.ndarray,       # (n_tstat, n_ch) corrected p painted onto clusters
+    plot_times: list[float],
+    alpha: float,
+):
+    """
+    Creates multiple topo variants per timepoint:
+      - effect (mean - chance): highlights "where information is strongest"
+      - T map: inferential field from cluster test
+      - signed -log10(p): strength+direction, masked by corrected p<alpha
+    """
+    figs_dir.mkdir(exist_ok=True)
+
+    # effect field (mean - chance) is usually the most interpretable
+    effect = mean_stat - chance  # (n_ch, n_tstat)
+
+    # robust scaling across ALL times/channels in stat window (stable comparisons)
+    # for acc: no need symmetric; for r and T: symmetric often nicer
+    eff_vlim = _robust_vlim(effect, lo=5, hi=95, symmetric=(mode != "acc"))
+    t_vlim   = _robust_vlim(T_obs,  lo=5, hi=95, symmetric=True)
+
+    # signed logp (for visualization only)
+    signedlogp = p_to_signed_logp(p_map, T_obs)
+    # scale signedlogp robustly but symmetric
+    slogp_vlim = _robust_vlim(signedlogp, lo=5, hi=95, symmetric=True)
+
+    for t in plot_times:
+        ti = int(np.argmin(np.abs(times_stat - t)))
+        t_ms = int(round(times_stat[ti] * 1000))
+
+        sig_mask = (p_map[ti, :] < alpha)  # <<< TFCE/cluster-corrected sig dots
+
+        # 1) effect (mean - chance)
+        plot_topomap_field(
+            kept_info,
+            effect[:, ti],
+            mask=sig_mask,
+            title=f"{analysis_name} effect (mean−chance) at {t_ms} ms",
+            out_path=figs_dir / f"{tag}_topo_effect_{t_ms}ms.png",
+            vlim=eff_vlim,
+            cmap=None,
+            sensors=True,
+        )
+
+
+        plot_topomap_field(
+            kept_info,
+            T_obs[ti, :],
+            mask=sig_mask,
+            title=f"{analysis_name} T at {t_ms} ms",
+            out_path=figs_dir / f"{tag}_topo_T_{t_ms}ms.png",
+            vlim=t_vlim,
+            contours=6,
+            cmap="RdBu_r",
+            sensors=True,
+            colorbar_label="t value",
+        )
+
+        plot_topomap_field(
+            kept_info,
+            signedlogp[ti, :],
+            mask=sig_mask,
+            title=f"{analysis_name} signed −log10(p) at {t_ms} ms",
+            out_path=figs_dir / f"{tag}_topo_signedlogp_{t_ms}ms.png",
+            vlim=slogp_vlim,
+            cmap=None,
+            sensors=True,
+        )
+
+
+        wta20 = top_percent_mask(T_obs[ti, :], top_pct=20.0)
+
+        # winners among TFCE-corrected significant sensors
+        wta20_sig = wta20 & sig_mask
+
+        # WTA over all channels
+        plot_wta_topomap(
+            kept_info,
+            T_obs[ti, :],
+            wta_mask=wta20,
+            title=f"{analysis_name} WTA top20% |T| at {t_ms} ms",
+            out_path=figs_dir / f"{tag}_topo_T_WTA20_{t_ms}ms.png",
+            vlim=t_vlim,
+            colorbar_label="t value",
+        )
+
+        # WTA restricted for significant channels
+        plot_wta_topomap(
+            kept_info,
+            T_obs[ti, :],
+            wta_mask=wta20_sig,
+            title=f"{analysis_name} WTA top20% |T| (sig-only) at {t_ms} ms",
+            out_path=figs_dir / f"{tag}_topo_T_WTA20_sig_{t_ms}ms.png",
+            vlim=t_vlim,
+            colorbar_label="t value",
+        )
+
+
 # =============================================================================
 # Saving cluster table / summary
 # =============================================================================
@@ -861,7 +1075,7 @@ def run_searchlight_analysis(
                     info, times, SPATIAL_RADIUS_M, TEMPORAL_RADIUS_MS
                 )
                 log(f"{sub}: searchlight template built | kept_ch={len(kept_picks)} "
-                    f"| n_times={len(times)} | half_win={half_win_samp} samples @ sfreq≈{RESAMPLE_SFREQ}")
+                    f"| n_times={len(times)} | half_win={half_win_samp} samples at sfreq≈{RESAMPLE_SFREQ}")
 
             else:
                 if len(times) != len(times_ref) or np.max(np.abs(times - times_ref)) > 1e-9:
@@ -983,19 +1197,20 @@ def run_searchlight_analysis(
     )
 
 
-    for t in plot_times:
-        ti = int(np.argmin(np.abs(times_stat - t)))
-        mask = (p_map[ti, :] < ALPHA_CLUSTER)
-
-        vlim = (0.45, 0.75) if mode == "acc" else (-0.05, 0.25)
-        plot_topomap_timepoint(
-            kept_info,
-            data_ch=mean_stat[:, ti],
-            mask=mask,
-            title=f"{analysis_name} @ {int(t*1000)} ms",
-            out_path=figs_dir / f"{tag}_topo_{int(t*1000)}ms.png",
-            vlim=vlim,
-        )
+    plot_topos_bundle(
+        figs_dir=figs_dir,
+        tag=tag,
+        analysis_name=analysis_name + (f" ({'SHUFFLED' if shuffle else 'REAL'})"),
+        mode=mode,
+        kept_info=kept_info,
+        times_stat=times_stat,
+        chance=chance,
+        mean_stat=mean_stat,            # (n_ch, n_tstat)
+        T_obs=stats_out["T_obs"],       # (n_tstat, n_ch)
+        p_map=stats_out["p_map"],       # (n_tstat, n_ch)
+        plot_times=plot_times,
+        alpha=ALPHA_CLUSTER,
+    )
 
     # cluster table + json summary
     save_cluster_table_and_summary(
