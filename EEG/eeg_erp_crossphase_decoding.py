@@ -1,32 +1,55 @@
 # -*- coding: utf-8 -*-
 """
-Step 3: Cross-phase time×time generalization (train time x test time heatmaps)
+Step 3: Cross-phase time-time generalization (train time x test time heatmaps)
 
-This script supports BOTH:
-A) Classification time×time (accuracy; 5-class; chance=0.2; tail=1)
-B) Regression time×time (Ridge; Pearson r; chance=0; tail=0)
+1) Binary classifier (low vs high money; drop middle level 60)
+   - chance = 0.5
+   - score = AUC (default) or accuracy
+   - plots score - 0.5
+   - provides no-control and "control pain" (TEST-EEG residualization)
 
-Decision-phase labels:
-- moneystim = 'm1'..'m5'  -> 20/40/60/80/100
-- painstim  = 'p1'..'p5'  -> 20/40/60/80/100
+2) Regression variants
+   - Primary regression with Pearson r (chance = 0)
+   - heatmaps from regression predictions:
+    Ridge + AUC scorer on binary low/high target (chance = 0.5; plot -0.5)
 
-Controls (REGRESSION block):
-1) no control
-2) pain balanced across money (subsampling test set)
-3) residualize pain^2 from test EEG features (optionally pain+pain^2)
+3) Pain control versions for each approach
+   - No control (baseline)
+   - Control pain (in two ways):
+       A) label residualization (for regression-r): residualize decision money labels by pain + pain^2
+          and mean-center passive money labels (intercept-only).
+       B) EEG residualization (for classifier / and for regression-based AUC): residualize TEST EEG by pain + pain^2
 
-Outputs per analysis:
-- NPZ with subj_mats (n_subj, n_train_t, n_test_t), p_map, cluster pvals, etc.
-- CSV cluster table + summary JSON
-- Heatmap PNG with sig overlay
+4) for speed rn:
+   - 20 ms steps RESAMPLE_SFREQ = 50 Hz
+   - Fit on ALL training trials for cross-phase (no CV)
+   - trialsnum merge
 
+5) Stats + significance
+   - For every analysis, saves:
+       subj matrices
+       group mean
+       cluster-based permutation test on the 2D grid (TFCE)
+       p_map + cluster table CSV
+       summary JSON
+
+OUTPUTS per analysis (in OUT_DIR/tag/):
+- NPZ: <tag>_timegen_group_results.npz
+- CSV: <tag>_cluster_table.csv
+- JSON: <tag>_summary.json
+- PNG: figs/<tag>_heatmap.png
 """
 
 from __future__ import annotations
+
 import os
-from pathlib import Path
+import sys
 import json
 import re
+from pathlib import Path
+from dataclasses import dataclass
+from typing import Callable, Optional, Literal
+
 import numpy as np
 import pandas as pd
 import mne
@@ -34,14 +57,37 @@ import matplotlib.pyplot as plt
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.model_selection import GroupKFold, StratifiedKFold, KFold
+from sklearn.linear_model import Ridge, LogisticRegression
+from sklearn.metrics import roc_auc_score, accuracy_score
 
 from mne.decoding import GeneralizingEstimator
 from mne.stats import permutation_cluster_1samp_test, combine_adjacency
-from scipy import stats
 from tqdm.auto import tqdm
+from scipy import stats
 
+def logprint(*args):
+    print(*args, flush=True)
+    sys.stdout.flush()
+
+
+# =============================================================================
+# SUBJECT SELECTION 
+# =============================================================================
+
+#   RUN_MODE="all"    -> run all subjects /
+#   RUN_MODE="subset" -> run first N_SUBJECTS subjects (sorted)
+#   RUN_MODE="list"   -> run explicit SUBJECT_LIST
+RUN_MODE = "subset"     # "all" | "subset" | "list"
+N_SUBJECTS = 5          # used only if RUN_MODE=="subset"
+SUBJECT_LIST = [        # used only if RUN_MODE=="list"
+    # "sub-001", "sub-002", "sub-003", "sub-004", "sub-005"
+]
+
+# =============================================================================
+# debug controls
+# =============================================================================
+# 5000+ (but debug faster with 500-2000)
+N_PERM_DEFAULT = 2000
 
 # =============================================================================
 # Paths
@@ -79,13 +125,16 @@ DEC_BEH_SUFFIX = "_task-decision_beh.tsv"
 # Parameters
 # =============================================================================
 RANDOM_STATE = 23
-N_SPLITS = 5
-N_PERM = 5000
 ALPHA_CLUSTER = 0.05
 
-RESAMPLE_SFREQ = 256
+# 20 ms steps
+RESAMPLE_SFREQ = 50  # 50 Hz => 20 ms per sample
+
 TMIN_STAT = 0.0
-TMAX_STAT = 0.8
+TMAX_STAT = 1.0
+
+# Cross-phase strictness control: fit on ALL training trials (no CV)
+CROSSPHASE_FIT_FULL_TRAIN = True
 
 # Metadata keys
 KEY_BLOCK = "blocks.thisN"
@@ -98,26 +147,59 @@ COL_LEVEL = "level"         # 20/40/60/80/100
 COND_MONEY = "m"
 COND_PAIN = "p"
 
-# Decision columns (your actual design)
+# Decision columns
 DEC_MONEY_COL_CANDIDATES = ["moneystim"]
-DEC_PAIN_COL_CANDIDATES  = ["painstim"]
+DEC_PAIN_COL_CANDIDATES = ["painstim"]
 
 LEVEL_CODE_TO_LEVEL = {1: 20, 2: 40, 3: 60, 4: 80, 5: 100}
 LEVELS_ALL = np.array([20, 40, 60, 80, 100], dtype=int)
 
-# classification setup
-CHANCE_5CLASS = 1.0 / 5.0
+# Binary low/high scheme (drop 60)
+BIN_KEEP_LEVELS = np.array([20, 40, 80, 100], dtype=int)
+BIN_LOW_LEVELS = {20, 40}
+BIN_HIGH_LEVELS = {80, 100}
+BIN_CHANCE = 0.5
 
-# regression setup
+# Regression-r chance
 CHANCE_R = 0.0
+
+# Label-permutation inference
+N_PERM_LABEL = 500        # 200–1000 
+CLUSTER_FORMING_P = 0.01  # for cluster-mass (if TFCE not used)
+USE_TFCE = True           
 
 
 # =============================================================================
 # Utilities
 # =============================================================================
 def list_subjects(deriv_dir: Path) -> list[str]:
-    return sorted([p.name for p in deriv_dir.iterdir()
-                   if p.is_dir() and p.name.startswith("sub-")])
+    return sorted([
+        p.name for p in deriv_dir.iterdir()
+        if p.is_dir() and p.name.startswith("sub-")
+    ])
+
+
+def select_subjects(all_subs: list[str]) -> list[str]:
+    """Select subjects based on RUN_MODE / N_SUBJECTS / SUBJECT_LIST."""
+    if RUN_MODE == "all":
+        subs = all_subs
+    elif RUN_MODE == "subset":
+        subs = all_subs[:int(N_SUBJECTS)]
+    elif RUN_MODE == "list":
+        wanted = list(SUBJECT_LIST)
+        subs = [s for s in wanted if s in all_subs]
+        missing = [s for s in wanted if s not in all_subs]
+        if len(missing) > 0:
+            logprint("WARNING: requested subjects not found:", missing)
+    else:
+        raise ValueError("RUN_MODE must be one of: 'all', 'subset', 'list'")
+
+    if len(subs) == 0:
+        raise RuntimeError("No subjects selected to run (check RUN_MODE / N_SUBJECTS / SUBJECT_LIST).")
+
+    logprint(f"Subject selection: RUN_MODE={RUN_MODE} | n={len(subs)}")
+    logprint("Subjects:", subs)
+    return subs
 
 
 def _coerce_int_series(s: pd.Series) -> pd.Series:
@@ -131,8 +213,10 @@ def load_epochs(sub: str, phase: str) -> mne.Epochs:
         epo_path = DERIV_DIR / sub / DEC_EPO_DIR / f"{sub}{DEC_EPO_SUFFIX}"
     else:
         raise ValueError("phase must be 'passive' or 'decision'")
+
     if not epo_path.exists():
         raise FileNotFoundError(f"Missing epochs for {sub} ({phase}): {epo_path}")
+
     return mne.read_epochs(epo_path, preload=True, verbose="ERROR")
 
 
@@ -143,6 +227,7 @@ def load_beh(sub: str, phase: str) -> pd.DataFrame:
         beh_path = RAW_DIR / sub / "eeg" / f"{sub}{DEC_BEH_SUFFIX}"
     else:
         raise ValueError("phase must be 'passive' or 'decision'")
+
     if not beh_path.exists():
         raise FileNotFoundError(f"Missing beh.tsv for {sub} ({phase}): {beh_path}")
 
@@ -151,22 +236,33 @@ def load_beh(sub: str, phase: str) -> pd.DataFrame:
         beh = beh[~beh["fixcross.started"].isna()].copy()
 
     beh = beh.reset_index(drop=True)
-    #beh[KEY_TRIALNUM] = np.arange(1, len(beh) + 1)
     return beh
 
 
 def merge_beh_into_epochs(epo: mne.Epochs, beh: pd.DataFrame, sub: str, phase: str) -> mne.Epochs:
+    """
+    CRITICAL: If epochs have trialsnum, beh MUST have trialsnum, otherwise we refuse fallback merges.
+    This prevents silent misalignment.
+    """
     if epo.metadata is None:
         raise ValueError(f"{sub} {phase}: epochs has no metadata; cannot merge beh.")
     md = epo.metadata.reset_index(drop=True).copy()
 
-    # trialsnum merge
+    # ---- Mandatory trialsnum merge if epochs contain trialsnum ----
+    if (KEY_TRIALNUM in md.columns) and (KEY_TRIALNUM not in beh.columns):
+        raise ValueError(
+            f"{sub} {phase}: epochs have {KEY_TRIALNUM} but beh does not — refusing fallback merge."
+        )
+
+    # ---- trialsnum merge ----
     if (KEY_TRIALNUM in md.columns) and (KEY_TRIALNUM in beh.columns):
         merged = md.merge(beh, on=KEY_TRIALNUM, how="left", validate="1:1")
+        n_missing = merged[beh.columns].isna().all(axis=1).sum()
+        logprint(f"{sub} {phase} merge: {n_missing}/{len(merged)} rows have NO beh match")
         epo.metadata = merged
         return epo
 
-    # key merge
+    # ---- key merge (block/trial) ----
     can_key_merge = (
         (KEY_BLOCK in md.columns) and (KEY_TRIAL in md.columns) and
         (KEY_BLOCK in beh.columns) and (KEY_TRIAL in beh.columns)
@@ -182,7 +278,7 @@ def merge_beh_into_epochs(epo: mne.Epochs, beh: pd.DataFrame, sub: str, phase: s
         epo.metadata = merged
         return epo
 
-    # order merge
+    # ---- order merge (last resort) ----
     if len(md) == len(beh):
         merged = md.copy()
         for c in beh.columns:
@@ -219,15 +315,6 @@ def pick_first_existing_col(df: pd.DataFrame, candidates: list[str], *, label: s
     raise ValueError(f"Could not find {label} column in metadata. Tried: {candidates}")
 
 
-def to_class_labels_from_levels(levels: np.ndarray) -> np.ndarray:
-    levels = np.asarray(levels).astype(int)
-    mapping = {20: 0, 40: 1, 60: 2, 80: 3, 100: 4}
-    y = np.array([mapping.get(int(v), -1) for v in levels], dtype=int)
-    if np.any(y < 0):
-        raise ValueError(f"Unexpected levels seen: {np.unique(levels)}")
-    return y
-
-
 def parse_stim_code_to_level(series: pd.Series, prefix: str) -> np.ndarray:
     s = series.astype(str).str.strip().str.lower()
     pat = rf"^{re.escape(prefix)}\s*([1-5])$"
@@ -240,50 +327,39 @@ def parse_stim_code_to_level(series: pd.Series, prefix: str) -> np.ndarray:
     return levels
 
 
-def balance_nuisance_within_target(
-    df: pd.DataFrame,
-    *,
-    target_levels: np.ndarray,   # numeric 20..100
-    nuisance_levels: np.ndarray, # numeric 20..100
-    rng: np.random.Generator,
-) -> np.ndarray:
+def filter_levels(X: np.ndarray, levels: np.ndarray, keep_levels: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return X_f, levels_f, keep_mask."""
+    keep_mask = np.isin(levels, keep_levels)
+    return X[keep_mask], levels[keep_mask], keep_mask
+
+
+def to_binary_low_high(levels: np.ndarray) -> np.ndarray:
     """
-    Subsample indices so nuisance distribution is matched across target bins.
-    Returns: indices into df (same index space).
+    Map {20,40} -> 0, {80,100} -> 1. (Assumes 60 already dropped.)
     """
-    d = df.copy()
-    d = d.assign(_target=target_levels, _nuis=nuisance_levels)[["_target", "_nuis"]].dropna()
-
-    target_vals = sorted(d["_target"].unique())
-    nuis_vals = sorted(d["_nuis"].unique())
-
-    counts = {(t, n): int(((d["_target"] == t) & (d["_nuis"] == n)).sum())
-              for t in target_vals for n in nuis_vals}
-
-    min_per_nuis = {n: min(counts[(t, n)] for t in target_vals) for n in nuis_vals}
-
-    keep_indices = []
-    for t in target_vals:
-        for n in nuis_vals:
-            k = min_per_nuis[n]
-            if k <= 0:
-                continue
-            cell_idx = d.index[(d["_target"] == t) & (d["_nuis"] == n)].to_numpy()
-            if cell_idx.size < k:
-                continue
-            keep_indices.append(rng.choice(cell_idx, size=k, replace=False))
-
-    if len(keep_indices) == 0:
-        raise ValueError("Balancing produced empty selection (check target/nuis values).")
-    return np.unique(np.concatenate(keep_indices))
+    y = np.full(levels.shape, -1, dtype=int)
+    for i, v in enumerate(levels.astype(int).tolist()):
+        if v in BIN_LOW_LEVELS:
+            y[i] = 0
+        elif v in BIN_HIGH_LEVELS:
+            y[i] = 1
+        else:
+            y[i] = -1
+    if np.any(y < 0):
+        bad = np.unique(levels[y < 0])
+        raise ValueError(f"Binary mapping saw unexpected levels (did you forget to drop 60?): {bad}")
+    return y
 
 
 def residualize_X_by_nuisance(
     X: np.ndarray,                 # (n_trials, n_ch, n_t)
-    nuisance_levels: np.ndarray,    # (n_trials,) e.g. pain levels 20..100
+    nuisance_levels: np.ndarray,    # (n_trials,)
     *,
-    model: str = "pain2",          # "pain2" or "pain+pain2"
+    model: str = "pain+pain2",      # "pain2" or "pain+pain2"
 ) -> np.ndarray:
+    """
+    Residualize nuisance from EEG features (typically apply on TEST EEG).
+    """
     n_trials, n_ch, n_t = X.shape
     z = nuisance_levels.astype(float)
 
@@ -296,10 +372,89 @@ def residualize_X_by_nuisance(
 
     X_flat = X.reshape(n_trials, -1)
     beta, *_ = np.linalg.lstsq(D, X_flat, rcond=None)
-    X_hat = D @ beta
-    R = X_flat - X_hat
+    R = X_flat - (D @ beta)
     return R.reshape(n_trials, n_ch, n_t)
 
+
+def residualize_y_by_nuisance(
+    y: np.ndarray,
+    nuisance_levels: Optional[np.ndarray],
+    *,
+    model: str = "intercept",  # "intercept", "pain2", "pain+pain2"
+) -> np.ndarray:
+    """
+    Residualize labels instead of EEG.
+
+    - For passive (no pain nuisance): use model="intercept" -> mean-center y.
+    - For decision (control pain): use model="pain+pain2" (or "pain2") with nuisance_levels=pain.
+    """
+    y = y.astype(float).ravel()
+    n = y.size
+
+    if model == "intercept":
+        D = np.ones((n, 1), dtype=float)
+    else:
+        if nuisance_levels is None:
+            raise ValueError("nuisance_levels required for model != 'intercept'")
+        z = nuisance_levels.astype(float).ravel()
+        if z.size != n:
+            raise ValueError("nuisance_levels length mismatch for label residualization")
+
+        if model == "pain2":
+            D = np.c_[np.ones(n), (z ** 2)]
+        elif model == "pain+pain2":
+            D = np.c_[np.ones(n), z, (z ** 2)]
+        else:
+            raise ValueError("model must be 'intercept', 'pain2', or 'pain+pain2'")
+
+    beta, *_ = np.linalg.lstsq(D, y, rcond=None)
+    y_hat = D @ beta
+    return (y - y_hat).astype(float)
+
+def subject_timegen_crossphase_with_nulls(
+    timegen: GeneralizingEstimator,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    *,
+    n_perm_label: int,
+    permute: Literal["train", "test", "both"] = "train",
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Returns
+    -------
+    mat_real : (n_train_t, n_test_t)
+    mats_null: (n_perm_label, n_train_t, n_test_t)
+
+    MVPA: permute labels and refit each perm.
+    """
+    rng = np.random.default_rng(RANDOM_STATE)
+
+    # Real
+    timegen.fit(X_train, y_train)
+    mat_real = timegen.score(X_test, y_test)
+
+    # Nulls
+    mats_null = []
+    for _ in range(n_perm_label):
+        if permute == "train":
+            ytr = rng.permutation(y_train)
+            yte = y_test
+        elif permute == "test":
+            ytr = y_train
+            yte = rng.permutation(y_test)
+        elif permute == "both":
+            ytr = rng.permutation(y_train)
+            yte = rng.permutation(y_test)
+        else:
+            raise ValueError("permute must be 'train', 'test', or 'both'")
+
+        tg = timegen  # safe because we refit below; if you want, clone via sklearn.base.clone
+        tg.fit(X_train, ytr)
+        mats_null.append(tg.score(X_test, yte))
+
+    return mat_real, np.asarray(mats_null)
 
 # =============================================================================
 # Selectors per phase
@@ -316,7 +471,6 @@ def prepare_passive(epo: mne.Epochs, label: str):
 
     levels_f = md_f[COL_LEVEL].to_numpy(dtype=int)
     X = epo_f.get_data()
-
     return X, levels_f, md_f
 
 
@@ -334,14 +488,9 @@ def prepare_decision(epo: mne.Epochs, label: str):
     else:
         raise ValueError("label must be 'money' or 'pain'")
 
-    print("Before decision filtering:", len(epo))
-    print("Levels parsed unique:", np.unique(levels))
-
     keep = np.isin(levels, LEVELS_ALL)
     epo_f = epo.copy()[keep]
     md_f = epo_f.metadata.reset_index(drop=True)
-
-    print("After decision filtering:", len(epo_f))
 
     # recompute after filtering
     if label == "money":
@@ -353,105 +502,289 @@ def prepare_decision(epo: mne.Epochs, label: str):
     return X, levels_f, md_f
 
 
+# =============================================================================
+# Scorers (compatible with GeneralizingEstimator)
+# =============================================================================
+def make_corr_scorer() -> Callable:
+    def _corr_scorer(estimator, X, y_true) -> float:
+        y_pred = estimator.predict(X)
+        y_true = np.asarray(y_true, dtype=float).ravel()
+        y_pred = np.asarray(y_pred, dtype=float).ravel()
+        if y_true.size < 3:
+            return 0.0
+        if np.std(y_true) < 1e-12 or np.std(y_pred) < 1e-12:
+            return 0.0
+        r = np.corrcoef(y_true, y_pred)[0, 1]
+        return 0.0 if np.isnan(r) else float(r)
+    return _corr_scorer
+
+
+def make_auc_scorer() -> Callable:
+    def _auc_scorer(estimator, X, y_true) -> float:
+        y_true = np.asarray(y_true, dtype=int).ravel()
+        if y_true.size < 3:
+            return 0.5
+        # Need both classes
+        if len(np.unique(y_true)) < 2:
+            return 0.5
+
+        # Try predict_proba -> decision_function fallback
+        if hasattr(estimator, "predict_proba"):
+            s = estimator.predict_proba(X)[:, 1]
+        elif hasattr(estimator, "decision_function"):
+            s = estimator.decision_function(X)
+        else:
+            # last resort: hard predictions (AUC not meaningful; return 0.5)
+            return 0.5
+
+        try:
+            return float(roc_auc_score(y_true, s))
+        except Exception:
+            return 0.5
+    return _auc_scorer
+
+
+def make_acc_scorer() -> Callable:
+    def _acc_scorer(estimator, X, y_true) -> float:
+        y_true = np.asarray(y_true, dtype=int).ravel()
+        if y_true.size < 1:
+            return 0.0
+        y_pred = estimator.predict(X).astype(int).ravel()
+        # if y_pred are floats (e.g., regression), threshold at 0.5
+        if y_pred.dtype.kind in ("f",):
+            y_pred = (y_pred >= 0.5).astype(int)
+        try:
+            return float(accuracy_score(y_true, y_pred))
+        except Exception:
+            return 0.0
+    return _acc_scorer
+
+
+def make_regression_auc_scorer(threshold: float = 60.0) -> Callable:
+    """
+    For a Ridge model: turn continuous predictions into an AUC score against binary labels.
+    This gives you an "accuracy-like" heatmap from regression.
+    """
+    def _reg_auc_scorer(estimator, X, y_true) -> float:
+        y_true = np.asarray(y_true, dtype=int).ravel()
+        if y_true.size < 3 or len(np.unique(y_true)) < 2:
+            return 0.5
+        y_pred = np.asarray(estimator.predict(X), dtype=float).ravel()
+        try:
+            return float(roc_auc_score(y_true, y_pred))
+        except Exception:
+            return 0.5
+    return _reg_auc_scorer
+
 
 # =============================================================================
-# Estimators: classification + regression
+# Estimators
 # =============================================================================
-def make_timegen_estimator_classification():
+def make_timegen_estimator_regression(score: Literal["r", "auc_from_reg"]):
+    if score == "r":
+        reg = make_pipeline(
+            StandardScaler(),
+            Ridge(alpha=1.0, random_state=RANDOM_STATE),
+        )
+        return GeneralizingEstimator(reg, scoring=make_corr_scorer(), n_jobs=1)
+
+    if score == "auc_from_reg":
+        reg = make_pipeline(
+            StandardScaler(),
+            Ridge(alpha=1.0, random_state=RANDOM_STATE),
+        )
+        # scorer expects binary y_true (0/1)
+        return GeneralizingEstimator(reg, scoring=make_regression_auc_scorer(), n_jobs=1)
+
+    raise ValueError("Unknown regression score")
+
+
+def make_timegen_estimator_classifier(score: Literal["auc", "acc"]):
     clf = make_pipeline(
         StandardScaler(),
         LogisticRegression(
             solver="lbfgs",
-            multi_class="auto",
             max_iter=5000,
             random_state=RANDOM_STATE,
         )
     )
-    return GeneralizingEstimator(clf, scoring="accuracy", n_jobs=1)
-
-
-def _corr_scorer(estimator, X, y_true) -> float:
-    y_pred = estimator.predict(X)
-    y_true = np.asarray(y_true, dtype=float).ravel()
-    y_pred = np.asarray(y_pred, dtype=float).ravel()
-    if y_true.size < 3:
-        return 0.0
-    if np.std(y_true) < 1e-12 or np.std(y_pred) < 1e-12:
-        return 0.0
-    r = np.corrcoef(y_true, y_pred)[0, 1]
-    return 0.0 if np.isnan(r) else float(r)
-
-
-def make_timegen_estimator_regression():
-    reg = make_pipeline(
-        StandardScaler(),
-        Ridge(alpha=1.0, random_state=RANDOM_STATE),
-    )
-    return GeneralizingEstimator(reg, scoring=_corr_scorer, n_jobs=1)
+    if score == "auc":
+        return GeneralizingEstimator(clf, scoring=make_auc_scorer(), n_jobs=1)
+    if score == "acc":
+        return GeneralizingEstimator(clf, scoring=make_acc_scorer(), n_jobs=1)
+    raise ValueError("Unknown classifier score")
 
 
 # =============================================================================
-# Within-subject time×time (CV on training set)
+# Cross-phase time×time per subject (fit full train)
 # =============================================================================
 def subject_timegen_crossphase(
+    timegen: GeneralizingEstimator,
     X_train: np.ndarray,
-    y_train,
+    y_train: np.ndarray,
     X_test: np.ndarray,
-    y_test,
+    y_test: np.ndarray,
     *,
-    groups_train: np.ndarray | None,
     shuffle_train: bool,
     shuffle_test: bool,
-    mode: str,  # "class" or "reg"
-):
+) -> np.ndarray:
     rng = np.random.default_rng(RANDOM_STATE)
     y_tr = rng.permutation(y_train) if shuffle_train else y_train
-    y_te = rng.permutation(y_test)  if shuffle_test  else y_test
+    y_te = rng.permutation(y_test) if shuffle_test else y_test
 
-    if mode == "class":
-        timegen = make_timegen_estimator_classification()
-        # classification CV
-        if groups_train is not None and (~pd.isna(groups_train)).all():
-            n_groups = len(np.unique(groups_train))
-            cv = GroupKFold(n_splits=min(N_SPLITS, n_groups)) if n_groups >= 2 else StratifiedKFold(
-                n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE
-            )
-        else:
-            cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
+    if not CROSSPHASE_FIT_FULL_TRAIN:
+        raise RuntimeError("This script is optimized for cross-phase full-train fitting. Keep CROSSPHASE_FIT_FULL_TRAIN=True.")
 
-        split_iter = cv.split(X_train, y_tr, groups=groups_train if isinstance(cv, GroupKFold) else None)
+    timegen.fit(X_train, y_tr)
+    mat = timegen.score(X_test, y_te)
+    return mat
 
-    elif mode == "reg":
-        timegen = make_timegen_estimator_regression()
-        # regression CV
-        if groups_train is not None and (~pd.isna(groups_train)).all():
-            n_groups = len(np.unique(groups_train))
-            cv = GroupKFold(n_splits=min(N_SPLITS, n_groups)) if n_groups >= 2 else KFold(
-                n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE
-            )
-        else:
-            cv = KFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
 
-        split_iter = cv.split(X_train, y_tr, groups=groups_train if isinstance(cv, GroupKFold) else None)
 
+def group_cluster_timegen_labelperm(
+    mats_real: np.ndarray,          # (n_subj, n_tr, n_te)
+    mats_null: np.ndarray,          # (n_subj, n_perm, n_tr, n_te)
+    *,
+    chance: float,
+    tail: int,
+    alpha_cluster: float,
+    use_tfce: bool,
+):
+    """
+    MVPA-style inference:
+    - Compute observed group statistic map from real data
+    - Build permutation distribution by, for each perm index:
+        take one permuted map per subject, compute group statistic
+    - Use cluster correction via max cluster stat (handled by MNE permutation_cluster_1samp_test
+      when we feed the permuted samples as X and let it permute signs?).
+    
+    Here we do it in a standard/transparent way:
+    - Build X_obs = real - chance
+    - Build X_perm[k] = perm_mean - chance
+    - use MNEs cluster test on the real maps but estimate corrected p-values
+      from the label-perm distribution of max cluster stats.
+
+    Returns p_map corrected (FWER) and cluster table info.
+    """
+    X_obs = mats_real - chance
+    n_subj, n_tr, n_te = X_obs.shape
+    adjacency = combine_adjacency(n_tr, n_te)
+
+    # ---- cluster-forming threshold ----
+    threshold = None
+    if use_tfce:
+        threshold = dict(start=0.0, step=0.2)  
     else:
-        raise ValueError("mode must be 'class' or 'reg'")
+        # cluster-forming threshold at p=CLUSTER_FORMING_P
+        df = n_subj - 1
+        if tail == 0:
+            t_thr = stats.t.ppf(1 - CLUSTER_FORMING_P / 2, df)
+        else:
+            t_thr = stats.t.ppf(1 - CLUSTER_FORMING_P, df)
+        threshold = t_thr
 
-    mats = []
-    for tr_idx, _ in split_iter:
-        Xtr = X_train[tr_idx]
-        ytr = np.asarray(y_tr)[tr_idx]
-        timegen.fit(Xtr, ytr)
-        mat = timegen.score(X_test, y_te)  # (n_train_times, n_test_times)
-        mats.append(mat)
+    # ---- get observed clusters using MNE, but with n_permutations=0 (no internal permutation) ----
+    # MNE doesn't have n_permutations=0, so we do 1 permutation and ignore its pvals,
+    # using it only to get clusters and T_obs.
+    T_obs, clusters, cluster_pv_dummy, _ = permutation_cluster_1samp_test(
+        X_obs.reshape(n_subj, -1),
+        n_permutations=1,
+        threshold=threshold,
+        tail=tail,
+        adjacency=adjacency,
+        out_type="mask",
+        n_jobs=1,
+        seed=RANDOM_STATE,
+    )
+    T_obs = T_obs.reshape(n_tr, n_te)
 
-    return np.mean(np.stack(mats, axis=0), axis=0)
+    # ---- compute observed cluster stats (cluster mass) from T_obs and clusters ----
+    obs_cluster_stats = []
+    for cl in clusters:
+        if cl is None:
+            obs_cluster_stats.append(0.0)
+            continue
+        m = np.asarray(cl, dtype=bool).ravel()
+        if not m.any():
+            obs_cluster_stats.append(0.0)
+            continue
+        # cluster mass = sum of T within cluster (common in MVPA)
+        obs_cluster_stats.append(float(np.sum(T_obs.ravel()[m])))
 
+    obs_cluster_stats = np.asarray(obs_cluster_stats, dtype=float)
+
+    # ---- build permutation distribution of max cluster stat ----
+    # For each perm: take one perm map per subject, compute group t-map, find max cluster mass
+    n_perm = mats_null.shape[1]
+    max_stats = np.zeros(n_perm, dtype=float)
+
+    for k in range(n_perm):
+        Xk = mats_null[:, k, :, :] - chance  # (n_subj, n_tr, n_te)
+
+        Tk, cl_k, _, _ = permutation_cluster_1samp_test(
+            Xk.reshape(n_subj, -1),
+            n_permutations=1,
+            threshold=threshold,
+            tail=tail,
+            adjacency=adjacency,
+            out_type="mask",
+            n_jobs=1,
+            seed=RANDOM_STATE + k + 1,
+        )
+        Tk = Tk.reshape(n_tr, n_te)
+
+        # max cluster mass for this perm
+        best = 0.0
+        for cl in cl_k:
+            if cl is None:
+                continue
+            m = np.asarray(cl, dtype=bool).ravel()
+            if not m.any():
+                continue
+            stat = float(np.sum(Tk.ravel()[m]))
+            if stat > best:
+                best = stat
+        max_stats[k] = best
+
+    # ---- corrected p-value per observed cluster using max-stat ----
+    # p = proportion of perm max >= observed cluster stat
+    cluster_pv = np.ones_like(obs_cluster_stats, dtype=float)
+    for i, s in enumerate(obs_cluster_stats):
+        if s <= 0:
+            cluster_pv[i] = 1.0
+        else:
+            cluster_pv[i] = (np.sum(max_stats >= s) + 1.0) / (n_perm + 1.0)
+
+    # ---- build corrected p_map by assigning each cluster its corrected p ----
+    p_map = np.ones((n_tr, n_te), dtype=float)
+    for cl, p in zip(clusters, cluster_pv):
+        if cl is None:
+            continue
+        m = np.asarray(cl, dtype=bool).ravel()
+        if m.size == n_tr * n_te and m.any():
+            p_map.ravel()[m] = np.minimum(p_map.ravel()[m], float(p))
+
+    return dict(
+        T_obs=T_obs,
+        clusters=clusters,
+        cluster_pv=cluster_pv,
+        p_map=p_map,
+        thresh_used=("tfce" if use_tfce else f"t@p<{CLUSTER_FORMING_P}"),
+        max_stats=max_stats,
+    )
 
 # =============================================================================
 # Group stats on 2D grid
 # =============================================================================
-def group_cluster_timegen(mats_by_subj: np.ndarray, *, chance: float, tail: int):
+def group_cluster_timegen(mats_by_subj: np.ndarray, *, chance: float, tail: int, n_perm: int):
+    """
+    mats_by_subj: (n_subj, n_train_t, n_test_t)
+    chance: subtract this before stats
+    tail:
+      1 -> positive clusters (metric > chance)
+      0 -> two-sided
+     -1 -> negative clusters
+    """
     X = mats_by_subj - chance
     n_subj, n_tr, n_te = X.shape
 
@@ -462,7 +795,7 @@ def group_cluster_timegen(mats_by_subj: np.ndarray, *, chance: float, tail: int)
     try:
         T_obs, clusters, cluster_pv, H0 = permutation_cluster_1samp_test(
             X_flat,
-            n_permutations=N_PERM,
+            n_permutations=n_perm,
             threshold=tfce_thresh,
             tail=tail,
             adjacency=adjacency,
@@ -474,7 +807,7 @@ def group_cluster_timegen(mats_by_subj: np.ndarray, *, chance: float, tail: int)
     except Exception:
         T_obs, clusters, cluster_pv, H0 = permutation_cluster_1samp_test(
             X_flat,
-            n_permutations=N_PERM,
+            n_permutations=n_perm,
             threshold=None,
             tail=tail,
             adjacency=adjacency,
@@ -580,177 +913,166 @@ def save_cluster_table_2d(out_csv: Path, times_train: np.ndarray, times_test: np
         ))
 
     df = pd.DataFrame(rows).sort_values("p_value") if len(rows) else pd.DataFrame(
-        columns=["cluster","p_value","train_t_start_s","train_t_end_s","test_t_start_s","test_t_end_s","n_cells"]
+        columns=["cluster", "p_value", "train_t_start_s", "train_t_end_s",
+                 "test_t_start_s", "test_t_end_s", "n_cells"]
     )
     df.to_csv(out_csv, index=False)
 
 
 # =============================================================================
-# Core runner (single analysis)
+# Analysis configuration
+# =============================================================================
+MetricKind = Literal["clf_auc", "clf_acc", "reg_r", "reg_auc"]
+
+@dataclass
+class AnalysisCfg:
+    tag: str
+    metric: MetricKind
+    train_phase: str
+    train_label: str
+    test_phase: str
+    test_label: str
+    # binary drop-60 selection
+    binary_drop_middle: bool
+    # pain control switches
+    control_mode: Literal["none", "eeg_resid_test", "label_resid"]  # label_resid only meaningful for reg_r here
+    resid_model: str  # "pain+pain2" or "pain2" (used by EEG or label control)
+    shuffle_train: bool = False
+    shuffle_test: bool = False
+
+
+def _metric_meta(metric: MetricKind) -> tuple[float, int, str]:
+    """
+    Returns: (chance, tail, cbar_label)
+    """
+    if metric in ("clf_auc", "clf_acc", "reg_auc"):
+        # chance 0.5, one-sided positive clusters
+        return BIN_CHANCE, 1, "Score − 0.5"
+    if metric == "reg_r":
+        # r chance 0, two-sided
+        return CHANCE_R, 0, "Pearson r (pred, true)"
+    raise ValueError("Unknown metric")
+
+
+# =============================================================================
+# runner
 # =============================================================================
 def run_one_analysis(
+    cfg: AnalysisCfg,
     *,
-    tag: str,
-    mode: str,                     # "class" or "reg"
-    train_phase: str,
-    train_label: str,
-    test_phase: str,
-    test_label: str,
-    balance_nuisance: bool,
-    nuisance_label: str | None,
-    residualize_test: bool,
-    residualize_nuisance: str | None,   # "pain" or "money"
-    residualize_model: str,             # "pain2" or "pain+pain2"
-    shuffle_train: bool,
-    shuffle_test: bool,
+    subjects: list[str],
+    n_perm: int,   # kept for backward-compat; not used by label-perm inference below
 ):
-    out_dir = OUT_DIR / tag
+    out_dir = OUT_DIR / cfg.tag
     out_dir.mkdir(parents=True, exist_ok=True)
     figs_dir = out_dir / "figs"
     figs_dir.mkdir(exist_ok=True)
 
-    def log(msg: str):
-        tqdm.write(msg)
+    chance, tail, cbar_label = _metric_meta(cfg.metric)
 
-    rng = np.random.default_rng(RANDOM_STATE)
-
-    subs = list_subjects(DERIV_DIR)
     included, skipped = [], []
     mats = []
+    nulls = [] 
     times_train = None
     times_test = None
 
-    pbar = tqdm(subs, desc=tag, unit="sub", dynamic_ncols=True)
+    pbar = tqdm(subjects, desc=cfg.tag, unit="sub", dynamic_ncols=True)
     for sub in pbar:
         try:
-            # ---- load train ----
+            # ---- load train/test epochs + merge beh ----
             epo_tr = ensure_resampled(drop_badtrials(
-                merge_beh_into_epochs(load_epochs(sub, train_phase), load_beh(sub, train_phase), sub=sub, phase=train_phase)
+                merge_beh_into_epochs(load_epochs(sub, cfg.train_phase),
+                                      load_beh(sub, cfg.train_phase),
+                                      sub=sub, phase=cfg.train_phase)
             ))
-
-            print(f"\n{sub} TRAIN ({train_phase})")
-            print("Epochs:", len(epo_tr))
-            print("Metadata rows:", len(epo_tr.metadata))
-            
-            if "trialsnum" in epo_tr.metadata.columns:
-                print("Unique trialsnum in epochs:", epo_tr.metadata["trialsnum"].nunique())
-            else:
-                print("trialsnum missing in epochs metadata")
-
-            print("NaNs in level columns:",
-                  epo_tr.metadata.isna().sum().sort_values(ascending=False).head(5))
-
-            # ---- load test ----
             epo_te = ensure_resampled(drop_badtrials(
-                merge_beh_into_epochs(load_epochs(sub, test_phase), load_beh(sub, test_phase), sub=sub, phase=test_phase)
+                merge_beh_into_epochs(load_epochs(sub, cfg.test_phase),
+                                      load_beh(sub, cfg.test_phase),
+                                      sub=sub, phase=cfg.test_phase)
             ))
 
-            print(f"\n{sub} TEST ({test_phase})")
-            print("Epochs:", len(epo_te))
-            print("Metadata rows:", len(epo_te.metadata))
-            print("Unique trialsnum in epochs:", len(np.unique(epo_te.metadata.get('trialsnum', []))))
-
-            if "moneystim" in epo_te.metadata.columns:
-                print("Unique moneystim values:",
-                      epo_te.metadata["moneystim"].dropna().unique()[:15])
-            if "painstim" in epo_te.metadata.columns:
-                print("Unique painstim values:",
-                      epo_te.metadata["painstim"].dropna().unique()[:15])
-
-            print("NaNs in moneystim:",
-                  epo_te.metadata["moneystim"].isna().sum() if "moneystim" in epo_te.metadata else "missing")
-
-
-            # ---- select train ----
-            if train_phase == "passive":
-                Xtr, tr_levels, md_tr = prepare_passive(epo_tr, train_label)
+            # ---- select train/test trials + labels (levels) ----
+            if cfg.train_phase == "passive":
+                Xtr, tr_levels, md_tr = prepare_passive(epo_tr, cfg.train_label)
             else:
-                Xtr, tr_levels, md_tr = prepare_decision(epo_tr, train_label)
+                Xtr, tr_levels, md_tr = prepare_decision(epo_tr, cfg.train_label)
 
-            # ---- select test ----
-            if test_phase == "passive":
-                Xte, te_levels, md_te = prepare_passive(epo_te, test_label)
+            if cfg.test_phase == "passive":
+                Xte, te_levels, md_te = prepare_passive(epo_te, cfg.test_label)
             else:
-                Xte, te_levels, md_te = prepare_decision(epo_te, test_label)
+                Xte, te_levels, md_te = prepare_decision(epo_te, cfg.test_label)
 
-            # ---- nuisance levels for decision test set (needed for balancing/residualization) ----
-            # Only meaningful when test_phase == "decision"
-            if test_phase == "decision":
-                pain_levels_all = parse_stim_code_to_level(md_te[pick_first_existing_col(md_te, DEC_PAIN_COL_CANDIDATES, label="painstim")], "p")
-                money_levels_all = parse_stim_code_to_level(md_te[pick_first_existing_col(md_te, DEC_MONEY_COL_CANDIDATES, label="moneystim")], "m")
-            else:
-                pain_levels_all = None
-                money_levels_all = None
-
-            # ---- balancing on TEST ----
-            if balance_nuisance:
-                if test_phase != "decision":
-                    raise ValueError("Balancing is implemented for decision test only.")
-                if nuisance_label is None:
-                    raise ValueError("nuisance_label must be set when balance_nuisance=True")
-
-                if nuisance_label == "pain":
-                    nuis = pain_levels_all
-                elif nuisance_label == "money":
-                    nuis = money_levels_all
-                else:
-                    raise ValueError("nuisance_label must be 'pain' or 'money'")
-
-                keep_idx = balance_nuisance_within_target(
-                    md_te,
-                    target_levels=te_levels,
-                    nuisance_levels=nuis,
-                    rng=rng,
+            # ---- nuisance arrays (decision only) ----
+            pain_levels_te = None
+            money_levels_te = None
+            if cfg.test_phase == "decision":
+                pain_levels_te = parse_stim_code_to_level(
+                    md_te[pick_first_existing_col(md_te, DEC_PAIN_COL_CANDIDATES, label="painstim")],
+                    "p"
+                )
+                money_levels_te = parse_stim_code_to_level(
+                    md_te[pick_first_existing_col(md_te, DEC_MONEY_COL_CANDIDATES, label="moneystim")],
+                    "m"
                 )
 
-                keep_mask = md_te.index.isin(keep_idx)
-                Xte = Xte[keep_mask]
-                te_levels = te_levels[keep_mask]
-                md_te = md_te.loc[keep_mask].reset_index(drop=True)
+            # ---- optional binary filtering (drop 60) ----
+            if cfg.binary_drop_middle:
+                Xtr, tr_levels, _ = filter_levels(Xtr, tr_levels, BIN_KEEP_LEVELS)
+                Xte, te_levels, keep_mask_te = filter_levels(Xte, te_levels, BIN_KEEP_LEVELS)
 
-                # recompute nuis arrays aligned to kept set (important!)
-                if test_phase == "decision":
-                    pain_levels_all = parse_stim_code_to_level(md_te[pick_first_existing_col(md_te, DEC_PAIN_COL_CANDIDATES, label="painstim")], "p")
-                    money_levels_all = parse_stim_code_to_level(md_te[pick_first_existing_col(md_te, DEC_MONEY_COL_CANDIDATES, label="moneystim")], "m")
+                if pain_levels_te is not None:
+                    pain_levels_te = pain_levels_te[keep_mask_te]
+                if money_levels_te is not None:
+                    money_levels_te = money_levels_te[keep_mask_te]
 
-                if len(te_levels) < 20:
-                    raise ValueError("Too few test trials after balancing.")
+                if len(tr_levels) < 10 or len(te_levels) < 10:
+                    raise ValueError("Too few trials after binary filtering (drop 60).")
 
-            # ---- residualize on TEST EEG ----
-            if residualize_test:
-                if test_phase != "decision":
-                    raise ValueError("Residualization implemented for decision test only.")
-                if residualize_nuisance is None:
-                    raise ValueError("residualize_nuisance must be 'pain' or 'money'")
+            # ---- pain control: EEG residualization on TEST ----
+            if cfg.control_mode == "eeg_resid_test":
+                if cfg.test_phase != "decision":
+                    raise ValueError("EEG residualization control is implemented for decision TEST only.")
+                if pain_levels_te is None:
+                    raise ValueError("Missing pain levels for test residualization.")
+                Xte = residualize_X_by_nuisance(Xte, pain_levels_te, model=cfg.resid_model)
 
-                if residualize_nuisance == "pain":
-                    nuis_levels = pain_levels_all
-                elif residualize_nuisance == "money":
-                    nuis_levels = money_levels_all
-                else:
-                    raise ValueError("residualize_nuisance must be 'pain' or 'money'")
+            # ---- build y + timegen estimator ----
+            if cfg.metric in ("clf_auc", "clf_acc"):
+                if not cfg.binary_drop_middle:
+                    raise ValueError("clf_* metrics require binary_drop_middle=True (drop 60).")
+                ytr = to_binary_low_high(tr_levels)
+                yte = to_binary_low_high(te_levels)
+                timegen = make_timegen_estimator_classifier("auc" if cfg.metric == "clf_auc" else "acc")
 
-                Xte = residualize_X_by_nuisance(Xte, nuis_levels, model=residualize_model)
-
-            # ---- build y for model ----
-            if mode == "class":
-                ytr = to_class_labels_from_levels(tr_levels)
-                yte = to_class_labels_from_levels(te_levels)
-                chance = CHANCE_5CLASS
-                tail = 1
-                cbar_label = "Accuracy − chance"
-            else:
-                # regression: use numeric levels directly
+            elif cfg.metric == "reg_r":
                 ytr = tr_levels.astype(float)
                 yte = te_levels.astype(float)
-                chance = CHANCE_R
-                tail = 0
-                cbar_label = "Pearson r (pred − true)"
 
-            # ---- training groups ----
-            groups_tr = None
-            if (md_tr is not None) and (KEY_BLOCK in md_tr.columns):
-                groups_tr = md_tr[KEY_BLOCK].to_numpy()
+                if cfg.control_mode == "label_resid":
+                    if cfg.test_phase != "decision":
+                        raise ValueError("label_resid control is implemented for decision TEST only.")
+                    if pain_levels_te is None:
+                        raise ValueError("Missing pain levels for label residualization.")
+
+                    ytr = residualize_y_by_nuisance(ytr, None, model="intercept")
+                    yte = residualize_y_by_nuisance(yte, pain_levels_te, model=cfg.resid_model)
+
+                timegen = make_timegen_estimator_regression("r")
+
+            elif cfg.metric == "reg_auc":
+                if not cfg.binary_drop_middle:
+                    raise ValueError("reg_auc requires binary_drop_middle=True (drop 60).")
+
+                ytr = tr_levels.astype(float)
+                yte = to_binary_low_high(te_levels).astype(int)
+
+                if cfg.control_mode == "label_resid":
+                    raise ValueError("label_resid is not supported for reg_auc (use eeg_resid_test).")
+
+                timegen = make_timegen_estimator_regression("auc_from_reg")
+
+            else:
+                raise ValueError("Unknown metric")
 
             # ---- time axes ----
             if times_train is None:
@@ -762,53 +1084,69 @@ def run_one_analysis(
                 if len(epo_te.times) != len(times_test) or np.max(np.abs(epo_te.times - times_test)) > 1e-9:
                     raise RuntimeError("Test time axis mismatch across subjects.")
 
-            # ---- compute subject matrix ----
-            mat = subject_timegen_crossphase(
-                Xtr, ytr, Xte, yte,
-                groups_train=groups_tr,
-                shuffle_train=shuffle_train,
-                shuffle_test=shuffle_test,
-                mode=mode,
+            # ---- compute subject matrix + nulls (LABEL PERMUTATION; MVPA standard) ----
+            mat_real, mats_null = subject_timegen_crossphase_with_nulls(
+                timegen,
+                Xtr, np.asarray(ytr),
+                Xte, np.asarray(yte),
+                n_perm_label=N_PERM_LABEL,
+                permute="train",
             )
-            mats.append(mat)
+
+            mats.append(mat_real)
+            nulls.append(mats_null)
             included.append(sub)
 
-            pbar.set_postfix_str(f"{sub} | tr={len(ytr)} te={len(yte)} | mean={np.mean(mat):.3f}")
+            pbar.set_postfix_str(
+                f"{sub} | tr={len(ytr)} te={len(yte)} | mean={np.mean(mat_real):.3f}"
+            )
 
         except Exception as e:
             skipped.append((sub, str(e)))
-            log(f"Skipped {sub}: {e}")
+            logprint(f"Skipped {sub}: {e}")
 
-    if len(mats) < 8:
-        raise RuntimeError(f"{tag}: too few subjects for group stats (n={len(mats)})")
+    if len(mats) < max(5, min(8, len(subjects))):
+        raise RuntimeError(f"{cfg.tag}: too few subjects for group stats (n={len(mats)}). Skipped={len(skipped)}")
 
-    mats = np.stack(mats, axis=0)  # (n_subj, n_tr, n_te)
+    mats = np.stack(mats, axis=0)       # (n_subj, n_tr, n_te)
+    nulls = np.stack(nulls, axis=0)     # (n_subj, n_perm_label, n_tr, n_te)
 
     # ---- restrict to stats window ----
     tr_mask = (times_train >= TMIN_STAT) & (times_train <= TMAX_STAT)
     te_mask = (times_test >= TMIN_STAT) & (times_test <= TMAX_STAT)
     tr_times_stat = times_train[tr_mask]
     te_times_stat = times_test[te_mask]
-    mats_stat = mats[:, tr_mask][:, :, te_mask]
 
-    # ---- group stats ----
-    stats_out = group_cluster_timegen(mats_stat, chance=chance, tail=tail)
+    mats_stat = mats[:, tr_mask][:, :, te_mask]
+    nulls_stat = nulls[:, :, tr_mask][:, :, :, te_mask]
+
+    # ---- MVPA-style group stats (label permutation null) ----
+    stats_out = group_cluster_timegen_labelperm(
+        mats_real=mats_stat,
+        mats_null=nulls_stat,
+        chance=chance,
+        tail=tail,
+        alpha_cluster=ALPHA_CLUSTER,
+        use_tfce=USE_TFCE,
+    )
 
     mean_mat = np.mean(mats_stat, axis=0)
     sem_mat = np.std(mats_stat, axis=0, ddof=1) / np.sqrt(mats_stat.shape[0])
 
     # ---- save ----
     np.savez(
-        out_dir / f"{tag}_timegen_group_results.npz",
+        out_dir / f"{cfg.tag}_timegen_group_results.npz",
         subj_mats=mats,
+        subj_nulls=nulls,  # can be big; remove if storage is an issue
         subj_mats_stat=mats_stat,
+        subj_nulls_stat=nulls_stat,
         times_train=times_train,
         times_test=times_test,
         times_train_stat=tr_times_stat,
         times_test_stat=te_times_stat,
         included=np.array(included, dtype=object),
         skipped=np.array(skipped, dtype=object),
-        mode=mode,
+        metric=cfg.metric,
         chance=float(chance),
         mean_mat=mean_mat,
         sem_mat=sem_mat,
@@ -817,19 +1155,26 @@ def run_one_analysis(
         cluster_pv=stats_out["cluster_pv"],
         thresh_used=stats_out["thresh_used"],
         alpha_cluster=float(ALPHA_CLUSTER),
-        n_perm=int(N_PERM),
+        resample_sfreq=int(RESAMPLE_SFREQ),
+        fit_full_train=bool(CROSSPHASE_FIT_FULL_TRAIN),
+        # permutation meta
+        max_stats=stats_out["max_stats"],
+        n_perm_label=int(N_PERM_LABEL),
+        permute_labels="train",
+        use_tfce=bool(USE_TFCE),
+        cluster_forming_p=float(CLUSTER_FORMING_P),
     )
 
     save_cluster_table_2d(
-        out_csv=out_dir / f"{tag}_cluster_table.csv",
+        out_csv=out_dir / f"{cfg.tag}_cluster_table.csv",
         times_train=tr_times_stat,
         times_test=te_times_stat,
         stats_out=stats_out,
     )
 
     meta = dict(
-        tag=tag,
-        mode=mode,
+        tag=cfg.tag,
+        metric=cfg.metric,
         n_subjects=int(mats_stat.shape[0]),
         n_train_times=int(mats_stat.shape[1]),
         n_test_times=int(mats_stat.shape[2]),
@@ -839,22 +1184,24 @@ def run_one_analysis(
         thresh_used=stats_out["thresh_used"],
         min_cluster_p=float(np.min(stats_out["cluster_pv"])) if len(stats_out["cluster_pv"]) else 1.0,
         included_subjects=included,
-        train_phase=train_phase,
-        train_label=train_label,
-        test_phase=test_phase,
-        test_label=test_label,
-        balance_nuisance=bool(balance_nuisance),
-        nuisance_label=nuisance_label,
-        residualize_test=bool(residualize_test),
-        residualize_nuisance=residualize_nuisance,
-        residualize_model=residualize_model,
-        shuffle_train=bool(shuffle_train),
-        shuffle_test=bool(shuffle_test),
-        resample_sfreq=RESAMPLE_SFREQ if RESAMPLE_SFREQ is not None else -1,
+        train_phase=cfg.train_phase,
+        train_label=cfg.train_label,
+        test_phase=cfg.test_phase,
+        test_label=cfg.test_label,
+        binary_drop_middle=bool(cfg.binary_drop_middle),
+        control_mode=cfg.control_mode,
+        resid_model=cfg.resid_model,
+        resample_sfreq=int(RESAMPLE_SFREQ),
         tmin_stat=float(TMIN_STAT),
         tmax_stat=float(TMAX_STAT),
+        fit_full_train=bool(CROSSPHASE_FIT_FULL_TRAIN),
+        # permutation meta
+        n_perm_label=int(N_PERM_LABEL),
+        permute_labels="train",
+        use_tfce=bool(USE_TFCE),
+        cluster_forming_p=float(CLUSTER_FORMING_P),
     )
-    with open(out_dir / f"{tag}_summary.json", "w") as f:
+    with open(out_dir / f"{cfg.tag}_summary.json", "w") as f:
         json.dump(meta, f, indent=2)
 
     plot_timegen_heatmap(
@@ -863,14 +1210,16 @@ def run_one_analysis(
         times_test=te_times_stat,
         p_map=stats_out["p_map"],
         chance=chance,
-        title=f"{tag} ({mode}): time×time generalization",
-        out_path=figs_dir / f"{tag}_heatmap.png",
+        title=f"{cfg.tag} ({cfg.metric})",
+        out_path=figs_dir / f"{cfg.tag}_heatmap.png",
         alpha=ALPHA_CLUSTER,
         cbar_label=cbar_label,
     )
 
-    log(f"DONE {tag}: included={len(included)} | min cluster p="
-        f"{(float(np.min(stats_out['cluster_pv'])) if len(stats_out['cluster_pv']) else 1.0):.6f}")
+    logprint(
+        f"DONE {cfg.tag}: included={len(included)} | skipped={len(skipped)} | "
+        f"min cluster p={(float(np.min(stats_out['cluster_pv'])) if len(stats_out['cluster_pv']) else 1.0):.6f}"
+    )
 
 
 # =============================================================================
@@ -879,63 +1228,91 @@ def run_one_analysis(
 def main():
     mne.set_log_level("WARNING")
 
-    analyses = []
+    all_subs = list_subjects(DERIV_DIR)
+    subjects = select_subjects(all_subs)
+    n_perm = int(N_PERM_DEFAULT)
 
-    ###
-    
-    analyses.append(dict(
-        tag="REG_trainPASS_money__testDEC_money__painBalanced",
-        mode="reg",
+
+    # -------------------------------------------------------------------------
+    analyses: list[AnalysisCfg] = []
+
+    # (A) classifier low vs high money (drop 60), score=AUC, plot AUC-0.5
+    analyses.append(AnalysisCfg(
+        tag="CLF_AUC_trainPASS_money__testDEC_money__binLowHigh_drop60__NOCTRL__50Hz",
+        metric="clf_auc",
         train_phase="passive", train_label="money",
         test_phase="decision", test_label="money",
-        balance_nuisance=True, nuisance_label="pain",
-        residualize_test=False, residualize_nuisance=None, residualize_model="pain2",
-        shuffle_train=False, shuffle_test=False,
+        binary_drop_middle=True,
+        control_mode="none",
+        resid_model="pain+pain2",
     ))
-
-    analyses.append(dict(
-        tag="REG_trainPASS_money__testDEC_money__residPain2",
-        mode="reg",
+    analyses.append(AnalysisCfg(
+        tag="CLF_AUC_trainPASS_money__testDEC_money__binLowHigh_drop60__CTRLpain_EEGresidTest_painPlusPain2__50Hz",
+        metric="clf_auc",
         train_phase="passive", train_label="money",
         test_phase="decision", test_label="money",
-        balance_nuisance=False, nuisance_label=None,
-        residualize_test=True, residualize_nuisance="pain", residualize_model="pain2",
-        shuffle_train=False, shuffle_test=False,
+        binary_drop_middle=True,
+        control_mode="eeg_resid_test",
+        resid_model="pain+pain2",
     ))
 
-    analyses.append(dict(
-        tag="REG_trainPASS_money__testDEC_money__residPainPlusPain2",
-        mode="reg",
+    # (B) REGRESSION: Pearson r on 5 levels (chance=0), baseline
+    analyses.append(AnalysisCfg(
+        tag="REG_r_trainPASS_money__testDEC_money__5level__NOCTRL__50Hz",
+        metric="reg_r",
         train_phase="passive", train_label="money",
         test_phase="decision", test_label="money",
-        balance_nuisance=False, nuisance_label=None,
-        residualize_test=True, residualize_nuisance="pain", residualize_model="pain+pain2",
-        shuffle_train=False, shuffle_test=False,
+        binary_drop_middle=False,
+        control_mode="none",
+        resid_model="pain+pain2",
     ))
-
-    analyses.append(dict(
-        tag="REG_trainPASS_money__testDEC_money__noControl",
-        mode="reg",
+    # (B-control preferred) REGRESSION r with LABEL residualization (controls pain without touching EEG)
+    analyses.append(AnalysisCfg(
+        tag="REG_r_trainPASS_money__testDEC_money__5level__CTRLpain_LABELresid_painPlusPain2__50Hz",
+        metric="reg_r",
         train_phase="passive", train_label="money",
         test_phase="decision", test_label="money",
-        balance_nuisance=False, nuisance_label=None,
-        residualize_test=False, residualize_nuisance=None, residualize_model="pain2",
-        shuffle_train=False, shuffle_test=False,
+        binary_drop_middle=False,
+        control_mode="label_resid",
+        resid_model="pain+pain2",
     ))
-
-    # classification 
-    analyses.append(dict(
-        tag="CLF_trainPASS_money__testDEC_money__noControl",
-        mode="class",
+    # (B-control alternative) REGRESSION r with TEST-EEG residualization (sometimes more conservative)
+    analyses.append(AnalysisCfg(
+        tag="REG_r_trainPASS_money__testDEC_money__5level__CTRLpain_EEGresidTest_painPlusPain2__50Hz",
+        metric="reg_r",
         train_phase="passive", train_label="money",
         test_phase="decision", test_label="money",
-        balance_nuisance=False, nuisance_label=None,
-        residualize_test=False, residualize_nuisance=None, residualize_model="pain2",
-        shuffle_train=False, shuffle_test=False,
+        binary_drop_middle=False,
+        control_mode="eeg_resid_test",
+        resid_model="pain+pain2",
     ))
 
+    # (C) REGRESSION -> "accuracy-like" heatmap: Ridge predictions scored as AUC on binary low/high
+    # chance=0.5, plot AUC-0.5 (this answers your "regression but still want accuracy-chance" request)
+    analyses.append(AnalysisCfg(
+        tag="REG_AUC_trainPASS_money__testDEC_money__binLowHigh_drop60__NOCTRL__50Hz",
+        metric="reg_auc",
+        train_phase="passive", train_label="money",
+        test_phase="decision", test_label="money",
+        binary_drop_middle=True,
+        control_mode="none",
+        resid_model="pain+pain2",
+    ))
+    analyses.append(AnalysisCfg(
+        tag="REG_AUC_trainPASS_money__testDEC_money__binLowHigh_drop60__CTRLpain_EEGresidTest_painPlusPain2__50Hz",
+        metric="reg_auc",
+        train_phase="passive", train_label="money",
+        test_phase="decision", test_label="money",
+        binary_drop_middle=True,
+        control_mode="eeg_resid_test",
+        resid_model="pain+pain2",
+    ))
+
+    # -------------------------------------------------------------------------
+    # RUN
+    # -------------------------------------------------------------------------
     for cfg in analyses:
-        run_one_analysis(**cfg)
+        run_one_analysis(cfg, subjects=subjects, n_perm=n_perm)
 
 
 if __name__ == "__main__":
