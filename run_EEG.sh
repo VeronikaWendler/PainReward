@@ -46,4 +46,5 @@ apptainer exec --cleanenv \
   --env OUT_DIR="${OUT_DIR}" \
   --env HDDM_DIR="${HDDM_DIR}" \
   "${IMAGE}" \
-  python "${PROJECT_DIR}/EEG/mvpa_erp_decoding_searchlight.py"
+  python "${PROJECT_DIR}/EEG/eeg_erp_crossphase_decoding.py"
+  

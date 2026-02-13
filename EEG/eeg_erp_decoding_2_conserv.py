@@ -1405,8 +1405,6 @@ def main():
     mne.set_log_level("WARNING")
 
     # -------------------------
-    # BINARY (your existing run)
-    # -------------------------
     if RUN_BINARY:
         # temporarily redirect global OUT_DIR/DEBUG_DIR for binary outputs
         global OUT_DIR, DEBUG_DIR
