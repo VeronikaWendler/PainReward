@@ -151,7 +151,7 @@ def load_beh(sub: str, phase: str) -> pd.DataFrame:
         beh = beh[~beh["fixcross.started"].isna()].copy()
 
     beh = beh.reset_index(drop=True)
-    beh[KEY_TRIALNUM] = np.arange(1, len(beh) + 1)
+    #beh[KEY_TRIALNUM] = np.arange(1, len(beh) + 1)
     return beh
 
 
@@ -321,9 +321,6 @@ def prepare_passive(epo: mne.Epochs, label: str):
 
 
 def prepare_decision(epo: mne.Epochs, label: str):
-    """
-    Returns X, levels_f(20..100), md_f
-    """
     if epo.metadata is None:
         raise ValueError("No metadata.")
     md = epo.metadata.reset_index(drop=True)
@@ -337,9 +334,14 @@ def prepare_decision(epo: mne.Epochs, label: str):
     else:
         raise ValueError("label must be 'money' or 'pain'")
 
+    print("Before decision filtering:", len(epo))
+    print("Levels parsed unique:", np.unique(levels))
+
     keep = np.isin(levels, LEVELS_ALL)
     epo_f = epo.copy()[keep]
     md_f = epo_f.metadata.reset_index(drop=True)
+
+    print("After decision filtering:", len(epo_f))
 
     # recompute after filtering
     if label == "money":
@@ -349,6 +351,7 @@ def prepare_decision(epo: mne.Epochs, label: str):
 
     X = epo_f.get_data()
     return X, levels_f, md_f
+
 
 
 # =============================================================================
@@ -625,10 +628,38 @@ def run_one_analysis(
                 merge_beh_into_epochs(load_epochs(sub, train_phase), load_beh(sub, train_phase), sub=sub, phase=train_phase)
             ))
 
+            print(f"\n{sub} TRAIN ({train_phase})")
+            print("Epochs:", len(epo_tr))
+            print("Metadata rows:", len(epo_tr.metadata))
+            
+            if "trialsnum" in epo_tr.metadata.columns:
+                print("Unique trialsnum in epochs:", epo_tr.metadata["trialsnum"].nunique())
+            else:
+                print("trialsnum missing in epochs metadata")
+
+            print("NaNs in level columns:",
+                  epo_tr.metadata.isna().sum().sort_values(ascending=False).head(5))
+
             # ---- load test ----
             epo_te = ensure_resampled(drop_badtrials(
                 merge_beh_into_epochs(load_epochs(sub, test_phase), load_beh(sub, test_phase), sub=sub, phase=test_phase)
             ))
+
+            print(f"\n{sub} TEST ({test_phase})")
+            print("Epochs:", len(epo_te))
+            print("Metadata rows:", len(epo_te.metadata))
+            print("Unique trialsnum in epochs:", len(np.unique(epo_te.metadata.get('trialsnum', []))))
+
+            if "moneystim" in epo_te.metadata.columns:
+                print("Unique moneystim values:",
+                      epo_te.metadata["moneystim"].dropna().unique()[:15])
+            if "painstim" in epo_te.metadata.columns:
+                print("Unique painstim values:",
+                      epo_te.metadata["painstim"].dropna().unique()[:15])
+
+            print("NaNs in moneystim:",
+                  epo_te.metadata["moneystim"].isna().sum() if "moneystim" in epo_te.metadata else "missing")
+
 
             # ---- select train ----
             if train_phase == "passive":
@@ -850,36 +881,8 @@ def main():
 
     analyses = []
 
-    # --------------------------
-    # CLASSIFICATION (optional)
-    # --------------------------
-    # (keep if you want; comment out if you only want regression)
-    analyses.append(dict(
-        tag="CLF_trainPASS_money__testDEC_money__noControl",
-        mode="class",
-        train_phase="passive", train_label="money",
-        test_phase="decision", test_label="money",
-        balance_nuisance=False, nuisance_label=None,
-        residualize_test=False, residualize_nuisance=None, residualize_model="pain2",
-        shuffle_train=False, shuffle_test=False,
-    ))
-
-    # --------------------------
-    # REGRESSION: your 3 core configs
-    # --------------------------
-
-    # 1) no control
-    analyses.append(dict(
-        tag="REG_trainPASS_money__testDEC_money__noControl",
-        mode="reg",
-        train_phase="passive", train_label="money",
-        test_phase="decision", test_label="money",
-        balance_nuisance=False, nuisance_label=None,
-        residualize_test=False, residualize_nuisance=None, residualize_model="pain2",
-        shuffle_train=False, shuffle_test=False,
-    ))
-
-    # 2) balance pain across money (subsample test trials)
+    ###
+    
     analyses.append(dict(
         tag="REG_trainPASS_money__testDEC_money__painBalanced",
         mode="reg",
@@ -890,7 +893,6 @@ def main():
         shuffle_train=False, shuffle_test=False,
     ))
 
-    # 3) residualize pain^2 from test EEG
     analyses.append(dict(
         tag="REG_trainPASS_money__testDEC_money__residPain2",
         mode="reg",
@@ -901,7 +903,6 @@ def main():
         shuffle_train=False, shuffle_test=False,
     ))
 
-    # Optional: residualize pain + pain^2 (more flexible)
     analyses.append(dict(
         tag="REG_trainPASS_money__testDEC_money__residPainPlusPain2",
         mode="reg",
@@ -909,6 +910,27 @@ def main():
         test_phase="decision", test_label="money",
         balance_nuisance=False, nuisance_label=None,
         residualize_test=True, residualize_nuisance="pain", residualize_model="pain+pain2",
+        shuffle_train=False, shuffle_test=False,
+    ))
+
+    analyses.append(dict(
+        tag="REG_trainPASS_money__testDEC_money__noControl",
+        mode="reg",
+        train_phase="passive", train_label="money",
+        test_phase="decision", test_label="money",
+        balance_nuisance=False, nuisance_label=None,
+        residualize_test=False, residualize_nuisance=None, residualize_model="pain2",
+        shuffle_train=False, shuffle_test=False,
+    ))
+
+    # classification 
+    analyses.append(dict(
+        tag="CLF_trainPASS_money__testDEC_money__noControl",
+        mode="class",
+        train_phase="passive", train_label="money",
+        test_phase="decision", test_label="money",
+        balance_nuisance=False, nuisance_label=None,
+        residualize_test=False, residualize_nuisance=None, residualize_model="pain2",
         shuffle_train=False, shuffle_test=False,
     ))
 
