@@ -236,6 +236,44 @@ def load_beh(sub: str, phase: str) -> pd.DataFrame:
         beh = beh[~beh["fixcross.started"].isna()].copy()
 
     beh = beh.reset_index(drop=True)
+    beh = ensure_trialsnum_in_beh(beh, sub=sub, phase=phase)
+    logprint(sub, phase, "beh trialsnum range:",
+             int(beh[KEY_TRIALNUM].min()), int(beh[KEY_TRIALNUM].max()))
+
+
+    return beh
+
+
+def ensure_trialsnum_in_beh(beh: pd.DataFrame, *, sub: str, phase: str) -> pd.DataFrame:
+    """Create trialsnum in beh if missing, using blocks.thisN and trials.thisN."""
+    if KEY_TRIALNUM in beh.columns:
+        return beh
+
+    if (KEY_BLOCK not in beh.columns) or (KEY_TRIAL not in beh.columns):
+        raise ValueError(
+            f"{sub} {phase}: beh.tsv missing {KEY_TRIALNUM} and cannot build it (need {KEY_BLOCK} and {KEY_TRIAL})."
+        )
+
+    beh = beh.copy()
+    beh[KEY_BLOCK] = _coerce_int_series(beh[KEY_BLOCK])
+    beh[KEY_TRIAL] = _coerce_int_series(beh[KEY_TRIAL])
+
+    # Drop rows where block/trial are NaN (shouldn't happen, but safe)
+    beh = beh[~beh[KEY_BLOCK].isna() & ~beh[KEY_TRIAL].isna()].copy()
+
+    # Infer trials-per-block and sanity check consistency
+    tpb_by_block = beh.groupby(KEY_BLOCK)[KEY_TRIAL].max().astype(int) + 1  # because trials.thisN is 0-based
+    tpb_unique = sorted(tpb_by_block.unique().tolist())
+    if len(tpb_unique) != 1:
+        raise ValueError(
+            f"{sub} {phase}: inconsistent trials-per-block inferred from beh: {tpb_by_block.to_dict()}"
+        )
+    trials_per_block = int(tpb_unique[0])
+
+    # Sort, then compute trialsnum = block*trials_per_block + trial + 1
+    beh = beh.sort_values([KEY_BLOCK, KEY_TRIAL]).reset_index(drop=True)
+    beh[KEY_TRIALNUM] = (beh[KEY_BLOCK].astype(int) * trials_per_block + beh[KEY_TRIAL].astype(int) + 1).astype(int)
+
     return beh
 
 
