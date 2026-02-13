@@ -47,4 +47,5 @@ apptainer exec --cleanenv \
   --env HDDM_DIR="${HDDM_DIR}" \
   "${IMAGE}" \
   python "${PROJECT_DIR}/EEG/eeg_erp_crossphase_decoding.py"
-  
+
+
