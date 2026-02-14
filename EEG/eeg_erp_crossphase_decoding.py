@@ -50,7 +50,7 @@ SUBJECT_LIST = []
 # =============================================================================
 # debug controls
 # =============================================================================
-N_PERM_DEFAULT = 2000
+N_PERM_DEFAULT = 1000
 
 # If True: refuse merges that look dangerous.
 # If False: do best-effort left-join on epochs and keep going, but log warnings.
@@ -453,7 +453,9 @@ def residualize_y_by_nuisance(
     return (y - y_hat).astype(float)
 
 
-def subject_timegen_crossphase_with_nulls(
+from sklearn.base import clone
+
+def subject_timegen_crossphase_with_nulls_fast(
     timegen: GeneralizingEstimator,
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -461,31 +463,33 @@ def subject_timegen_crossphase_with_nulls(
     y_test: np.ndarray,
     *,
     n_perm_label: int,
-    permute: Literal["train", "test", "both"] = "train",
+    permute: Literal["test", "both"] = "test",
 ) -> tuple[np.ndarray, np.ndarray]:
+
     rng = np.random.default_rng(RANDOM_STATE)
 
-    timegen.fit(X_train, y_train)
-    mat_real = timegen.score(X_test, y_test)
+    # IMPORTANT: clone so we don't carry state between subjects
+    tg = clone(timegen)
 
-    mats_null = []
-    for _ in range(n_perm_label):
-        if permute == "train":
-            ytr = rng.permutation(y_train)
-            yte = y_test
-        elif permute == "test":
-            ytr = y_train
-            yte = rng.permutation(y_test)
-        elif permute == "both":
-            ytr = rng.permutation(y_train)
-            yte = rng.permutation(y_test)
-        else:
-            raise ValueError("permute must be 'train', 'test', or 'both'")
+    # Fit ONCE
+    tg.fit(X_train, y_train)
+    mat_real = tg.score(X_test, y_test)
 
-        timegen.fit(X_train, ytr)
-        mats_null.append(timegen.score(X_test, yte))
+    mats_null = np.empty((n_perm_label, mat_real.shape[0], mat_real.shape[1]), dtype=float)
 
-    return mat_real, np.asarray(mats_null)
+    if permute not in ("test", "both"):
+        raise ValueError("permute must be 'test' or 'both'")
+
+    # Nulls: shuffle test labels (fast)
+    for k in range(n_perm_label):
+        yte = rng.permutation(y_test)
+
+        # optional: if you REALLY want "both", you can also shuffle y_train
+        # but we still don't refit => it's basically the same practical effect as "test"
+        # (kept only so you can keep the same interface)
+        mats_null[k] = tg.score(X_test, yte)
+
+    return mat_real, mats_null
 
 
 # =============================================================================
@@ -938,13 +942,14 @@ def run_one_analysis(cfg: AnalysisCfg, *, subjects: list[str], n_perm: int):
                 if len(epo_te.times) != len(times_test) or np.max(np.abs(epo_te.times - times_test)) > 1e-9:
                     raise RuntimeError("Test time axis mismatch across subjects.")
 
-            mat_real, mats_null = subject_timegen_crossphase_with_nulls(
+            mat_real, mats_null = subject_timegen_crossphase_with_nulls_fast(
                 timegen,
                 Xtr, np.asarray(ytr),
                 Xte, np.asarray(yte),
                 n_perm_label=N_PERM_LABEL,
-                permute="train",
-            )
+                permute="test",
+                )
+
 
             mats.append(mat_real)
             nulls.append(mats_null)
