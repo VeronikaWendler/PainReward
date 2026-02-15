@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Step 1 (Decision): Time-resolved decoding of money- and pain-cue levels (decision phase)
-
-Faithful adaptation of the PASSIVE Step-1 decoding script style.
+Decision phase: Time-resolved decoding of money- and pain-cue levels (decision phase)
 
 - Loads decision epochs from derivatives
 - Loads decision beh.tsv from raw painrewardeegdata
-- Merges beh into epochs.metadata (trialsnum -> else block/trial -> else order if lengths match)
+- merge on trialsnum
 - Extracts cue levels from decision metadata columns:
     - moneystim: m1..m5 -> 20/40/60/80/100
     - painstim : p1..p5 -> 20/40/60/80/100
@@ -55,7 +53,7 @@ from tqdm.auto import tqdm
 
 # -----------------------------
 # Paths
-# -----------------------------
+
 DATA_DIR_STR = os.getenv("DATA_DIR", "").strip()
 OUT_DIR_STR = os.getenv("OUT_DIR", "").strip()
 
@@ -549,7 +547,7 @@ def subject_decode_regression(X: np.ndarray, y: np.ndarray, shuffle: bool, group
 
 
 # =====================================================================
-# Stats + plotting (copied style from passive)
+# Stats + plotting
 # =====================================================================
 
 def _cluster_to_bool_mask(cl, n_times: int) -> np.ndarray | None:
@@ -813,7 +811,7 @@ def append_subject_summary(records: list[dict], *, sub: str, which: str, shuffle
 
 
 # =====================================================================
-# Passive-style run loops
+# run 
 # =====================================================================
 
 def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
@@ -1024,10 +1022,9 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
     )
 
     # subject summary
-    pd.DataFrame(subj_records).to_csv(
-        OUT / f"decision_{tag}_{which}" + ("_shuffle" if shuffle else "") + "_subject_summary.csv",
-        index=False
-    )
+    suffix = "_shuffle" if shuffle else ""
+    fname = f"decision_{tag}_{which}{suffix}_subject_summary.csv"
+    pd.DataFrame(subj_records).to_csv(OUT / fname, index=False)
 
     min_p_auc = float(np.min(stats_auc["cluster_pv"])) if len(stats_auc["cluster_pv"]) else 1.0
     min_p_bacc = float(np.min(stats_bacc["cluster_pv"])) if len(stats_bacc["cluster_pv"]) else 1.0
@@ -1037,7 +1034,7 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
 
 def run_regression(which: str, shuffle: bool, tag: str, control_by_other: bool):
     """
-    Passive-like run_regression() but for decision regression ridgecorr.
+    run_regression() but for decision regression ridgecorr.
     """
     OUT = OUT_DIR_REG
     DBG = DEBUG_DIR_REG
@@ -1141,7 +1138,7 @@ def run_regression(which: str, shuffle: bool, tag: str, control_by_other: bool):
     times_stat = times[time_mask]
     r_stat = scores_all_r[:, time_mask]
 
-    # regression: two-sided by default (tail=0), matches your passive reg choice
+    # regression: two-sided by default (tail=0)
     stats_r = group_cluster_metric(r_stat, times_stat, chance=CHANCE_REG, tail=0)
 
     out_tag = f"decision_{tag}_{which}_ridgecorr" + ("_shuffle" if shuffle else "")
