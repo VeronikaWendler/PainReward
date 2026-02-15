@@ -617,7 +617,7 @@ def save_decision_trial_counts(out_dir: Path, sub: str, tag: str, which: str, le
 
 
 # =====================================================================
-# Residualization helpers (control-by-other ONLY; no RT)
+# Residualization helpers (control-by-other)
 # =====================================================================
 
 def _design_matrix_from_nuisances(
@@ -679,7 +679,6 @@ def residualize_X_by_nuisances(
     """
     Residualize EEG features w.r.t. nuisance vector(s) across trials.
 
-    In this RT-free version:
       - ctrlOther / ctrlOtherTrain uses the other cue level with a quadratic or lin model.
     """
     X = np.asarray(X, dtype=float)
@@ -2562,7 +2561,7 @@ def main():
     log_print(f"OUT_DIR:  {OUT_DIR}")
     log_print(f"RESAMPLE_SFREQ: {RESAMPLE_SFREQ}")
     log_print(f"N_PERM: {N_PERM} | ALPHA_CLUSTER: {ALPHA_CLUSTER} | STATS WINDOW: [{TMIN_STAT},{TMAX_STAT}] s")
-    log_print("Control model (when enabled): other cue = lin (NO RT CONTROL)\n")
+    log_print("Control model (when enabled): other cue = lin\n")
 
     # -------------------------
     # Binary (standard)
