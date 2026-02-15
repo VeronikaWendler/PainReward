@@ -3,6 +3,7 @@
 # Vero
 #Decision phase: Time-resolved decoding of money- and pain-cue levels (decision phase)
 
+
 #1) Standard
 #A) Binary (low=20/40 vs high=80/100; drops 60)
 #      - money: AUC + balanced accuracy
