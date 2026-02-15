@@ -680,7 +680,7 @@ def residualize_X_by_nuisances(
     Residualize EEG features w.r.t. nuisance vector(s) across trials.
 
     In this RT-free version:
-      - ctrlOther / ctrlOtherTrain uses ONLY the other cue level with a QUADRATIC model.
+      - ctrlOther / ctrlOtherTrain uses the other cue level with a quadratic or lin model.
     """
     X = np.asarray(X, dtype=float)
     if len(nuisances) == 0:
@@ -723,7 +723,7 @@ def select_trials_decision_binary(epo: mne.Epochs, which: str, control_resid_by_
     BINARY:
       - keep 20/40/80/100 (drop 60)
       - y = 0/1
-      - if control_resid_by_other: residualize by other cue level QUAD (ONLY)
+      - if control_resid_by_other: residualize by other cue level lin (ONLY)
     Returns: X, y, times, md_f, levels_f, other_f, info(dict)
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
@@ -751,7 +751,7 @@ def select_trials_decision_binary(epo: mne.Epochs, which: str, control_resid_by_
         X = residualize_X_by_nuisances(
             X,
             nuisances=[other_f.astype(float)],
-            models=["quad"],
+            models=["lin"],
         )
 
     y = make_binary_labels(levels_f.astype(float))
@@ -775,7 +775,7 @@ def select_trials_decision_regression(epo: mne.Epochs, which: str, control_resid
     RIDGE corr-r:
       - keep 20/40/60/80/100
       - y = numeric level
-      - if control_resid_by_other: residualize by other cue level QUAD (ONLY)
+      - if control_resid_by_other: residualize by other cue level lin (ONLY)
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
 
@@ -802,7 +802,7 @@ def select_trials_decision_regression(epo: mne.Epochs, which: str, control_resid
         X = residualize_X_by_nuisances(
             X,
             nuisances=[other_f.astype(float)],
-            models=["quad"],
+            models=["lin"],
         )
 
     y = levels_f.astype(float)
@@ -823,7 +823,7 @@ def select_trials_decision_multiclass5(epo: mne.Epochs, which: str, control_resi
     5-class multinomial:
       - keep 20/40/60/80/100
       - y in {0..4}
-      - if control_resid_by_other: residualize by other cue level QUAD (ONLY)
+      - if control_resid_by_other: residualize by other cue level lin (ONLY)
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
 
@@ -850,7 +850,7 @@ def select_trials_decision_multiclass5(epo: mne.Epochs, which: str, control_resi
         X = residualize_X_by_nuisances(
             X,
             nuisances=[other_f.astype(float)],
-            models=["quad"],
+            models=["lin"],
         )
 
     y = make_class5_labels(levels_f)
@@ -875,7 +875,7 @@ def select_trials_crossgen_binary(epo: mne.Epochs, control_by_other_train: bool,
     """
     Cross-label binary:
       - keep trials where BOTH money and pain are in BIN_KEEP_LEVELS
-      - if control_by_other_train: residualize by (other-of-train QUAD) ONLY
+      - if control_by_other_train: residualize by (other-of-train lin) ONLY
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
 
@@ -905,7 +905,7 @@ def select_trials_crossgen_binary(epo: mne.Epochs, control_by_other_train: bool,
         X = residualize_X_by_nuisances(
             X,
             nuisances=[nuis_other.astype(float)],
-            models=["quad"],
+            models=["lin"],
         )
 
     info = dict(
@@ -926,7 +926,7 @@ def select_trials_crossgen_mc5(epo: mne.Epochs, control_by_other_train: bool, tr
     """
     Cross-label 5-class:
       - keep trials where BOTH money and pain are in LEVELS_MC5
-      - if control_by_other_train: residualize by (other-of-train QUAD) ONLY
+      - if control_by_other_train: residualize by (other-of-train lin) ONLY
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
 
@@ -956,7 +956,7 @@ def select_trials_crossgen_mc5(epo: mne.Epochs, control_by_other_train: bool, tr
         X = residualize_X_by_nuisances(
             X,
             nuisances=[nuis_other.astype(float)],
-            models=["quad"],
+            models=["lin"],
         )
 
     info = dict(
@@ -1552,7 +1552,7 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
     time_mask = (times >= TMIN_STAT) & (times <= TMAX_STAT)
     times_stat = times[time_mask]
 
-    nuisance_model = "raw" if not control_by_other else "other=quad"
+    nuisance_model = "raw" if not control_by_other else "other=lin"
     control_label = "raw" if not control_by_other else "ctrlOther"
 
     # AUC (tail=1)
@@ -1832,7 +1832,7 @@ def run_regression_ridgecorr(which: str, shuffle: bool, tag: str, control_by_oth
         stats_out=stats_r, out_dir=OUT, alpha=ALPHA_CLUSTER, chance=CHANCE_REG,
     )
 
-    nuisance_model = "raw" if not control_by_other else "other=quad"
+    nuisance_model = "raw" if not control_by_other else "other=lin"
     control_label = "raw" if not control_by_other else "ctrlOther"
 
     summarize_group_results_text(
@@ -2005,7 +2005,7 @@ def run_multiclass5(which: str, shuffle: bool, tag: str, control_by_other: bool)
         stats_out=stats_acc, out_dir=OUT, alpha=ALPHA_CLUSTER, chance=CHANCE_MC5,
     )
 
-    nuisance_model = "raw" if not control_by_other else "other=quad"
+    nuisance_model = "raw" if not control_by_other else "other=lin"
     control_label = "raw" if not control_by_other else "ctrlOther"
 
     summarize_group_results_text(
@@ -2043,7 +2043,7 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
       - roc_auc
     Output in OUT_DIR_XGEN_BIN
 
-    NOTE: if control_by_other_train=True, we control for other-of-train QUAD ONLY.
+    NOTE: if control_by_other_train=True, we control for other-of-train lin ONLY.
     """
     OUT = OUT_DIR_XGEN_BIN
     DBG = DEBUG_DIR_XGEN_BIN
@@ -2254,7 +2254,7 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         chance=CHANCE_BIN,
     )
 
-    nuisance_model = "raw" if not control_by_other_train else "other(train)=quad"
+    nuisance_model = "raw" if not control_by_other_train else "other(train)=lin"
     control_label = "raw" if not control_by_other_train else "ctrlOtherTrain"
 
     summarize_group_results_text(
@@ -2346,7 +2346,7 @@ def run_crossgen_mc5(train: str, shuffle: bool, tag: str, control_by_other_train
     train: "money" or "pain"
     Evaluates diagonal + heatmap for 5-class accuracy
 
-    NOTE: if control_by_other_train=True, we control for other-of-train QUAD ONLY.
+    NOTE: if control_by_other_train=True, we control for other-of-train lin ONLY.
     """
     OUT = OUT_DIR_XGEN_MC5
     DBG = DEBUG_DIR_XGEN_MC5
@@ -2501,7 +2501,7 @@ def run_crossgen_mc5(train: str, shuffle: bool, tag: str, control_by_other_train
         chance=CHANCE_MC5,
     )
 
-    nuisance_model = "raw" if not control_by_other_train else "other(train)=quad"
+    nuisance_model = "raw" if not control_by_other_train else "other(train)=lin"
     control_label = "raw" if not control_by_other_train else "ctrlOtherTrain"
 
     summarize_group_results_text(
@@ -2562,7 +2562,7 @@ def main():
     log_print(f"OUT_DIR:  {OUT_DIR}")
     log_print(f"RESAMPLE_SFREQ: {RESAMPLE_SFREQ}")
     log_print(f"N_PERM: {N_PERM} | ALPHA_CLUSTER: {ALPHA_CLUSTER} | STATS WINDOW: [{TMIN_STAT},{TMAX_STAT}] s")
-    log_print("Control model (when enabled): other cue = QUAD (NO RT CONTROL)\n")
+    log_print("Control model (when enabled): other cue = lin (NO RT CONTROL)\n")
 
     # -------------------------
     # Binary (standard)
@@ -2575,7 +2575,7 @@ def main():
             run_binary("pain",  shuffle=True, tag="raw", control_by_other=False)
 
         if RUN_CONTROL_BY_OTHER:
-            # ctrlOther now means: control other cue level (QUAD) ONLY
+            # ctrlOther now means: control other cue level (lin) ONLY
             run_binary("money", shuffle=False, tag="ctrlOther", control_by_other=True)
             run_binary("pain",  shuffle=False, tag="ctrlOther", control_by_other=True)
 
@@ -2634,7 +2634,7 @@ def main():
             run_crossgen_mc5(train="money", shuffle=True, tag="raw", control_by_other_train=False)
             run_crossgen_mc5(train="pain",  shuffle=True, tag="raw", control_by_other_train=False)
 
-        # CTRL (other-of-train QUAD ONLY)
+        # CTRL (other-of-train lin ONLY)
         if RUN_CONTROL_BY_OTHER:
             run_crossgen_binary(train="money", shuffle=False, tag="ctrlOtherTrain", control_by_other_train=True)
             run_crossgen_binary(train="pain",  shuffle=False, tag="ctrlOtherTrain", control_by_other_train=True)
