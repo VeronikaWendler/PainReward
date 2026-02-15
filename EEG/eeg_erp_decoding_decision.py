@@ -1,21 +1,20 @@
 # -*- coding: utf-8 -*-
-"""
+
 # Vero
 #Decision phase: Time-resolved decoding of money- and pain-cue levels (decision phase)
-
 
 #1) Standard
 #A) Binary (low=20/40 vs high=80/100; drops 60)
 #      - money: AUC + balanced accuracy
 #      - pain : AUC + balanced accuracy
-#      - raw and ctrlOther (EEG residualized by the other cue level)
+#      - raw and ctrlOther
 #      - shuffle controls
 #      - group cluster permutation tests over time + time plots
 
 #B) Regression (ridge corr-r; kept)
 #      - money: corr-r
 #      - pain : corr-r
-#      - raw and ctrlOther
+#      - raw and ctrlOther (other cue ONLY)
 #      - shuffle controls
 #      - group cluster permutation tests over time + time plots
 
@@ -23,7 +22,7 @@
 #   - LogisticRegression to decode the 5 cue levels (20/40/60/80/100)
 #   - Metric: accuracy (chance = 0.20)
 #   - money and pain
-#   - raw and ctrlOther
+#   - raw and ctrlOther (other cue ONLY)
 #   - shuffle controls
 #   - group cluster permutation tests over time + time plots
 
@@ -39,16 +38,6 @@
 #       - Saves heatmaps of group mean matrices
 #       - saves per-subject matrices to .npz, plus a diagonal time-series for stats
 
-#IMPORTANT:
-#  - ctrlOther / ctrlOtherTrain always controls the other cue level AND RT.
-#  - other cue level is modelled QUADRATIC, RT is modelled LINEAR (your preference).
-#  - Trials with missing RT are dropped only in controlled analyses.
-
-#NEW (your request):
-#  - Much more console output (start/end summaries + reasons for exclusions).
-#  - For EVERY group-level analysis/metric, we also write a single human-readable .txt
-#    with paper-style key stats (Nsubs, trials, chance, TFCE/threshold, peak, clusters, etc.)
-#    and we print that same summary to the console.
 
 #OUTPUTS
 #derivatives/statistics/mvpa_decision_step1_conserv2/
@@ -59,7 +48,7 @@
 #     binary/
 #     multiclass5/
 #  debug/
-"""
+
 
 from __future__ import annotations
 import os
@@ -114,7 +103,6 @@ BEH_SUFFIX = "_task-decision_beh.tsv"
 
 # -----------------------------
 # Decoding params
-# -----------------------------
 RANDOM_STATE = 23
 N_SPLITS = 5
 N_PERM = 5000
@@ -128,10 +116,9 @@ KEY_TRIAL = "trials.thisN"
 RESAMPLE_SFREQ = 256  # set None to keep original
 
 # decision metadata columns
-DEC_MONEY_COL = "moneystim"  # e.g., m1..m5
-DEC_PAIN_COL = "painstim"    # e.g., p1..p5
+DEC_MONEY_COL = "moneystim"  
+DEC_PAIN_COL = "painstim"   
 
-# RT column in beh/metadata
 RT_COL = "choice_resp.rt"
 
 # stats window
@@ -301,7 +288,6 @@ def summarize_group_results_text(
     total_trials_in = int(trial_stats.get("total_trials_in", -1))
     total_trials_after_badtrial = int(trial_stats.get("total_trials_after_badtrial", -1))
     total_trials_after_level = int(trial_stats.get("total_trials_after_level", -1))
-    total_trials_after_nan = int(trial_stats.get("total_trials_after_nan", -1))
 
     # per-subject trial stats
     n_trials_per_sub = np.asarray(trial_stats.get("n_trials_per_sub", []), dtype=float)
@@ -353,8 +339,6 @@ def summarize_group_results_text(
         lines.append(f"    total trials in (post-merge):        {total_trials_in}")
         lines.append(f"    after dropping badtrial:            {total_trials_after_badtrial}")
         lines.append(f"    after level-filtering:              {total_trials_after_level}")
-        if control.lower().startswith("ctrl"):
-            lines.append(f"    after dropping NaN RT (control):    {total_trials_after_nan}")
     lines.append(f"  Trials per included subject: mean={_fmt_float(n_trials_mean,2)} sd={_fmt_float(n_trials_sd,2)} "
                  f"min={_fmt_float(n_trials_min,0)} max={_fmt_float(n_trials_max,0)}")
     lines.append("")
@@ -379,11 +363,10 @@ def summarize_group_results_text(
         lines.append(f"  Significant timepoints (p<{alpha}): NO")
     lines.append("")
 
-    # cluster table (top few clusters)
     clusters = stats_out.get("clusters", [])
-    if cluster_pv.size and len(clusters):
+    if np.asarray(stats_out.get("cluster_pv", [])).size and len(clusters):
         rows = []
-        for i, (mask, p) in enumerate(zip(clusters, cluster_pv)):
+        for i, (mask, p) in enumerate(zip(clusters, stats_out["cluster_pv"])):
             m = _cluster_to_bool_mask(mask, n_time)
             if m is None or not m.any():
                 continue
@@ -403,17 +386,14 @@ def summarize_group_results_text(
         lines.append("")
     lines.append("=" * 78)
 
-    # filename + write
     safe_name = f"{analysis_name}_{metric_name}".replace(" ", "_").replace("/", "_")
     out_txt = out_dir / f"{safe_name}_GROUP_REPORT.txt"
     with open(out_txt, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
-    # print to console
     for ln in lines:
         log_print(ln)
 
-    # also write a compact JSON alongside (useful for programmatic paper tables)
     out_json = out_dir / f"{safe_name}_GROUP_REPORT.json"
     payload = dict(
         analysis_name=analysis_name,
@@ -423,9 +403,9 @@ def summarize_group_results_text(
         shuffle=bool(shuffle),
         control=control,
         nuisance_model=nuisance_model,
-        n_subjects_total=n_sub_total,
+        n_subjects_total=int(trial_stats.get("n_sub_total", n_sub + len(skipped))),
         n_subjects_included=n_sub,
-        n_subjects_skipped=n_sub_skipped,
+        n_subjects_skipped=int(len(skipped)),
         included_subjects=included,
         skipped_subjects=skipped,
         trial_stats=trial_stats,
@@ -433,17 +413,17 @@ def summarize_group_results_text(
         n_perm=int(N_PERM),
         alpha=float(alpha),
         cluster_threshold=str(stats_out.get("t_thresh", None)),
-        peak_mean_score=peak_score,
-        peak_mean_time_s=peak_time,
-        peak_T_obs=peak_T,
-        peak_T_time_s=peak_T_time,
-        min_cluster_p=min_cluster_p,
-        sig_any=sig_any,
-        sig_start_s=None if not sig_any else sig_start,
-        sig_end_s=None if not sig_any else sig_end,
-        sig_duration_ms=None if not sig_any else sig_dur_ms,
-        mean_in_sig=None if not sig_any else mean_in_sig,
-        mean_above_chance_in_sig=None if not sig_any else mean_above_chance_in_sig,
+        peak_mean_score=float(peak_score),
+        peak_mean_time_s=float(peak_time),
+        peak_T_obs=float(peak_T),
+        peak_T_time_s=float(peak_T_time),
+        min_cluster_p=float(np.min(np.asarray(stats_out.get("cluster_pv", [1.0])))),
+        sig_any=bool(sig_any),
+        sig_start_s=None if not sig_any else float(sig_start),
+        sig_end_s=None if not sig_any else float(sig_end),
+        sig_duration_ms=None if not sig_any else float(sig_dur_ms),
+        mean_in_sig=None if not sig_any else float(mean_in_sig),
+        mean_above_chance_in_sig=None if not sig_any else float(mean_above_chance_in_sig),
     )
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
@@ -637,21 +617,12 @@ def save_decision_trial_counts(out_dir: Path, sub: str, tag: str, which: str, le
 
 
 # =====================================================================
-# Residualization helpers (control-by-other + RT)
+# Residualization helpers (control-by-other ONLY; no RT)
 # =====================================================================
-
-def _get_rt_from_md(md: pd.DataFrame, *, require: bool) -> np.ndarray | None:
-    if RT_COL not in md.columns:
-        if require:
-            raise ValueError(f"Missing RT column '{RT_COL}' in merged metadata.")
-        return None
-    rt = pd.to_numeric(md[RT_COL], errors="coerce").to_numpy(dtype=float)
-    return rt
-
 
 def _design_matrix_from_nuisances(
     nuisances: list[np.ndarray],
-    models: str | list[str] = "quad",
+    models: str | list[str] = "lin",
     zscore: bool = True
 ) -> np.ndarray:
     """
@@ -703,15 +674,13 @@ def _design_matrix_from_nuisances(
 def residualize_X_by_nuisances(
     X: np.ndarray,
     nuisances: list[np.ndarray],
-    models: str | list[str] = "quad"
+    models: str | list[str] = "lin"
 ) -> np.ndarray:
     """
-    Residualize EEG features w.r.t. multiple nuisance vectors across trials.
+    Residualize EEG features w.r.t. nuisance vector(s) across trials.
 
-    In this project, whenever we control, we use:
-      - other cue level: "quad"
-      - RT: "lin"
-    so models=["quad","lin"] for nuisances=[other, rt].
+    In this RT-free version:
+      - ctrlOther / ctrlOtherTrain uses ONLY the other cue level with a QUADRATIC model.
     """
     X = np.asarray(X, dtype=float)
     if len(nuisances) == 0:
@@ -731,33 +700,6 @@ def residualize_X_by_nuisances(
     Y_hat = A @ beta
     Y_resid = Y - Y_hat
     return Y_resid.reshape(X.shape)
-
-
-def _drop_nan_trials_for_nuisances(
-    epo_f: mne.Epochs,
-    md_f: pd.DataFrame,
-    nuisances: list[np.ndarray],
-    *,
-    reason: str
-) -> tuple[mne.Epochs, pd.DataFrame, np.ndarray]:
-    """Drop trials where ANY nuisance is NaN/inf. Returns filtered epo, md, and mask_kept."""
-    if len(nuisances) == 0:
-        mask = np.ones(len(md_f), dtype=bool)
-        return epo_f, md_f, mask
-
-    mask = np.ones(len(md_f), dtype=bool)
-    for n in nuisances:
-        n = np.asarray(n, dtype=float).ravel()
-        mask &= np.isfinite(n)
-
-    if not mask.all():
-        n_drop = int((~mask).sum())
-        log_print(f"  [drop_nan] {reason}: dropping {n_drop} trials (NaN/inf in nuisances)")
-        epo_f2 = epo_f.copy()[mask]
-        md_f2 = epo_f2.metadata.reset_index(drop=True)
-        return epo_f2, md_f2, mask
-
-    return epo_f, md_f, mask
 
 
 # =====================================================================
@@ -781,8 +723,7 @@ def select_trials_decision_binary(epo: mne.Epochs, which: str, control_resid_by_
     BINARY:
       - keep 20/40/80/100 (drop 60)
       - y = 0/1
-      - if control_resid_by_other: residualize by (other cue level QUAD + RT LIN),
-        and drop NaN RT trials
+      - if control_resid_by_other: residualize by other cue level QUAD (ONLY)
     Returns: X, y, times, md_f, levels_f, other_f, info(dict)
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
@@ -803,33 +744,14 @@ def select_trials_decision_binary(epo: mne.Epochs, which: str, control_resid_by_
     if len(epo_f) < 10:
         raise ValueError(f"Too few trials after filtering for decision {which} binary. n={len(epo_f)}")
 
-    n_drop_nan = 0
-    rt_f = None
-    if control_resid_by_other:
-        rt_f = _get_rt_from_md(md_f, require=True)
-        nuis = [other_f.astype(float), rt_f.astype(float)]
-        epo_f2, md_f2, mask_ok = _drop_nan_trials_for_nuisances(
-            epo_f, md_f, nuis, reason=f"{which}-binary-ctrlOther+RT"
-        )
-        n_drop_nan = int((~mask_ok).sum())
-        epo_f, md_f = epo_f2, md_f2
-        levels_f = levels_f[mask_ok]
-        other_f = other_f[mask_ok]
-        rt_f = rt_f[mask_ok]
-
-        if len(epo_f) < 10:
-            raise ValueError(
-                f"Too few trials after dropping NaN RT in decision {which} binary ctrl. n={len(epo_f)}"
-            )
-
     X = epo_f.get_data()
     times = epo_f.times.copy()
 
     if control_resid_by_other:
         X = residualize_X_by_nuisances(
             X,
-            nuisances=[other_f.astype(float), rt_f.astype(float)],
-            models=["quad", "lin"],
+            nuisances=[other_f.astype(float)],
+            models=["quad"],
         )
 
     y = make_binary_labels(levels_f.astype(float))
@@ -839,9 +761,9 @@ def select_trials_decision_binary(epo: mne.Epochs, which: str, control_resid_by_
     info = dict(
         n_in=n_in,
         n_after_level=n_after_level,
-        n_after_nan=int(len(y)),
+        n_after_nan=int(len(y)),   # (kept for compatibility; no NaN-dropping step now)
         n_drop_level=int(n_in - n_after_level),
-        n_drop_nan=n_drop_nan,
+        n_drop_nan=0,
         n_low=int(np.sum(y == 0)),
         n_high=int(np.sum(y == 1)),
     )
@@ -850,12 +772,10 @@ def select_trials_decision_binary(epo: mne.Epochs, which: str, control_resid_by_
 
 def select_trials_decision_regression(epo: mne.Epochs, which: str, control_resid_by_other: bool):
     """
-    RIDGE corr-r (kept):
+    RIDGE corr-r:
       - keep 20/40/60/80/100
       - y = numeric level
-      - if control_resid_by_other: residualize by (other cue level QUAD + RT LIN),
-        and drop NaN RT trials
-    Returns: X, y, times, md_f, levels_f, other_f, info(dict)
+      - if control_resid_by_other: residualize by other cue level QUAD (ONLY)
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
 
@@ -875,33 +795,14 @@ def select_trials_decision_regression(epo: mne.Epochs, which: str, control_resid
     if len(epo_f) < 10:
         raise ValueError(f"Too few trials after filtering for decision {which} regression. n={len(epo_f)}")
 
-    n_drop_nan = 0
-    rt_f = None
-    if control_resid_by_other:
-        rt_f = _get_rt_from_md(md_f, require=True)
-        nuis = [other_f.astype(float), rt_f.astype(float)]
-        epo_f2, md_f2, mask_ok = _drop_nan_trials_for_nuisances(
-            epo_f, md_f, nuis, reason=f"{which}-ridge-ctrlOther+RT"
-        )
-        n_drop_nan = int((~mask_ok).sum())
-        epo_f, md_f = epo_f2, md_f2
-        levels_f = levels_f[mask_ok]
-        other_f = other_f[mask_ok]
-        rt_f = rt_f[mask_ok]
-
-        if len(epo_f) < 10:
-            raise ValueError(
-                f"Too few trials after dropping NaN RT in decision {which} ridge ctrl. n={len(epo_f)}"
-            )
-
     X = epo_f.get_data()
     times = epo_f.times.copy()
 
     if control_resid_by_other:
         X = residualize_X_by_nuisances(
             X,
-            nuisances=[other_f.astype(float), rt_f.astype(float)],
-            models=["quad", "lin"],
+            nuisances=[other_f.astype(float)],
+            models=["quad"],
         )
 
     y = levels_f.astype(float)
@@ -910,7 +811,7 @@ def select_trials_decision_regression(epo: mne.Epochs, which: str, control_resid
         n_after_level=n_after_level,
         n_after_nan=int(len(y)),
         n_drop_level=int(n_in - n_after_level),
-        n_drop_nan=n_drop_nan,
+        n_drop_nan=0,
         y_min=float(np.min(y)),
         y_max=float(np.max(y)),
     )
@@ -922,9 +823,7 @@ def select_trials_decision_multiclass5(epo: mne.Epochs, which: str, control_resi
     5-class multinomial:
       - keep 20/40/60/80/100
       - y in {0..4}
-      - if control_resid_by_other: residualize by (other cue level QUAD + RT LIN),
-        and drop NaN RT trials
-    Returns: X, y, times, md_f, levels_f, other_f, info(dict)
+      - if control_resid_by_other: residualize by other cue level QUAD (ONLY)
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
 
@@ -944,33 +843,14 @@ def select_trials_decision_multiclass5(epo: mne.Epochs, which: str, control_resi
     if len(epo_f) < 10:
         raise ValueError(f"Too few trials after filtering for decision {which} multiclass5. n={len(epo_f)}")
 
-    n_drop_nan = 0
-    rt_f = None
-    if control_resid_by_other:
-        rt_f = _get_rt_from_md(md_f, require=True)
-        nuis = [other_f.astype(float), rt_f.astype(float)]
-        epo_f2, md_f2, mask_ok = _drop_nan_trials_for_nuisances(
-            epo_f, md_f, nuis, reason=f"{which}-mc5-ctrlOther+RT"
-        )
-        n_drop_nan = int((~mask_ok).sum())
-        epo_f, md_f = epo_f2, md_f2
-        levels_f = levels_f[mask_ok]
-        other_f = other_f[mask_ok]
-        rt_f = rt_f[mask_ok]
-
-        if len(epo_f) < 10:
-            raise ValueError(
-                f"Too few trials after dropping NaN RT in decision {which} mc5 ctrl. n={len(epo_f)}"
-            )
-
     X = epo_f.get_data()
     times = epo_f.times.copy()
 
     if control_resid_by_other:
         X = residualize_X_by_nuisances(
             X,
-            nuisances=[other_f.astype(float), rt_f.astype(float)],
-            models=["quad", "lin"],
+            nuisances=[other_f.astype(float)],
+            models=["quad"],
         )
 
     y = make_class5_labels(levels_f)
@@ -982,7 +862,7 @@ def select_trials_decision_multiclass5(epo: mne.Epochs, which: str, control_resi
         n_after_level=n_after_level,
         n_after_nan=int(len(y)),
         n_drop_level=int(n_in - n_after_level),
-        n_drop_nan=n_drop_nan,
+        n_drop_nan=0,
     )
     return X, y, times, md_f, levels_f, other_f, info
 
@@ -995,10 +875,7 @@ def select_trials_crossgen_binary(epo: mne.Epochs, control_by_other_train: bool,
     """
     Cross-label binary:
       - keep trials where BOTH money and pain are in BIN_KEEP_LEVELS
-      - if control_by_other_train: residualize by (other-of-train QUAD + RT LIN),
-        and drop NaN RT trials
-    Returns:
-      X, y_train, y_test, times, md_used, money_levels_used, pain_levels_used, info
+      - if control_by_other_train: residualize by (other-of-train QUAD) ONLY
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
 
@@ -1020,28 +897,6 @@ def select_trials_crossgen_binary(epo: mne.Epochs, control_by_other_train: bool,
     if np.any(y_money < 0) or np.any(y_pain < 0):
         raise ValueError("Crossgen binary: unlabeled trials exist after filtering (should not happen).")
 
-    n_drop_nan = 0
-    rt_f = None
-    if control_by_other_train:
-        rt_f = _get_rt_from_md(md_f, require=True)
-        nuis_other = p if train == "money" else m
-        nuis = [nuis_other.astype(float), rt_f.astype(float)]
-        epo_f2, md_f2, mask_ok = _drop_nan_trials_for_nuisances(
-            epo_f, md_f, nuis, reason=f"xgen-binary-{train}-ctrlOtherTrain+RT"
-        )
-        n_drop_nan = int((~mask_ok).sum())
-        epo_f, md_f = epo_f2, md_f2
-        m = m[mask_ok]
-        p = p[mask_ok]
-        y_money = y_money[mask_ok]
-        y_pain = y_pain[mask_ok]
-        rt_f = rt_f[mask_ok]
-
-        if len(epo_f) < 10:
-            raise ValueError(
-                f"Too few trials after dropping NaN RT for crossgen binary ctrl. n={len(epo_f)}"
-            )
-
     X = epo_f.get_data()
     times = epo_f.times.copy()
 
@@ -1049,8 +904,8 @@ def select_trials_crossgen_binary(epo: mne.Epochs, control_by_other_train: bool,
         nuis_other = p if train == "money" else m
         X = residualize_X_by_nuisances(
             X,
-            nuisances=[nuis_other.astype(float), rt_f.astype(float)],
-            models=["quad", "lin"],
+            nuisances=[nuis_other.astype(float)],
+            models=["quad"],
         )
 
     info = dict(
@@ -1058,7 +913,7 @@ def select_trials_crossgen_binary(epo: mne.Epochs, control_by_other_train: bool,
         n_after_level=n_after_level,
         n_after_nan=int(len(epo_f)),
         n_drop_level=int(n_in - n_after_level),
-        n_drop_nan=n_drop_nan,
+        n_drop_nan=0,
     )
 
     if train == "money":
@@ -1071,10 +926,7 @@ def select_trials_crossgen_mc5(epo: mne.Epochs, control_by_other_train: bool, tr
     """
     Cross-label 5-class:
       - keep trials where BOTH money and pain are in LEVELS_MC5
-      - if control_by_other_train: residualize by (other-of-train QUAD + RT LIN),
-        and drop NaN RT trials
-    Returns:
-      X, y_train, y_test, times, md_used, money_levels_used, pain_levels_used, info
+      - if control_by_other_train: residualize by (other-of-train QUAD) ONLY
     """
     money_levels, pain_levels = _get_levels_from_epochs(epo)
 
@@ -1096,28 +948,6 @@ def select_trials_crossgen_mc5(epo: mne.Epochs, control_by_other_train: bool, tr
     if np.any(y_money < 0) or np.any(y_pain < 0):
         raise ValueError("Crossgen mc5: unlabeled trials exist after filtering (should not happen).")
 
-    n_drop_nan = 0
-    rt_f = None
-    if control_by_other_train:
-        rt_f = _get_rt_from_md(md_f, require=True)
-        nuis_other = p if train == "money" else m
-        nuis = [nuis_other.astype(float), rt_f.astype(float)]
-        epo_f2, md_f2, mask_ok = _drop_nan_trials_for_nuisances(
-            epo_f, md_f, nuis, reason=f"xgen-mc5-{train}-ctrlOtherTrain+RT"
-        )
-        n_drop_nan = int((~mask_ok).sum())
-        epo_f, md_f = epo_f2, md_f2
-        m = m[mask_ok]
-        p = p[mask_ok]
-        y_money = y_money[mask_ok]
-        y_pain = y_pain[mask_ok]
-        rt_f = rt_f[mask_ok]
-
-        if len(epo_f) < 10:
-            raise ValueError(
-                f"Too few trials after dropping NaN RT for crossgen mc5 ctrl. n={len(epo_f)}"
-            )
-
     X = epo_f.get_data()
     times = epo_f.times.copy()
 
@@ -1125,8 +955,8 @@ def select_trials_crossgen_mc5(epo: mne.Epochs, control_by_other_train: bool, tr
         nuis_other = p if train == "money" else m
         X = residualize_X_by_nuisances(
             X,
-            nuisances=[nuis_other.astype(float), rt_f.astype(float)],
-            models=["quad", "lin"],
+            nuisances=[nuis_other.astype(float)],
+            models=["quad"],
         )
 
     info = dict(
@@ -1134,7 +964,7 @@ def select_trials_crossgen_mc5(epo: mne.Epochs, control_by_other_train: bool, tr
         n_after_level=n_after_level,
         n_after_nan=int(len(epo_f)),
         n_drop_level=int(n_in - n_after_level),
-        n_drop_nan=n_drop_nan,
+        n_drop_nan=0,
     )
 
     if train == "money":
@@ -1627,7 +1457,7 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
         total_trials_in=0,
         total_trials_after_badtrial=0,
         total_trials_after_level=0,
-        total_trials_after_nan=0,
+        total_trials_after_nan=0,  # kept for compatibility; equals after_level here
         n_trials_per_sub=[],
     )
 
@@ -1672,7 +1502,6 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
                 epo, which=which, control_resid_by_other=control_by_other
             )
 
-            # update trial stats using info (note: info.n_in corresponds to n1-ish; ok)
             trial_stats["total_trials_after_level"] += int(info["n_after_level"])
             trial_stats["total_trials_after_nan"] += int(info["n_after_nan"])
             trial_stats["n_trials_per_sub"].append(int(len(y)))
@@ -1701,8 +1530,8 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
                     n_low=int(np.sum(y == 0)),
                     n_high=int(np.sum(y == 1)),
                     control_by_other=bool(control_by_other),
-                    control_rt=bool(control_by_other),
-                    other_quad_rt_lin=bool(control_by_other),
+                    control_rt=False,
+                    other_quad=bool(control_by_other),
                     n_badtrial_dropped=int(n_bad),
                     n_drop_level=int(info["n_drop_level"]),
                     n_drop_nan=int(info["n_drop_nan"]),
@@ -1723,8 +1552,8 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
     time_mask = (times >= TMIN_STAT) & (times <= TMAX_STAT)
     times_stat = times[time_mask]
 
-    nuisance_model = "raw" if not control_by_other else "other=quad, RT=lin"
-    control_label = "raw" if not control_by_other else "ctrlOther(+RT)"
+    nuisance_model = "raw" if not control_by_other else "other=quad"
+    control_label = "raw" if not control_by_other else "ctrlOther"
 
     # AUC (tail=1)
     auc_stat = scores_all_auc[:, time_mask]
@@ -1745,8 +1574,8 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
         resample_sfreq=RESAMPLE_SFREQ if RESAMPLE_SFREQ is not None else -1,
         tmin_stat=TMIN_STAT,
         tmax_stat=TMAX_STAT,
-        control_rt=bool(control_by_other),
-        other_quad_rt_lin=bool(control_by_other),
+        control_rt=False,
+        other_quad=bool(control_by_other),
     )
 
     pd.DataFrame(scores_all_auc, index=included, columns=np.round(times, 6)).to_csv(
@@ -1805,8 +1634,8 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
         resample_sfreq=RESAMPLE_SFREQ if RESAMPLE_SFREQ is not None else -1,
         tmin_stat=TMIN_STAT,
         tmax_stat=TMAX_STAT,
-        control_rt=bool(control_by_other),
-        other_quad_rt_lin=bool(control_by_other),
+        control_rt=False,
+        other_quad=bool(control_by_other),
     )
 
     pd.DataFrame(scores_all_bacc, index=included, columns=np.round(times, 6)).to_csv(
@@ -1854,7 +1683,7 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
 
 
 # =====================================================================
-# RUN: Ridge corr-r (kept)
+# RUN: Ridge corr-r
 # =====================================================================
 
 def run_regression_ridgecorr(which: str, shuffle: bool, tag: str, control_by_other: bool):
@@ -1942,8 +1771,8 @@ def run_regression_ridgecorr(which: str, shuffle: bool, tag: str, control_by_oth
                     y_min=float(np.min(y)),
                     y_max=float(np.max(y)),
                     control_by_other=bool(control_by_other),
-                    control_rt=bool(control_by_other),
-                    other_quad_rt_lin=bool(control_by_other),
+                    control_rt=False,
+                    other_quad=bool(control_by_other),
                     n_badtrial_dropped=int(n_bad),
                     n_drop_level=int(info["n_drop_level"]),
                     n_drop_nan=int(info["n_drop_nan"]),
@@ -1981,8 +1810,8 @@ def run_regression_ridgecorr(which: str, shuffle: bool, tag: str, control_by_oth
         resample_sfreq=RESAMPLE_SFREQ if RESAMPLE_SFREQ is not None else -1,
         tmin_stat=TMIN_STAT,
         tmax_stat=TMAX_STAT,
-        control_rt=bool(control_by_other),
-        other_quad_rt_lin=bool(control_by_other),
+        control_rt=False,
+        other_quad=bool(control_by_other),
     )
 
     pd.DataFrame(scores_all_r, index=included, columns=np.round(times, 6)).to_csv(
@@ -2003,8 +1832,8 @@ def run_regression_ridgecorr(which: str, shuffle: bool, tag: str, control_by_oth
         stats_out=stats_r, out_dir=OUT, alpha=ALPHA_CLUSTER, chance=CHANCE_REG,
     )
 
-    nuisance_model = "raw" if not control_by_other else "other=quad, RT=lin"
-    control_label = "raw" if not control_by_other else "ctrlOther(+RT)"
+    nuisance_model = "raw" if not control_by_other else "other=quad"
+    control_label = "raw" if not control_by_other else "ctrlOther"
 
     summarize_group_results_text(
         analysis_name=analysis_name,
@@ -2115,8 +1944,8 @@ def run_multiclass5(which: str, shuffle: bool, tag: str, control_by_other: bool)
                 n_trials=len(y), groups=groups, cv_used=cv_used,
                 extra=dict(
                     control_by_other=bool(control_by_other),
-                    control_rt=bool(control_by_other),
-                    other_quad_rt_lin=bool(control_by_other),
+                    control_rt=False,
+                    other_quad=bool(control_by_other),
                     n_badtrial_dropped=int(n_bad),
                     n_drop_level=int(info["n_drop_level"]),
                     n_drop_nan=int(info["n_drop_nan"]),
@@ -2154,8 +1983,8 @@ def run_multiclass5(which: str, shuffle: bool, tag: str, control_by_other: bool)
         resample_sfreq=RESAMPLE_SFREQ if RESAMPLE_SFREQ is not None else -1,
         tmin_stat=TMIN_STAT,
         tmax_stat=TMAX_STAT,
-        control_rt=bool(control_by_other),
-        other_quad_rt_lin=bool(control_by_other),
+        control_rt=False,
+        other_quad=bool(control_by_other),
     )
 
     pd.DataFrame(scores_all_acc, index=included, columns=np.round(times, 6)).to_csv(
@@ -2176,8 +2005,8 @@ def run_multiclass5(which: str, shuffle: bool, tag: str, control_by_other: bool)
         stats_out=stats_acc, out_dir=OUT, alpha=ALPHA_CLUSTER, chance=CHANCE_MC5,
     )
 
-    nuisance_model = "raw" if not control_by_other else "other=quad, RT=lin"
-    control_label = "raw" if not control_by_other else "ctrlOther(+RT)"
+    nuisance_model = "raw" if not control_by_other else "other=quad"
+    control_label = "raw" if not control_by_other else "ctrlOther"
 
     summarize_group_results_text(
         analysis_name=analysis_name,
@@ -2213,7 +2042,8 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
       - balanced_accuracy
       - roc_auc
     Output in OUT_DIR_XGEN_BIN
-    NOTE: if control_by_other_train=True, we control for (other-of-train QUAD + RT LIN).
+
+    NOTE: if control_by_other_train=True, we control for other-of-train QUAD ONLY.
     """
     OUT = OUT_DIR_XGEN_BIN
     DBG = DEBUG_DIR_XGEN_BIN
@@ -2368,8 +2198,8 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         cluster_pv=stats_bacc["cluster_pv"],
         t_thresh=stats_bacc["t_thresh"],
         chance=CHANCE_BIN,
-        control_rt=bool(control_by_other_train),
-        other_quad_rt_lin=bool(control_by_other_train),
+        control_rt=False,
+        other_quad=bool(control_by_other_train),
     )
     np.savez(
         OUT / f"{tag_auc}_diag_group_results.npz",
@@ -2382,8 +2212,8 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         cluster_pv=stats_auc["cluster_pv"],
         t_thresh=stats_auc["t_thresh"],
         chance=CHANCE_BIN,
-        control_rt=bool(control_by_other_train),
-        other_quad_rt_lin=bool(control_by_other_train),
+        control_rt=False,
+        other_quad=bool(control_by_other_train),
     )
 
     plot_group_metric(
@@ -2424,8 +2254,8 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         chance=CHANCE_BIN,
     )
 
-    nuisance_model = "raw" if not control_by_other_train else "other(train)=quad, RT=lin"
-    control_label = "raw" if not control_by_other_train else "ctrlOtherTrain(+RT)"
+    nuisance_model = "raw" if not control_by_other_train else "other(train)=quad"
+    control_label = "raw" if not control_by_other_train else "ctrlOtherTrain"
 
     summarize_group_results_text(
         analysis_name=analysis_name,
@@ -2480,8 +2310,8 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         included=np.array(included, dtype=object),
         chance=CHANCE_BIN,
         decim=int(HEATMAP_DECIM),
-        control_rt=bool(control_by_other_train),
-        other_quad_rt_lin=bool(control_by_other_train),
+        control_rt=False,
+        other_quad=bool(control_by_other_train),
     )
     np.savez(
         OUT / f"{tag_auc}_heatmaps.npz",
@@ -2491,8 +2321,8 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         included=np.array(included, dtype=object),
         chance=CHANCE_BIN,
         decim=int(HEATMAP_DECIM),
-        control_rt=bool(control_by_other_train),
-        other_quad_rt_lin=bool(control_by_other_train),
+        control_rt=False,
+        other_quad=bool(control_by_other_train),
     )
 
     plot_heatmap(
@@ -2515,7 +2345,8 @@ def run_crossgen_mc5(train: str, shuffle: bool, tag: str, control_by_other_train
     """
     train: "money" or "pain"
     Evaluates diagonal + heatmap for 5-class accuracy
-    NOTE: if control_by_other_train=True, we control for (other-of-train QUAD + RT LIN).
+
+    NOTE: if control_by_other_train=True, we control for other-of-train QUAD ONLY.
     """
     OUT = OUT_DIR_XGEN_MC5
     DBG = DEBUG_DIR_XGEN_MC5
@@ -2646,8 +2477,8 @@ def run_crossgen_mc5(train: str, shuffle: bool, tag: str, control_by_other_train
         cluster_pv=stats_acc["cluster_pv"],
         t_thresh=stats_acc["t_thresh"],
         chance=CHANCE_MC5,
-        control_rt=bool(control_by_other_train),
-        other_quad_rt_lin=bool(control_by_other_train),
+        control_rt=False,
+        other_quad=bool(control_by_other_train),
     )
 
     plot_group_metric(
@@ -2670,8 +2501,8 @@ def run_crossgen_mc5(train: str, shuffle: bool, tag: str, control_by_other_train
         chance=CHANCE_MC5,
     )
 
-    nuisance_model = "raw" if not control_by_other_train else "other(train)=quad, RT=lin"
-    control_label = "raw" if not control_by_other_train else "ctrlOtherTrain(+RT)"
+    nuisance_model = "raw" if not control_by_other_train else "other(train)=quad"
+    control_label = "raw" if not control_by_other_train else "ctrlOtherTrain"
 
     summarize_group_results_text(
         analysis_name=analysis_name,
@@ -2706,8 +2537,8 @@ def run_crossgen_mc5(train: str, shuffle: bool, tag: str, control_by_other_train
         included=np.array(included, dtype=object),
         chance=CHANCE_MC5,
         decim=int(HEATMAP_DECIM),
-        control_rt=bool(control_by_other_train),
-        other_quad_rt_lin=bool(control_by_other_train),
+        control_rt=False,
+        other_quad=bool(control_by_other_train),
     )
 
     plot_heatmap(
@@ -2731,7 +2562,7 @@ def main():
     log_print(f"OUT_DIR:  {OUT_DIR}")
     log_print(f"RESAMPLE_SFREQ: {RESAMPLE_SFREQ}")
     log_print(f"N_PERM: {N_PERM} | ALPHA_CLUSTER: {ALPHA_CLUSTER} | STATS WINDOW: [{TMIN_STAT},{TMAX_STAT}] s")
-    log_print("Control model (when enabled): other cue = QUAD, RT = LIN\n")
+    log_print("Control model (when enabled): other cue = QUAD (NO RT CONTROL)\n")
 
     # -------------------------
     # Binary (standard)
@@ -2744,7 +2575,7 @@ def main():
             run_binary("pain",  shuffle=True, tag="raw", control_by_other=False)
 
         if RUN_CONTROL_BY_OTHER:
-            # ctrlOther now means: control other cue level (QUAD) + RT (LIN)
+            # ctrlOther now means: control other cue level (QUAD) ONLY
             run_binary("money", shuffle=False, tag="ctrlOther", control_by_other=True)
             run_binary("pain",  shuffle=False, tag="ctrlOther", control_by_other=True)
 
@@ -2803,7 +2634,7 @@ def main():
             run_crossgen_mc5(train="money", shuffle=True, tag="raw", control_by_other_train=False)
             run_crossgen_mc5(train="pain",  shuffle=True, tag="raw", control_by_other_train=False)
 
-        # CTRL (other-of-train QUAD + RT LIN)
+        # CTRL (other-of-train QUAD ONLY)
         if RUN_CONTROL_BY_OTHER:
             run_crossgen_binary(train="money", shuffle=False, tag="ctrlOtherTrain", control_by_other_train=True)
             run_crossgen_binary(train="pain",  shuffle=False, tag="ctrlOtherTrain", control_by_other_train=True)
