@@ -556,7 +556,6 @@ def merge_beh_into_epochs_decision(epo: mne.Epochs, beh: pd.DataFrame, sub: str,
 
 # =====================================================================
 # Label parsing + selection
-# =====================================================================
 
 def parse_stim_code_to_level(series: pd.Series, prefix: str) -> np.ndarray:
     """Parse e.g. 'm1'..'m5' or 'p1'..'p5' to 20/40/60/80/100"""
@@ -2633,7 +2632,7 @@ def main():
             run_crossgen_mc5(train="money", shuffle=True, tag="raw", control_by_other_train=False)
             run_crossgen_mc5(train="pain",  shuffle=True, tag="raw", control_by_other_train=False)
 
-        # CTRL (other-of-train lin ONLY)
+        # CTRL (other-of-train lin)
         if RUN_CONTROL_BY_OTHER:
             run_crossgen_binary(train="money", shuffle=False, tag="ctrlOtherTrain", control_by_other_train=True)
             run_crossgen_binary(train="pain",  shuffle=False, tag="ctrlOtherTrain", control_by_other_train=True)
