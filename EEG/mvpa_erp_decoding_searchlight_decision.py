@@ -108,7 +108,7 @@ CHANCE = 0.5
 HEATMAP_DECIM = 2
 
 # Timepoints for topomaps (requested)
-TOPO_TIMES_S = [0.2, 0.4, 0.5, 0.6, 0.7, 0.8]
+TOPO_TIMES_S = [0.2, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
 # extra auto timepoints where significance exists
 N_EXTRA_SIG_TOPO_TIMES = 4
 
@@ -685,7 +685,7 @@ def plot_topos_bundle(figs_dir, tag, analysis_name, kept_info, times_stat, chanc
 def plot_channelmean_timecourse_with_sem(maps_by_subj, times, *, title, out_path,
                                         chance, ylabel, ylim):
     """
-    ONLY SEM shading.
+    SEM shading.
     maps_by_subj: (n_subj, n_ch, n_t) OR (n_subj, n_t)
     """
     X = np.asarray(maps_by_subj, float)
@@ -1285,7 +1285,7 @@ def run_withinlabel_heatmaps(*, tag_prefix: str, which: str, control_by_other: b
     plot_channelmean_timecourse_with_sem(
         diag_bacc, times_hm,
         title=f"{tag_prefix} diagonal bAcc (SEM) | {'SHUF' if shuffle else 'REAL'}",
-        out_path=out_dir / f"{out_tag}_diag_bacc_timecourse_SEM.png",
+        out_path=out_dir / f"{out_tag}_diag_bacc_timecourse.png",
         chance=CHANCE, ylabel="bAcc", ylim=(0.35, 0.85)
     )
     plot_time_sig_bar_1d(
@@ -1299,7 +1299,7 @@ def run_withinlabel_heatmaps(*, tag_prefix: str, which: str, control_by_other: b
     plot_channelmean_timecourse_with_sem(
         diag_auc, times_hm,
         title=f"{tag_prefix} diagonal AUC (SEM) | {'SHUF' if shuffle else 'REAL'}",
-        out_path=out_dir / f"{out_tag}_diag_auc_timecourse_SEM.png",
+        out_path=out_dir / f"{out_tag}_diag_auc_timecourse.png",
         chance=CHANCE, ylabel="AUC", ylim=(0.35, 0.85)
     )
     plot_time_sig_bar_1d(
@@ -1322,7 +1322,7 @@ def run_withinlabel_heatmaps(*, tag_prefix: str, which: str, control_by_other: b
 
 
 # =============================================================================
-# Cross-label heatmaps runner (no diagonal stats by default; add later if you want)
+# Cross-label heatmaps 
 # =============================================================================
 def run_crosslabel_heatmaps(*, tag_prefix: str, train: str, control_by_other_train: bool,
                             shuffle: bool, out_dir: Path):
@@ -1447,7 +1447,7 @@ def run_crosslabel_heatmaps(*, tag_prefix: str, train: str, control_by_other_tra
 def run_money_minus_pain_difference(*, tag_prefix: str, control_by_other: bool, metric: str, shuffle: bool, out_dir: Path):
     """
     Paired difference (money_map - pain_map) tested vs 0 over channel×time.
-    Also computes money vs chance and pain vs chance TFCE maps to support "both significant" masks.
+    Also computes money vs chance and pain vs chance TFCE maps.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     dbg = out_dir / "debug"
@@ -1747,7 +1747,7 @@ def run_diag_money_minus_pain_stats(*, tag_prefix: str,
     plot_channelmean_timecourse_with_sem(
         diff_bacc, times,
         title=f"{tag_prefix} DIAG (money − pain) bAcc (SEM)",
-        out_path=out_dir / f"{tag_prefix}_diag_diff_bacc_timecourse_SEM.png",
+        out_path=out_dir / f"{tag_prefix}_diag_diff_bacc_timecourse.png",
         chance=0.0, ylabel="bAcc diff", ylim=(-0.20, 0.20)
     )
     plot_time_sig_bar_1d(
@@ -1761,7 +1761,7 @@ def run_diag_money_minus_pain_stats(*, tag_prefix: str,
     plot_channelmean_timecourse_with_sem(
         diff_auc, times,
         title=f"{tag_prefix} DIAG (money − pain) AUC (SEM)",
-        out_path=out_dir / f"{tag_prefix}_diag_diff_auc_timecourse_SEM.png",
+        out_path=out_dir / f"{tag_prefix}_diag_diff_auc_timecourse.png",
         chance=0.0, ylabel="AUC diff", ylim=(-0.20, 0.20)
     )
     plot_time_sig_bar_1d(
@@ -1789,7 +1789,7 @@ def main():
     log_print(f"N_PERM: {N_PERM} | ALPHA_CLUSTER: {ALPHA_CLUSTER} | STATS WINDOW: [{TMIN_STAT},{TMAX_STAT}] s")
     log_print(f"Searchlight radii: spatial={SPATIAL_RADIUS_M} m | temporal={TEMPORAL_RADIUS_MS} ms")
     log_print(f"Heatmap decim: {HEATMAP_DECIM}")
-    log_print(f"Topo requested times: {TOPO_TIMES_S} (+{N_EXTRA_SIG_TOPO_TIMES} auto if sig)\n")
+    log_print(f"Topo times: {TOPO_TIMES_S} (+{N_EXTRA_SIG_TOPO_TIMES} auto if sig)\n")
 
     OUT_SL = OUT_DIR / "searchlight_maps"
     OUT_HM = OUT_DIR / "temporal_generalization_heatmaps"
