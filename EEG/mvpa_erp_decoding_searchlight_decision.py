@@ -113,7 +113,7 @@ TOPO_TIMES_S = [0.2, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
 N_EXTRA_SIG_TOPO_TIMES = 4
 
 # What to run
-RUN_RAW          = True
+RUN_RAW          = False
 RUN_CTRLOTHER    = True
 RUN_SHUFFLE      = True
 
