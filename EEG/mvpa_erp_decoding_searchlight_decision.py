@@ -114,7 +114,7 @@ N_EXTRA_SIG_TOPO_TIMES = 4
 
 # What to run
 RUN_RAW          = False
-RUN_CTRLOTHER    = False
+RUN_CTRLOTHER    = True
 RUN_SHUFFLE      = False
 
 RUN_WITHINLABEL_HEATMAPS = False
