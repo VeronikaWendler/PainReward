@@ -114,15 +114,15 @@ N_EXTRA_SIG_TOPO_TIMES = 4
 
 # What to run
 RUN_RAW          = False
-RUN_CTRLOTHER    = True
-RUN_SHUFFLE      = True
+RUN_CTRLOTHER    = False
+RUN_SHUFFLE      = False
 
-RUN_WITHINLABEL_HEATMAPS = True
-RUN_CROSS_LABEL          = True
+RUN_WITHINLABEL_HEATMAPS = False
+RUN_CROSS_LABEL          = False
 RUN_DIFF_MONEY_MINUS_PAIN = True
 
 # Timecourse difference stats for diag (money - pain)
-RUN_DIAG_DIFF_STATS = True
+RUN_DIAG_DIFF_STATS = False
 
 
 # =============================================================================
