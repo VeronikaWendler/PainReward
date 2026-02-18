@@ -1904,11 +1904,11 @@ def main():
                     metric="balanced_accuracy", shuffle=shuffle,
                     out_dir=OUT_DF / "ctrlOther"
                 )
-                run_money_minus_pain_difference(
-                    tag_prefix="diff", control_by_other=True,
-                    metric="roc_auc", shuffle=shuffle,
-                    out_dir=OUT_DF / "ctrlOther"
-                )
+                # run_money_minus_pain_difference(
+                #     tag_prefix="diff", control_by_other=True,
+                #     metric="roc_auc", shuffle=shuffle,
+                #     out_dir=OUT_DF / "ctrlOther"
+                # )
 
     log_print(f"\n=== mvpa_decision_step2_searchlight_binaryonly DONE ===\n")
 
