@@ -123,6 +123,7 @@ RUN_DIFF_MONEY_MINUS_PAIN = True
 
 # Timecourse difference stats for diag (money - pain)
 RUN_DIAG_DIFF_STATS = False
+RUN_ONLY_DIFF = True
 
 
 # =============================================================================
@@ -1864,8 +1865,9 @@ def main():
     # CTRLOTHER (residualize by other cue)
     if RUN_CTRLOTHER:
         for shuffle in ([False, True] if RUN_SHUFFLE else [False]):
-            run_pair("decision_money_binary_ctrlOther", "money", True, shuffle, OUT_SL / "ctrlOther")
-            run_pair("decision_pain_binary_ctrlOther",  "pain",  True, shuffle, OUT_SL / "ctrlOther")
+            if not RUN_ONLY_DIFF:
+                run_pair("decision_money_binary_ctrlOther", "money", True, shuffle, OUT_SL / "ctrlOther")
+                run_pair("decision_pain_binary_ctrlOther",  "pain",  True, shuffle, OUT_SL / "ctrlOther")
 
             money_hm_res = pain_hm_res = None
             if RUN_WITHINLABEL_HEATMAPS:
