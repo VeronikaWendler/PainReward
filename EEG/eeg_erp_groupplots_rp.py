@@ -16,7 +16,7 @@ import scipy.stats as stats
 from matplotlib.offsetbox import AnchoredText
 
 # -----------------------
-# Directories (cluster/container friendly)
+# Directories 
 # -----------------------
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
 DATA_DIR    = Path(os.getenv("DATA_DIR", PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"))
