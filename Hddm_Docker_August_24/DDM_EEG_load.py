@@ -69,7 +69,7 @@ numba.config.CACHE_ENABLE = False
 # V_sub = value of the worse option
 
 # params:
-version = 10    # defining version #
+version = 11    # defining version #
 run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
@@ -107,7 +107,7 @@ nr_samples      = 6000      # samples per chain - do 6000 (+1000 for burn-in) bu
 parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
-    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10"]     
+    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10","mod_11"]     
 }
 
 # debugging, tip, python starts at 0, unlike Matlab
@@ -357,6 +357,9 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=600
         elif version == 10:
             a_reg = {'model': 'a ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
             reg_descr = [a_reg]
+        elif version == 11:
+            t_reg = {'model': 't ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
+            reg_descr = [t_reg]
         else:
             raise ValueError(f"Is this version correct ? ")  
   
@@ -697,6 +700,23 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                       'a_Intercept',
                       'a_painlevel',
                       'a_moneylevel'
+                      ]
+            
+        elif version == 11:
+            params_of_interest = ['a',
+                                  'v',
+                                  't', 
+                                  't_Intercept',
+                                  't_painlevel',
+                                  't_moneylevel'
+                                  ]
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Threshold',
+                      'Drift Rate', 
+                      'Non-dec. time',
+                      'ndt_Intercept',
+                      'ndt_painlevel',
+                      'ndt_moneylevel'
                       ]
         else:
             raise ValueError(f"Invalid version {version}")
@@ -1324,6 +1344,53 @@ def a_pain_money_interaction_contributions(models, data):
     return data_out
 
 
+# for mod 10 
+def t_pain_money_interaction_contributions(models, data):
+
+    combined = kabuki.utils.concat_models(models)
+    data_out = data.copy()
+
+    # allocate space
+    cols = [
+        "t_intercept_subj", 
+        "t_painlevel_subj", 
+        "t_moneylevel_subj",
+        "t_intercept_contrib",
+        "t_pain_contrib",
+        "t_money_contrib",
+        "t_full_trial"
+    ]
+    for c in cols:
+        data_out[c] = np.nan
+
+    for subj in data['subj_idx'].unique():
+        subj_mask = data_out['subj_idx'] == subj
+        subj_data = data_out.loc[subj_mask]
+
+        # Subject-specific posterior means
+        b0 = combined.nodes_db.loc[f"t_Intercept_subj.{subj}", "node"].trace().mean()
+        b1 = combined.nodes_db.loc[f"t_painlevel_subj.{subj}", "node"].trace().mean()
+        b2 = combined.nodes_db.loc[f"t_moneylevel_subj.{subj}", "node"].trace().mean()
+
+        # stable subject-level params
+        data_out.loc[subj_mask, "t_intercept_subj"] = b0
+        data_out.loc[subj_mask, "t_painlevel_subj"] = b1
+        data_out.loc[subj_mask, "t_moneylevel_subj"] = b2
+
+        # trial level contributions
+        data_out.loc[subj_mask, "t_intercept_contrib"] = b0
+        data_out.loc[subj_mask, "t_pain_contrib"] = b1 * subj_data["painlevel"]
+        data_out.loc[subj_mask, "t_money_contrib"] = b2 * subj_data["moneylevel"]
+
+        # full drift per trial
+        data_out.loc[subj_mask, "t_full_trial"] = (
+            data_out.loc[subj_mask, "t_intercept_contrib"]
+            + data_out.loc[subj_mask, "t_pain_contrib"]
+            + data_out.loc[subj_mask, "t_money_contrib"]
+        )
+
+    return data_out
+
 # # for model NR2
 # def full_sv_pain_para_contributions(models, data):
 #     data_full_sv_pain_para = data.copy()
@@ -1542,6 +1609,9 @@ else:
         elif version == 10:
             sv_contribute = a_pain_money_interaction_contributions(models, data)
             sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'a_pain_money.csv' ))
+        elif version == 11:
+            sv_contribute = t_pain_money_interaction_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 't_pain_money.csv' ))
         else:
             print('None')
             
