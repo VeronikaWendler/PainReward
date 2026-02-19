@@ -13,6 +13,7 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from pathlib import Path
 import scipy.stats as stats
+from matplotlib.offsetbox import AnchoredText
 
 # -----------------------
 # Directories (cluster/container friendly)
@@ -162,29 +163,74 @@ for set_name in electrode_sets:
         ax.set_title(f"{out_prefix.upper()} RP_mean_uV ~ {predictor}\n{set_name} (joint + RT)")
 
         # annotate and star based on FDR 
+        #for i in range(len(betas)):
+        #    if not np.isfinite(betas[i]):
+        #        continue
+
+        #    if has_fdr and np.isfinite(pfdr[i]):
+        #        txt = f"p={pvals[i]:.3f}\nFDR={pfdr[i]:.3f}"
+        #        sig = pfdr[i] < 0.05
+        #    else:
+        #        txt = f"p={pvals[i]:.3f}"
+        #        sig = np.isfinite(pvals[i]) and (pvals[i] < 0.05)
+
+        #    y_text = betas[i]
+        #    if np.isfinite(se[i]):
+        #        y_text = betas[i] + np.sign(betas[i]) * (se[i] + 0.05)
+        #    ax.text(x[i], y_text, txt, ha="center", va="bottom", fontsize=8)
+
+        #    if sig:
+        #        ax.text(x[i], y_text, "*", ha="center", va="bottom", fontsize=16)
+
+
+        ##
+        lines = []
+        for i, bl in enumerate(bins_sorted["bin_label"].to_list()):
+            if not np.isfinite(pvals[i]):
+                continue
+            if has_fdr and np.isfinite(pfdr[i]):
+                lines.append(f"{bl}: p={pvals[i]:.3f}, FDR={pfdr[i]:.3f}")
+            else:
+                lines.append(f"{bl}: p={pvals[i]:.3f}")
+
+        # Add the box inside the axes
+        box = AnchoredText(
+            "\n".join(lines),
+            loc="upper left",          # change to "upper right" if you prefer
+            prop=dict(size=8),
+            frameon=True,
+            borderpad=0.6,
+        )
+        box.patch.set_alpha(0.9)
+        ax.add_artist(box)
+
+        # Stars only (no p text on bars)
         for i in range(len(betas)):
             if not np.isfinite(betas[i]):
                 continue
 
             if has_fdr and np.isfinite(pfdr[i]):
-                txt = f"p={pvals[i]:.3f}\nFDR={pfdr[i]:.3f}"
                 sig = pfdr[i] < 0.05
             else:
-                txt = f"p={pvals[i]:.3f}"
                 sig = np.isfinite(pvals[i]) and (pvals[i] < 0.05)
 
-            y_text = betas[i]
-            if np.isfinite(se[i]):
-                y_text = betas[i] + np.sign(betas[i]) * (se[i] + 0.05)
-            ax.text(x[i], y_text, txt, ha="center", va="bottom", fontsize=8)
+            if not sig:
+                continue
 
-            if sig:
-                ax.text(x[i], y_text, "*", ha="center", va="bottom", fontsize=16)
+            y_star = betas[i]
+            if np.isfinite(se[i]):
+                y_star = betas[i] + np.sign(betas[i]) * (se[i] + 0.05)
+
+            ax.text(x[i], y_star, "*", ha="center", va="bottom", fontsize=16)
 
         fig.tight_layout()
         fig.savefig(outfigpath / f"{out_prefix}_{set_name}__betas_{predictor}.svg",
                     dpi=600, bbox_inches="tight")
         plt.close(fig)
+
+
+
+        
 
 # -------------------------
 # Partial regression scatter (unique effect in joint+RT model)
