@@ -62,11 +62,12 @@ if not os.path.exists(outpath):
     
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
 # ---- versions / output routing ----
-version = 4
+version = 5
 v1_mode = "joint"
 v2_mode = "joint"
 v3_mode = "joint"
 v4_mode = "joint"
+v5_mode = "joint"
 
 base_root = opj(outpath, "erps_massuni_sv_cuelong")
 os.makedirs(base_root, exist_ok=True)
@@ -79,8 +80,10 @@ elif version == 3:
     outpath = opj(base_root, "v3_rp_drift_joint_longwindow")
 elif version == 4:
     outpath = opj(base_root, "v4_rp_boundary_joint_longwindow")
+elif version == 5:
+    outpath = opj(base_root, "v5_rp_ndt_joint_longwindow")
 else:
-    raise ValueError("version must be 1, 2, 3, or 4")
+    raise ValueError("version must be 1, 2, 3, 4, 5")
 
 os.makedirs(outpath, exist_ok=True)
 
@@ -121,7 +124,10 @@ mod_data["trialsnum"] = (
 mod_data_a_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_10" / "diagnostics" / "a_pain_money.csv"
 mod_data_a = pd.read_csv(mod_data_a_path, sep=None, engine="python")
 
-for _df in [mod_data, mod_data_a]:
+mod_data_t_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_11" / "diagnostics" / "t_pain_money.csv"
+mod_data_t = pd.read_csv(mod_data_t_path, sep=None, engine="python")
+
+for _df in [mod_data, mod_data_a, mod_data_t]:
     _df["rt"] = _df["choice_resp.rt"]
     _df["interaction"] = _df["moneylevel"] * _df["painlevel"]
     _df["trialsnum"] = (
@@ -145,8 +151,14 @@ elif version in [2, 4]: # boundary (a)
     pred2_col = "a_moneylevel_subj"
     out_prefix = "v2" if version == 2 else "v4"
 
+elif version in [5]: # boundary (a)
+    beh_df = mod_data_t
+    pred1_col = "t_painlevel_subj"
+    pred2_col = "t_moneylevel_subj"
+    out_prefix = "v5" if version == 5 else "v5"
+
 else:
-    raise ValueError("version must be 1, 2, 3, or 4")
+    raise ValueError("version must be 1, 2, 3, 4, 5")
 
 # Subjects in EEG 
 # EEG participants from participants.tsv
@@ -281,12 +293,12 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1,2,3,4]:
+if version in [1,2,3,4,5]:
     filtered_data = []
     for p in part:
         df = beh_df[beh_df["participant"] == p]
         
-        if version in [1,2,3,4]:
+        if version in [1,2,3,4,5]:
             epo = mne.read_epochs(
                 opj(basepath, "derivatives", p, "eeg", "erps_resp_rp",
                     f"{p}_decision_resp_rp_singletrials-epo.fif"),
@@ -358,7 +370,7 @@ if version in [1,2,3,4]:
 
 #----------------------------------------------------------------------------------------
 
-if version in [1, 2, 3, 4]:
+if version in [1, 2, 3, 4, 5]:
 
     # -----------------------
     # Only JOINT model + RT covariate
@@ -368,10 +380,10 @@ if version in [1, 2, 3, 4]:
 
     if version in [1, 2]:
         bins = [(-0.4, -0.2), (-0.2, -0.1)]          # original: two bins
-    elif version in [3, 4]:
+    elif version in [3, 4, 5]:
         bins = [(-0.5, -0.1)]                      # new: one long bin
     else:
-        raise ValueError("version must be 1-4")
+        raise ValueError("version must be 1-5")
 
 
     # False: FDR across both bins together (within each predictor)
