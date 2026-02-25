@@ -152,10 +152,14 @@ if version in [1, 2]:
             epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps_passive',                   
                                   p + '_passive_cues_singletrials-epo.fif'))
             epo_1 = epo.copy()
+
         elif version in [2]:
-            epo = mne.read_epochs(opj(basepath,  p, 'eeg', 'erps',                   
-                                  p + '_decision_cues_singletrials-epo.fif'))
+            epo = mne.read_epochs(
+                opj(basepath, "derivatives", p, "eeg", "erps",
+                    f"{p}_decision_cues_singletrials-epo.fif"),
+                    preload=True)
             epo_1 = epo.copy()
+
         elif version in [3]:
             epo = mne.read_epochs(
                 opj(basepath, p, "eeg", "erps_resp_rp", f"{p}_decision_resp_rp_singletrials-epo.fif"),
@@ -255,8 +259,11 @@ if version in [1, 2, 3]:
             )
         else:  # version 2 or 3
             epo = mne.read_epochs(
-                opj(basepath, pa, 'eeg', 'erps', pa + '_decision_cues_singletrials-epo.fif')
-            )
+                opj(basepath, "derivatives", p, "eeg", "erps",
+                    f"{p}_decision_cues_singletrials-epo.fif"),
+                    preload=True)
+            epo_1 = epo.copy()
+
 
         epo_cop = epo.copy()
 
