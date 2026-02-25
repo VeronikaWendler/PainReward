@@ -74,8 +74,9 @@ else:
 
 
 # participants
-part_csv = PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "participants.tsv"
-part = pd.read_csv(part_csv, sep=None, engine="python")["participant_id"].unique().tolist()
+# participants
+part_csv = basepath / "participants.tsv"
+part = pd.read_csv(part_csv, sep="\t")["participant_id"].unique().tolist()
 part.sort()
 
 # Silence pandas warning
