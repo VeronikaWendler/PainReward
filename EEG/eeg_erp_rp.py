@@ -33,7 +33,6 @@ from mne.time_frequency import tfr_morlet
 from mne.stats import permutation_cluster_1samp_test, combine_adjacency
 
 
-
 # Set directory
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
 basepath = Path(os.getenv("DATA_DIR", PROJECT_DIR / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata"))
@@ -58,10 +57,11 @@ outpath = Path(os.getenv("OUT_DIR", basepath / 'statistics'))
 if not os.path.exists(outpath):
     os.mkdir(outpath)
 
-#----
-    
+
+#----    
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
-# ---- versions / output routing ----
+# ---- versions ----
+
 version = 5
 v1_mode = "joint"
 v2_mode = "joint"
