@@ -65,7 +65,7 @@ if version == 1:
     outpath = opj(outpath, 'erps_massuni_drift_mod_9_passive')
     if not os.path.exists(outpath):
         os.mkdir(outpath)
-if version == 2: # with RT as covariate
+elif version == 2: # with RT as covariate
     outpath = opj(outpath, 'erps_massuni_regression')
     if not os.path.exists(outpath):
         os.mkdir(outpath)             
@@ -259,8 +259,8 @@ if version in [1, 2, 3]:
             )
         else:  # version 2 or 3
             epo = mne.read_epochs(
-                opj(basepath, "derivatives", p, "eeg", "erps",
-                    f"{p}_decision_cues_singletrials-epo.fif"),
+                opj(basepath, "derivatives", pa, "eeg", "erps",
+                    f"{pa}_decision_cues_singletrials-epo.fif"),
                     preload=True)
             epo_1 = epo.copy()
 
