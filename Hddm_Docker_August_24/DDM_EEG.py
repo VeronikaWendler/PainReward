@@ -248,7 +248,7 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         m = hddm.models.HDDMRegressor(data, 
                                     reg_descr,
                                     p_outlier=.05, 
-                                    include=['a', 't', 'v', 'z'],   #'z'
+                                    include=['a', 't', 'v', 'sv'],   #'z'
                                     depends_on=depends_on,
                                     group_only_regressors=False,
                                     keep_regressor_trace=True
