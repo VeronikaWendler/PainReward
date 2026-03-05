@@ -83,7 +83,7 @@ nr_samples      = 12000      # samples per chain - do 6000 (+1000 for burn-in) b
 parallel        = True      # parallel #
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
-    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10", "mod_11", "mod_12"]     
+    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10", "mod_11", "mod_12", "mod_13", "mod_14"]     
 }
 
 PHASE_TO_SOURCE = {
@@ -97,7 +97,7 @@ RUN_ALL_MODELS  = True                                           # False = just 
 
 # selectivity
 start_phase = "dec"
-start_version = 12
+start_version = 13
 started = False
 
 # dir
@@ -228,6 +228,12 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         elif version == 12:
             v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
             reg_descr = [v_reg]
+        elif version == 13:
+            v_reg = {'model': 'v ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
+            reg_descr = [v_reg]
+        elif version == 14:
+            a_reg = {'model': 'a ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
+            reg_descr = [a_reg]
         # elif version == 11:
         # elif version == 11:
         #     v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
@@ -242,7 +248,7 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         m = hddm.models.HDDMRegressor(data, 
                                     reg_descr,
                                     p_outlier=.05, 
-                                    include=['a', 't', 'v'],   #'z'
+                                    include=['a', 't', 'v', 'z'],   #'z'
                                     depends_on=depends_on,
                                     group_only_regressors=False,
                                     keep_regressor_trace=True
