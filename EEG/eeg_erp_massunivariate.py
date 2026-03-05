@@ -10,11 +10,6 @@
  
  '''
 
-# -*- coding: utf-8 -*-
-# Massunivariate Analysis and Second level test on betas
-# Passive (v1) uses condition/level from epochs metadata (NO HDDM).
-# Decision (v2) uses HDDM/behavioral regressors and trial mapping.
-
 import os
 import warnings
 from pathlib import Path
@@ -52,8 +47,8 @@ ensure_dir(outroot)
 # -----------------------
 # Choose version
 # -----------------------
-# version = 1 -> PASSIVE (condition/level from passive_beh.tsv; no RT)
-# version = 2 -> DECISION (HDDM-based pain/money + RT)
+# version = 1 passive level from passive_beh.tsv; no RT
+# version = 2 decision HDDM-based pain/money + RT
 version = 1
 
 if version == 1:
@@ -127,8 +122,6 @@ if version == 2:
     part_1_dat = mod_data
     part_1 = part
 
-    regvars = ["painlevel", "moneylevel"]
-
     # ------------ Create trial map for decision (YOUR existing logic) ------------
     filtered_data = []
     for p in part:
@@ -145,7 +138,7 @@ if version == 2:
         trialblocks = []
         blocks_idx = []
 
-        for participant in participants:
+        for _participant in participants:
             blocks = list(range(25)) * 5
             blocks_idx_participant = [i for i in range(5) for _ in range(25)]
             trialblocks.extend(blocks)
@@ -173,25 +166,7 @@ if version == 2:
 
     epo_1_filtered_combined = pd.concat(filtered_data, ignore_index=True)
 
-    merge_left = ["participant_id", "blocks_idx", "trialblocks"]
-    merge_right = ["participant", "blocks.thisRepN", "trials.thisN"]
-
-    trial_map = epo_1_filtered_combined.merge(
-        mod_data,
-        left_on=merge_left,
-        right_on=merge_right,
-        how="inner"
-    )
-
-    if "trialsnum_x" in trial_map.columns:
-        trial_map = trial_map.rename(columns={"trialsnum_x": "trialsnum"})
-    if "trialsnum_y" in trial_map.columns:
-        trial_map = trial_map.drop(columns=["trialsnum_y"])
-
     # ------------ Run decision regression ------------
-    z_dir = outpath / "Zscoring"
-    ensure_dir(z_dir)
-
     all_epos = [[] for _ in range(len(regvars))]
     allbetasnp = []
     betas = [[] for _ in range(len(regvars))]
@@ -211,12 +186,14 @@ if version == 2:
         )
         epo_cop = epo.copy()
 
+        # keep only mapped trials
         matching = epo_cop.metadata["trialsnum"].isin(df2["trialsnum"])
         epo_filt = epo_cop[matching]
 
         if epo_filt.info["sfreq"] != param["testresampfreq"]:
             epo_filt = epo_filt.resample(param["testresampfreq"])
 
+        # drop bad trials (metadata stays aligned)
         goodtrials = np.where(epo_filt.metadata["badtrial"] == 0)[0]
         mod2 = mod2.iloc[goodtrials].reset_index(drop=True)
         epo_filt = epo_filt[goodtrials]
@@ -265,13 +242,11 @@ if version == 2:
 
         included_subjects.append(pa)
 
-    # group-level (same as your code)
     if len(allbetasnp) == 0:
         raise RuntimeError("No subjects included (decision).")
 
     allbetas = np.stack(allbetasnp)
     beta_gavg = [mne.grand_average(betas[i]) for i in range(len(regvars))]
-
     connect, _ = mne.channels.find_ch_adjacency(beta_gavg[0].info, ch_type="eeg")
 
     if not isinstance(param["cluster_threshold"], dict):
@@ -308,7 +283,7 @@ if version == 2:
     tvals = np.stack(tvals_list)
     pvals = np.stack(pvals_list)
 
-    # FDR across regressors
+    # FDR across regressors (min cluster p per regressor)
     min_cluster_ps = []
     for pmap in pvals_list:
         mask = pmap < 1.0
@@ -329,9 +304,10 @@ if version == 2:
     np.save(z_dir / "included_subjects.npy", np.array(included_subjects, dtype=object))
     np.save(z_dir / "ols_2ndlevel_betasavg.npy", np.array(beta_gavg, dtype=object))
 
-# =========================
+# ============================================================
+# v1 PASSIVE (FIXED): merge like your decoding pipeline
+# ============================================================
 elif version == 1:
-
     regvars = ["painlevel", "moneylevel"]
     z_dir = Path(outpath) / "Zscoring"
     ensure_dir(z_dir)
@@ -348,48 +324,71 @@ elif version == 1:
         return cand1 if cand1.exists() else cand2
 
     def find_passive_beh(pa: str) -> Path:
-        # typically stored in raw BIDS subject folder
         cand1 = basepath / pa / "eeg" / f"{pa}_task-passive_beh.tsv"
-        # fallback if it exists in derivatives somewhere (less likely)
         cand2 = basepath / "derivatives" / pa / "eeg" / f"{pa}_task-passive_beh.tsv"
         return cand1 if cand1.exists() else cand2
 
-    def prepare_passive_beh_df(beh: pd.DataFrame) -> pd.DataFrame:
+    def load_passive_beh_with_trialsnum(beh_path: Path) -> pd.DataFrame:
         """
-        Keep only real trials (like you did in preprocessing) and compute trialsnum.
-        Expected columns include:
-          - blocks.thisN
-          - trials.thisN
-          - condition (p/m)
-          - level (20..100)
+        MATCHES YOUR WORKING DECODING SCRIPT:
+          - drop rows with missing fixcross.started (if present)
+          - trialsnum = 1..N (event order)
+          - normalize condition/level
         """
-        beh = beh.copy()
+        beh = pd.read_csv(beh_path, sep="\t")
 
-        # If your passive_beh includes rows with missing fixcross.started, drop them (as in preprocessing)
         if "fixcross.started" in beh.columns:
             beh = beh[~beh["fixcross.started"].isna()].copy()
 
-        needed = {"blocks.thisN", "trials.thisN", "condition", "level"}
-        missing = needed - set(beh.columns)
-        if missing:
-            raise ValueError(f"Passive beh file missing columns: {missing}")
+        beh = beh.reset_index(drop=True)
 
-        beh["blocks.thisN"] = beh["blocks.thisN"].astype(int)
-        beh["trials.thisN"] = beh["trials.thisN"].astype(int)
+        # Passive trialsnum is just order 1..N (not blocks math)
+        beh["trialsnum"] = np.arange(1, len(beh) + 1)
 
-        # IMPORTANT: assumes 25 trials per block -> 8 blocks = 200 trials
-        beh["trialsnum"] = beh["blocks.thisN"] * 25 + beh["trials.thisN"] + 1
+        # normalize
+        if "condition" not in beh.columns or "level" not in beh.columns:
+            raise ValueError(f"Passive beh file missing 'condition'/'level'. Columns: {list(beh.columns)}")
 
-        # normalize condition
         beh["condition"] = beh["condition"].astype(str).str.lower().str.strip()
-        beh["level"] = beh["level"].astype(float)
+        beh["level"] = pd.to_numeric(beh["level"], errors="coerce")
 
-        # keep only p/m trials with finite level
-        beh = beh[np.isin(beh["condition"], ["p", "m"]) & np.isfinite(beh["level"])].copy()
-
+        beh = beh[beh["condition"].isin(["p", "m"]) & np.isfinite(beh["level"])].copy()
         return beh
 
-    # only subjects who are in EEG ∩ HDDM set
+    def merge_beh_into_epochs_on_trialsnum(epo: mne.Epochs, beh: pd.DataFrame, pa: str) -> mne.Epochs:
+        """
+        Merge BEFORE dropping bad trials.
+        This avoids MNE error: metadata rows must equal epochs/events rows.
+        """
+        if epo.metadata is None:
+            md = pd.DataFrame({"trialsnum": np.arange(1, len(epo) + 1)})
+        else:
+            md = epo.metadata.reset_index(drop=True).copy()
+
+        if "trialsnum" not in md.columns:
+            md["trialsnum"] = np.arange(1, len(epo) + 1)
+
+        md["trialsnum"] = pd.to_numeric(md["trialsnum"], errors="coerce").astype(int)
+        beh["trialsnum"] = pd.to_numeric(beh["trialsnum"], errors="coerce").astype(int)
+
+        merged = md.merge(
+            beh[["trialsnum", "condition", "level"]],
+            on="trialsnum",
+            how="left",
+            validate="1:1",
+        )
+
+        if merged["condition"].isna().any() or merged["level"].isna().any():
+            n_bad = int(merged["condition"].isna().sum())
+            raise ValueError(
+                f"{pa}: trialsnum merge produced {n_bad} unlabeled epochs. "
+                "This suggests epochs order and beh.tsv order differ for this subject."
+            )
+
+        epo.metadata = merged
+        return epo
+
+    # Only subjects who are in EEG ∩ HDDM set (keeping your decision-selection restriction)
     part_passive = []
     for p in common_participants:
         if find_passive_epochs(p).exists() and find_passive_beh(p).exists():
@@ -399,127 +398,97 @@ elif version == 1:
 
     for pa in part_passive:
         print(f"\n--- PASSIVE (v1): Processing {pa} ---")
-
-        epo_path = find_passive_epochs(pa)
-        beh_path = find_passive_beh(pa)
-
-        epo = mne.read_epochs(str(epo_path), preload=True)
-
-        beh = pd.read_csv(beh_path, sep="\t")
         try:
-            beh = prepare_passive_beh_df(beh)
+            epo_path = find_passive_epochs(pa)
+            beh_path = find_passive_beh(pa)
+
+            epo = mne.read_epochs(str(epo_path), preload=True)
+
+            beh = load_passive_beh_with_trialsnum(beh_path)
+
+            # 1) MERGE FIRST (while lengths still match)
+            epo = merge_beh_into_epochs_on_trialsnum(epo, beh, pa)
+
+            # 2) resample if needed
+            if epo.info["sfreq"] != param["testresampfreq"]:
+                epo = epo.resample(param["testresampfreq"])
+
+            # 3) now drop bad trials (metadata stays aligned)
+            if "badtrial" in epo.metadata.columns:
+                good_mask = epo.metadata["badtrial"].fillna(0).astype(int).to_numpy() == 0
+                epo = epo.copy()[good_mask]
+
+            if len(epo) < 20:
+                print(f"Skipping {pa}: too few epochs after dropping bad trials (n={len(epo)})")
+                skipped_subjects.append(pa)
+                continue
+
+            # Build regressors from condition/level
+            cond = epo.metadata["condition"].astype(str).str.lower().str.strip().to_numpy()
+            level = epo.metadata["level"].to_numpy(dtype=float)
+
+            is_pain = cond == "p"
+            is_money = cond == "m"
+
+            if is_pain.sum() < 5 or is_money.sum() < 5:
+                print(f"Skipping {pa}: too few trials per condition (p={is_pain.sum()}, m={is_money.sum()})")
+                skipped_subjects.append(pa)
+                continue
+
+            if np.nanstd(level[is_pain]) == 0 or np.nanstd(level[is_money]) == 0:
+                print(f"Skipping {pa}: zero variance in level within condition")
+                skipped_subjects.append(pa)
+                continue
+
+            # Keep plotting compatibility: create painlevel/moneylevel columns
+            epo.metadata["painlevel"] = np.where(is_pain, level, 0.0)
+            epo.metadata["moneylevel"] = np.where(is_money, level, 0.0)
+            epo.metadata["participant_id"] = pa
+
+            # Z-score EEG across trials
+            scale = Scaler(scalings="mean")
+            epo_z = mne.EpochsArray(scale.fit_transform(epo.get_data()), epo.info)
+
+            # Design matrix: Intercept + cue_type_pm + pain_z_masked + money_z_masked
+            df_reg = epo.metadata.copy()
+            df_reg["Intercept"] = 1.0
+            df_reg["cue_type_pm"] = np.where(is_pain, 0.5, -0.5)
+
+            pain_z = np.zeros(len(df_reg), dtype=float)
+            money_z = np.zeros(len(df_reg), dtype=float)
+            pain_z[is_pain] = stats.zscore(level[is_pain])
+            money_z[is_money] = stats.zscore(level[is_money])
+
+            df_reg["pain_z_masked"] = pain_z
+            df_reg["money_z_masked"] = money_z
+
+            names = ["Intercept", "cue_type_pm", "pain_z_masked", "money_z_masked"]
+            design = df_reg[names]
+
+            if not np.all(np.isfinite(design.to_numpy())):
+                print(f"Skipping {pa}: NaN/Inf in design")
+                skipped_subjects.append(pa)
+                continue
+
+            # Regression
+            res = mne.stats.linear_regression(epo_z, design, names=names)
+            beta_pain = res["pain_z_masked"].beta
+            beta_money = res["money_z_masked"].beta
+
+            betas[0].append(beta_pain)
+            betas[1].append(beta_money)
+            allbetasnp.append(np.stack([beta_pain.data, beta_money.data]))
+
+            # Save epochs for plotting
+            all_epos[0].append(epo)
+            all_epos[1].append(epo)
+
+            included_subjects.append(pa)
+            print(f"Included {pa} (n_epochs={len(epo)})")
+
         except Exception as e:
-            print(f"Skipping {pa}: could not prep passive beh.tsv ({e})")
+            print(f"Skipping {pa}: {e}")
             skipped_subjects.append(pa)
-            continue
-
-        # Resample epochs if needed
-        if epo.info["sfreq"] != param["testresampfreq"]:
-            epo = epo.resample(param["testresampfreq"])
-
-        # Drop bad trials if available in metadata
-        if epo.metadata is not None and "badtrial" in epo.metadata.columns:
-            good_idx = np.where(epo.metadata["badtrial"].to_numpy().astype(int) == 0)[0]
-            epo = epo[good_idx]
-
-        # Ensure we have some metadata to attach merge keys
-        if epo.metadata is None:
-            # create minimal metadata with sequential trialsnum
-            meta_epo = pd.DataFrame({"trialsnum": np.arange(1, len(epo) + 1)})
-        else:
-            meta_epo = epo.metadata.reset_index(drop=True).copy()
-
-        # Ensure epochs metadata has trialsnum
-        if "trialsnum" not in meta_epo.columns:
-            # fallback: assume epochs are already in trial order
-            meta_epo["trialsnum"] = np.arange(1, len(epo) + 1)
-
-        # Merge beh into epochs metadata
-        meta_epo["trialsnum"] = meta_epo["trialsnum"].astype(int)
-        beh["trialsnum"] = beh["trialsnum"].astype(int)
-
-        merged = meta_epo.merge(
-            beh[["trialsnum", "condition", "level"]],
-            on="trialsnum",
-            how="inner"
-        )
-
-        if len(merged) < 50:
-            print(f"Skipping {pa}: too few matched trials after merge (matched={len(merged)})")
-            skipped_subjects.append(pa)
-            continue
-
-        # Keep only matched trials in epochs
-        keep_trialsnum = set(merged["trialsnum"].tolist())
-        keep_idx = [i for i, tn in enumerate(meta_epo["trialsnum"].tolist()) if tn in keep_trialsnum]
-        epo = epo[keep_idx]
-
-        # Put merged metadata back in same order as epochs
-        merged = merged.set_index("trialsnum").loc[meta_epo.loc[keep_idx, "trialsnum"]].reset_index()
-        epo.metadata = merged
-
-        # Build regressors from condition/level
-        cond = epo.metadata["condition"].astype(str).str.lower().str.strip().to_numpy()
-        level = epo.metadata["level"].to_numpy(dtype=float)
-
-        is_pain = cond == "p"
-        is_money = cond == "m"
-
-        if is_pain.sum() < 5 or is_money.sum() < 5:
-            print(f"Skipping {pa}: too few trials per condition (p={is_pain.sum()}, m={is_money.sum()})")
-            skipped_subjects.append(pa)
-            continue
-
-        if np.nanstd(level[is_pain]) == 0 or np.nanstd(level[is_money]) == 0:
-            print(f"Skipping {pa}: zero variance in level within condition")
-            skipped_subjects.append(pa)
-            continue
-
-        # Keep plotting compatibility: create painlevel/moneylevel columns
-        epo.metadata["painlevel"] = np.where(is_pain, level, 0.0)
-        epo.metadata["moneylevel"] = np.where(is_money, level, 0.0)
-        epo.metadata["participant_id"] = pa
-
-        # Z-score EEG across trials (same as decision approach)
-        scale = Scaler(scalings="mean")
-        epo_z = mne.EpochsArray(scale.fit_transform(epo.get_data()), epo.info)
-
-        # Design matrix: Intercept + cue_type_pm + pain_z_masked + money_z_masked
-        df_reg = epo.metadata.copy()
-        df_reg["Intercept"] = 1.0
-        df_reg["cue_type_pm"] = np.where(is_pain, 0.5, -0.5)
-
-        pain_z = np.zeros(len(df_reg), dtype=float)
-        money_z = np.zeros(len(df_reg), dtype=float)
-        pain_z[is_pain] = stats.zscore(level[is_pain])
-        money_z[is_money] = stats.zscore(level[is_money])
-
-        df_reg["pain_z_masked"] = pain_z
-        df_reg["money_z_masked"] = money_z
-
-        names = ["Intercept", "cue_type_pm", "pain_z_masked", "money_z_masked"]
-        design = df_reg[names]
-
-        if not np.all(np.isfinite(design.to_numpy())):
-            print(f"Skipping {pa}: NaN/Inf in design")
-            skipped_subjects.append(pa)
-            continue
-
-        # Regression
-        res = mne.stats.linear_regression(epo_z, design, names=names)
-        beta_pain = res["pain_z_masked"].beta
-        beta_money = res["money_z_masked"].beta
-
-        betas[0].append(beta_pain)
-        betas[1].append(beta_money)
-        allbetasnp.append(np.stack([beta_pain.data, beta_money.data]))
-
-        # Save epochs for plotting (same epochs saved twice under regvar names)
-        all_epos[0].append(epo)
-        all_epos[1].append(epo)
-
-        included_subjects.append(pa)
-        print(f"Included {pa} (matched trials={len(epo)})")
 
     # -----------------------------
     # Group-level
@@ -583,7 +552,7 @@ elif version == 1:
         "sig_FDR": rej_fdr
     }).to_csv(z_dir / "cluster_FDR_across_regressors.csv", index=False)
 
-    # Save group-level files expected by your plotting script
+    # Save group-level files expected by plotting script
     np.save(z_dir / "ols_2ndlevel_tvals.npy", tvals)
     np.save(z_dir / "ols_2ndlevel_pvals.npy", pvals)
     np.save(z_dir / "ols_2ndlevel_betas.npy", allbetas)
@@ -622,10 +591,6 @@ elif version == 1:
     print("Saved outputs in:", z_dir)
     print("Included subjects:", included_subjects)
     print("Skipped subjects:", skipped_subjects)
-
-
-
-
 
 
 
