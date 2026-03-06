@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 # =========================
-# user settings
+# paths
 # =========================
 project_dir = Path("/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval").resolve()
 
@@ -49,7 +49,7 @@ keep_badtrial_rows = True
 
 
 # =========================
-# helper functions
+# helpers
 # =========================
 
 def zscore_within_subject(df: pd.DataFrame, value_col: str, subj_col: str, out_col: str):

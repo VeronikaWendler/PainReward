@@ -82,7 +82,8 @@ nr_samples      = 12000      # samples per chain - do 6000 (+1000 for burn-in) b
 parallel        = True      # parallel #
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
-    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10", "mod_11", "mod_12", "mod_13", "mod_14", "mod_15", "mod_16"]     
+    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8","mod_9", "mod_10",
+                  "mod_11", "mod_12", "mod_13", "mod_14", "mod_15", "mod_16", "mod_17", "mod_18"]     
 }
 
 PHASE_TO_SOURCE = {
@@ -96,7 +97,7 @@ RUN_ALL_MODELS  = True                                           # False = just 
 
 # selectivity
 start_phase = "dec"
-start_version = 15
+start_version = 17
 started = False
 
 # dir
@@ -241,10 +242,10 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
             reg_descr = [a_reg]
         # here, we are trying a joint-model approach    
         elif version == 17:
-            v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + rp + painlevel * rp + moneylevel * rp', 'link_func': lambda x: x}
+            v_reg = {'model': 'v ~ 1 + pain_z + money_z + rp_z + pain_z * rp_z + money_z * rp_z', 'link_func': lambda x: x}
             reg_descr = [v_reg]
         elif version == 18:
-            a_reg = {'model': 'a ~ 1 + painlevel + moneylevel + rp + painlevel * rp + moneylevel * rp', 'link_func': lambda x: x}
+            a_reg = {'model': 'a ~ 1 + pain_z + money_z + rp_z + pain_z * rp_z + money_z * rp_z', 'link_func': lambda x: x}
             reg_descr = [a_reg]
 
         # elif version == 11:
@@ -349,8 +350,11 @@ model_dir = BASE_MODEL_DIR
 # Main running function
 
 if __name__ == "__main__":
+
+    #data_full = pd.read_csv((PROJECT_DIR / "Hddm_Docker_August_24" / "data_sets" / "behavioural_sv_cleaned_final_3.csv").as_posix(), sep=",")
     
-    data_full = pd.read_csv((PROJECT_DIR / "Hddm_Docker_August_24" / "data_sets" / "behavioural_sv_cleaned_final_3.csv").as_posix(), sep=",")
+    data_full = pd.read_csv(
+        "/rds/homes/v/vaw508/projects/PainReward/Hddm_Docker_August_24/data_sets/behavioural_sv_cleaned_final_3_with_rp.csv", sep=",")
     # loop over phases and versions
     for phase in PHASE_RUN_ORDER:
         if phase in SKIP_PHASES:
@@ -413,13 +417,39 @@ if __name__ == "__main__":
                 print("No subjects dropped at RT step.")
             
             # drop nans
-            drop_cols = ['rt', "painlevel", "moneylevel", "accepted", 'acceptance_pair', 'sv_pain_para']
-            
-            # before, we had this in dropna (not so ideal)
-            #"painlevel", "moneylevel", "accepted", 'acceptance_pair', 'sv_money', 'sv_pain', 'sv_both', 'p_pain_all', 'Abs_Money_Pain', 
-            # 'OV_Money_Pain', 'sv_pain_para', 'sv_both_para', 'k_pain_para', 'beta_para', 'bias_para', 'STA_SAI_Score', 'STA_TAI_Score', 'PCS_Score'
-            
+            drop_cols = ['rt', "painlevel", "moneylevel","pain_z", "money_z", "rp_z", "accepted", 'acceptance_pair', 'sv_pain_para']
+                        
             data_clean = data_rt.copy()
+
+            for s in data_clean['subj_idx'].unique():
+                mask = data_clean['subj_idx'] == s
+
+                pain_sd = data_clean.loc[mask, 'painlevel'].std()
+                money_sd = data_clean.loc[mask, 'moneylevel'].std()
+
+                if pd.notna(pain_sd) and pain_sd > 0:
+                    data_clean.loc[mask, 'pain_z'] = (
+                        data_clean.loc[mask, 'painlevel'] - data_clean.loc[mask, 'painlevel'].mean()
+                    ) / pain_sd
+                else:
+                    data_clean.loc[mask, 'pain_z'] = np.nan
+
+                if pd.notna(money_sd) and money_sd > 0:
+                    data_clean.loc[mask, 'money_z'] = (
+                        data_clean.loc[mask, 'moneylevel'] - data_clean.loc[mask, 'moneylevel'].mean()
+                        ) / money_sd
+                else:
+                    data_clean.loc[mask, 'money_z'] = np.nan
+
+            if version in [17, 18]:
+                print("\nDropping trials with bad RP or missing rp_z")
+                before = len(data_clean)
+                data_clean = data_clean[data_clean["badtrial"] == 0]
+                data_clean = data_clean.dropna(subset=["rp_z"])
+                after = len(data_clean)
+                print("Trials removed:", before - after)
+                print("Trials remaining:", after)
+
             before_dropna_subjs = sorted(data_clean["subj_idx"].unique())
             data_clean.dropna(subset=drop_cols, inplace=True)
             after_dropna_subjs = sorted(data_clean["subj_idx"].unique())

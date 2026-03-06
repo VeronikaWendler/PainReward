@@ -46,6 +46,6 @@ apptainer exec --cleanenv \
   --env OUT_DIR="${OUT_DIR}" \
   --env HDDM_DIR="${HDDM_DIR}" \
   "${IMAGE}" \
-  python "${PROJECT_DIR}/EEG/rp_into_hddm.py"
+  python "${PROJECT_DIR}/EEG/DDM_EEG.py"
 
 
