@@ -21,12 +21,11 @@ import pandas as pd
 # =========================
 # user settings
 # =========================
-project_dir = Path(os.getenv("project_dir", "/workspace")).resolve()
+project_dir = Path("/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval").resolve()
 
-deriv_dir = Path(os.getenv(
-    "deriv_dir",
-    (project_dir / "EEG" / "PainReward_sub-001-050" / "painrewardeegdata" / "derivatives").as_posix(),
-)).resolve()
+deriv_dir = Path(
+    "/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives"
+).resolve()
 
 behav_file = Path(os.getenv(
     "behav_file",
@@ -92,26 +91,35 @@ def make_behaviour_trial_table(behav: pd.DataFrame):
 def load_single_participant_rp(participant: str):
 
     epo_path = deriv_dir / participant / "eeg" / rp_subdir / f"{participant}_decision_resp_rp_singletrials-epo.fif"
+    print("checking", epo_path)
+
     if not epo_path.exists():
         raise FileNotFoundError(f"erp file not found for {participant}: {epo_path}")
+
     epochs = mne.read_epochs(epo_path.as_posix(), preload=True, verbose="ERROR")
+
+    print(participant, "metadata columns:", list(epochs.metadata.columns))
+
     missing_chans = [c for c in rp_channels if c not in epochs.ch_names]
     if missing_chans:
         raise ValueError(f"{participant}: missing rp channels {missing_chans}")
+
     rp_epochs = epochs.copy().pick(rp_channels).crop(tmin=rp_tmin, tmax=rp_tmax)
     data = rp_epochs.get_data()
     rp_raw = data.mean(axis=(1, 2))
+
     meta = epochs.metadata.copy() if epochs.metadata is not None else pd.DataFrame(index=np.arange(len(epochs)))
     meta = meta.reset_index(drop=True)
+
+    meta["rp_raw"] = rp_raw
+    if "sample" in meta.columns:
+        meta = meta.sort_values("sample").reset_index(drop=True)
+
     meta["participant"] = participant
     meta["trial_seq"] = np.arange(1, len(meta) + 1)
-    meta["rp_raw"] = rp_raw
 
     if "badtrial" not in meta.columns:
         meta["badtrial"] = [1 if len(x) > 0 else 0 for x in epochs.drop_log]
-
-    keep_cols = [c for c in ["participant", "trial_seq", "rp_raw", "badtrial"] if c in meta.columns]
-    meta = meta[keep_cols].copy()
 
     if keep_badtrial_rows:
         meta.loc[meta["badtrial"] == 1, "rp_raw"] = np.nan
@@ -119,7 +127,6 @@ def load_single_participant_rp(participant: str):
         meta = meta[meta["badtrial"] == 0].copy()
 
     return meta
-
 
 def build_rp_trial_table(participants: List[str]):
 
@@ -138,26 +145,33 @@ def build_rp_trial_table(participants: List[str]):
 
 def merge_behaviour_and_rp(behav_full: pd.DataFrame, rp_table: pd.DataFrame):
 
-    behav_dec = make_behaviour_trial_table(behav_full)
+    behav_full = behav_full.copy()
+    behav_full["row_id"] = np.arange(len(behav_full))
+
+    behav_dec = behav_full[behav_full["TaskName"] == "decision"].copy()
+    behav_dec = sort_behaviour_trials(behav_dec)
+    behav_dec["trial_seq"] = behav_dec.groupby("participant").cumcount() + 1
+
     merged_dec = behav_dec.merge(
         rp_table,
         on=["participant", "trial_seq"],
         how="left",
         validate="one_to_one",
     )
-    behav_full = behav_full.copy()
-    behav_full["row_id"] = np.arange(len(behav_full))
-    behav_dec["row_id"] = behav_dec.index
-    merged_subset = merged_dec[["row_id", "trial_seq", "rp_raw", "rp_z", "badtrial"]]
+
+    merged_subset = merged_dec[["row_id", "trial_seq", "rp_raw", "rp_z", "badtrial"]].copy()
+
     final = behav_full.merge(merged_subset, on="row_id", how="left")
     final = final.sort_values("row_id").drop(columns=["row_id"])
+
     diag = merged_dec.groupby("participant").agg(
         n_trials=("trial_seq", "size"),
         n_rp=("rp_raw", lambda x: x.notna().sum()),
     ).reset_index()
-    diag["merge_rate"] = diag["n_rp"] / diag["n_trials"]
-    return final, diag
 
+    diag["merge_rate"] = diag["n_rp"] / diag["n_trials"]
+
+    return final, diag
 
 # =========================
 # main
