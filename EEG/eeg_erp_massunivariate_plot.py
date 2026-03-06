@@ -40,7 +40,7 @@ layout = BIDSLayout(basepath)
 # Version + GLM version (keep version-sensitive structure)
 # version = 2 -> decision plotting (UNCHANGED)
 # version = 1 -> passive plotting (ADDED; mirrors decision plotting)
-version = 1
+version = 2
 glm_version = "z"  # noz / z / partz
 
 # ---------------------------------------------------------------------------------------------------
@@ -74,8 +74,12 @@ outpath_glm = opj(outpath, stats_subdir)
 
 # ---------------------------------------------------------------------------------------------------
 # plotting params
+
+regvars = ["painlevel", "moneylevel"]
+regvarsnames = ["Painlevel", "Moneylevel"]
+
 param = {
-    "alpha": 0.05,
+    "alpha": 0.05 / len(regvars),
     "titlefontsize": 12,
     "labelfontsize": 12,
     "ticksfontsize": 11,
