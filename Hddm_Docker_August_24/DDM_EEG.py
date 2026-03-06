@@ -2,7 +2,6 @@
 #
 # Pipeline for running hddm regression models for the PainReward task
 # Veronika Wendler
-# some inspiration comes from Python2 code from Jan Willem de Gee that I translated into Python3.
 #
 # TO DO: More models
 
@@ -240,6 +239,14 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         elif version == 16:
             a_reg = {'model': 'a ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
             reg_descr = [a_reg]
+        # here, we are trying a joint-model approach    
+        elif version == 17:
+            v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + rp + painlevel * rp + moneylevel * rp', 'link_func': lambda x: x}
+            reg_descr = [v_reg]
+        elif version == 18:
+            a_reg = {'model': 'a ~ 1 + painlevel + moneylevel + rp + painlevel * rp + moneylevel * rp', 'link_func': lambda x: x}
+            reg_descr = [a_reg]
+
         # elif version == 11:
         # elif version == 11:
         #     v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
@@ -254,7 +261,7 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         m = hddm.models.HDDMRegressor(data, 
                                     reg_descr,
                                     p_outlier=.05, 
-                                    include=['a', 't', 'v', 'z'],   #'z'
+                                    include=['a', 't', 'v'],   #'z'
                                     depends_on=depends_on,
                                     group_only_regressors=False,
                                     keep_regressor_trace=True
