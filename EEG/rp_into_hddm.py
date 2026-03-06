@@ -27,15 +27,13 @@ deriv_dir = Path(
     "/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives"
 ).resolve()
 
-behav_file = Path(os.getenv(
-    "behav_file",
-    (project_dir / "Hddm_Docker_August_24" / "data_sets" / "behavioural_sv_cleaned_final_3.csv").as_posix(),
-)).resolve()
+behav_file = Path(
+    "/rds/homes/v/vaw508/projects/PainReward/Hddm_Docker_August_24/data_sets/behavioural_sv_cleaned_final_3.csv"
+).resolve()
 
-out_dir = Path(os.getenv(
-    "out_dir",
-    (project_dir / "Hddm_Docker_August_24" / "data_sets").as_posix(),
-)).resolve()
+out_dir = Path(
+    "/rds/homes/v/vaw508/projects/PainReward/Hddm_Docker_August_24/data_sets"
+).resolve()
 out_dir.mkdir(parents=True, exist_ok=True)
 
 # response-locked rp epochs directory
