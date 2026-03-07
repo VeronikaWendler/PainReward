@@ -29,7 +29,7 @@ layout = BIDSLayout(basepath)
 # -----------------------
 # CONFIG
 # -----------------------
-version = 5              # 1=v, 2=a
+version = 3             # 1=v, 2=a
 stats_subdir = "Zscoring"   
 
 if version == 1:
@@ -86,8 +86,18 @@ group_df = pd.read_csv(group_csv)
 electrode_sets = sorted(subj_df["set"].unique())
 
 
+# some helpers
 def bin_label(tmin, tmax):
     return f"{tmin:.2f}–{tmax:.2f}s"
+
+def style_axes(ax):
+    """Minimal, cleaner axes: keep only left/bottom spines."""
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(1)
+    ax.spines["bottom"].set_linewidth(1)
+    ax.tick_params(axis="both", labelsize=10)
+
 
 subj_df["bin_label"]  = subj_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
 group_df["bin_label"] = group_df.apply(lambda r: bin_label(r.bin_tmin, r.bin_tmax), axis=1)
@@ -116,13 +126,16 @@ for set_name in electrode_sets:
     ax.set_xlabel("Time from response (ms)")
     ax.set_ylabel("Amplitude (µV)")
     ax.set_title(f"{out_prefix.upper()} RP waveform: {set_name}")
+    style_axes(ax)
     fig.tight_layout()
     fig.savefig(outfigpath / f"{out_prefix}_{set_name}__rp_grand_average.svg", dpi=600, bbox_inches="tight")
     plt.close(fig)
 
+
 # -------------------------
-# Group betas (bars per bin) + p + FDR + stars
+# Group betas (bars per bin) + p + FDR 
 # -------------------------
+
 has_fdr = "p_fdr_bh" in group_df.columns
 
 for set_name in electrode_sets:
@@ -149,67 +162,64 @@ for set_name in electrode_sets:
         pvals = sdf["p"].to_numpy(float)
         pfdr  = sdf["p_fdr_bh"].to_numpy(float) if has_fdr else np.full_like(pvals, np.nan)
 
-        # compute SE(beta) from beta/t 
+        # compute SE(beta) from beta/t
         se = np.full_like(betas, np.nan)
         ok = np.isfinite(betas) & np.isfinite(tvals) & (np.abs(tvals) > 1e-12)
         se[ok] = np.abs(betas[ok] / tvals[ok])
 
-        fig, ax = plt.subplots(figsize=(6.6, 3.6))
+        # Make single-bar plots narrower and less "bloated"
+        n_bars = len(x)
+        if n_bars == 1:
+            fig, ax = plt.subplots(figsize=(3.0, 3.6))
+            bar_width = 0.38
+        elif n_bars == 2:
+            fig, ax = plt.subplots(figsize=(4.2, 3.6))
+            bar_width = 0.45
+        else:
+            fig, ax = plt.subplots(figsize=(5.2, 3.6))
+            bar_width = 0.5
 
         ax.bar(
-            x, betas, width=0.6,
-            yerr=se, capsize=4, ecolor="black"
+            x, betas,
+            width=bar_width,
+            yerr=se,
+            capsize=3,
+            ecolor="black",
+            linewidth=0
         )
 
-        ax.axhline(0, linestyle="--", color="gray")
+        ax.axhline(0, linestyle="--", color="gray", linewidth=1)
+
         ax.set_xticks(x)
         ax.set_xticklabels(bins_sorted["bin_label"].to_list())
-        ax.set_ylabel("β (standardized)")
-        ax.set_title(f"{out_prefix.upper()} RP_mean_uV ~ {predictor}\n{set_name} (joint + RT)")
+        ax.set_ylabel("beta")
+        ax.set_title(f"{out_prefix.upper()} RP_mean_uV ~ {predictor}\n{set_name} (joint + RT)", fontsize=12)
 
-        # annotate and star based on FDR 
-        #for i in range(len(betas)):
-        #    if not np.isfinite(betas[i]):
-        #        continue
+        # Add some empty horizontal space so a single bar does not fill the axis
+        ax.set_xlim(-0.5, n_bars - 0.5)
 
-        #    if has_fdr and np.isfinite(pfdr[i]):
-        #        txt = f"p={pvals[i]:.3f}\nFDR={pfdr[i]:.3f}"
-        #        sig = pfdr[i] < 0.05
-        #    else:
-        #        txt = f"p={pvals[i]:.3f}"
-        #        sig = np.isfinite(pvals[i]) and (pvals[i] < 0.05)
-
-        #    y_text = betas[i]
-        #    if np.isfinite(se[i]):
-        #        y_text = betas[i] + np.sign(betas[i]) * (se[i] + 0.05)
-        #    ax.text(x[i], y_text, txt, ha="center", va="bottom", fontsize=8)
-
-        #    if sig:
-        #        ax.text(x[i], y_text, "*", ha="center", va="bottom", fontsize=16)
-
-
-        ##
+        # Cleaner annotation box: only p and FDR
         lines = []
-        for i, bl in enumerate(bins_sorted["bin_label"].to_list()):
+        for i in range(len(betas)):
             if not np.isfinite(pvals[i]):
                 continue
             if has_fdr and np.isfinite(pfdr[i]):
-                lines.append(f"{bl}: p={pvals[i]:.3f}, FDR={pfdr[i]:.3f}")
+                lines.append(f"p={pvals[i]:.3f}, FDR={pfdr[i]:.3f}")
             else:
-                lines.append(f"{bl}: p={pvals[i]:.3f}")
+                lines.append(f"p={pvals[i]:.3f}")
 
-        # Add the box inside the axes
-        box = AnchoredText(
-            "\n".join(lines),
-            loc="upper left",          # change to "upper right" if you prefer
-            prop=dict(size=8),
-            frameon=True,
-            borderpad=0.6,
-        )
-        box.patch.set_alpha(0.9)
-        ax.add_artist(box)
+        if lines:
+            box = AnchoredText(
+                "\n".join(lines),
+                loc="upper left",
+                prop=dict(size=9),
+                frameon=True,
+                borderpad=0.4,
+            )
+            box.patch.set_alpha(0.9)
+            ax.add_artist(box)
 
-        # Stars only (no p text on bars)
+        # Stars only
         for i in range(len(betas)):
             if not np.isfinite(betas[i]):
                 continue
@@ -224,17 +234,18 @@ for set_name in electrode_sets:
 
             y_star = betas[i]
             if np.isfinite(se[i]):
-                y_star = betas[i] + np.sign(betas[i]) * (se[i] + 0.05)
+                y_star = betas[i] + se[i] + 0.03
 
-            ax.text(x[i], y_star, "*", ha="center", va="bottom", fontsize=16)
+            ax.text(x[i], y_star, "*", ha="center", va="bottom", fontsize=15)
 
+        style_axes(ax)
         fig.tight_layout()
-        fig.savefig(outfigpath / f"{out_prefix}_{set_name}__betas_{predictor}.svg",
-                    dpi=600, bbox_inches="tight")
+        fig.savefig(
+            outfigpath / f"{out_prefix}_{set_name}__betas_{predictor}.svg",
+            dpi=600,
+            bbox_inches="tight"
+        )
         plt.close(fig)
-
-
-
         
 
 # -------------------------
@@ -336,8 +347,8 @@ for set_name in electrode_sets:
             ax.set_title(
                 f"{out_prefix.upper()} added-variable plot (joint+RT)\n"
                 f"{set_name} {bin_label(tmin,tmax)}  slope={slope:.2f}, p={p_reg:.3f}"
-            )
-
+                )
+            style_axes(ax)
             fig.tight_layout()
             fig.savefig(
                 outfigpath / f"{out_prefix}_{set_name}__partial_{target_pred}__{tmin:.2f}_{tmax:.2f}.svg",
