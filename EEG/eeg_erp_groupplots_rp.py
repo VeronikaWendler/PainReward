@@ -218,25 +218,6 @@ for set_name in electrode_sets:
             )
             ax.add_artist(box)
 
-        # Stars 
-        for i in range(len(betas)):
-            if not np.isfinite(betas[i]):
-                continue
-
-            if has_fdr and np.isfinite(pfdr[i]):
-                sig = pfdr[i] < 0.05
-            else:
-                sig = np.isfinite(pvals[i]) and (pvals[i] < 0.05)
-
-            if not sig:
-                continue
-
-            y_star = betas[i]
-            if np.isfinite(se[i]):
-                y_star = betas[i] + se[i] + 0.03
-
-            ax.text(x[i], y_star, "*", ha="center", va="bottom", fontsize=15)
-
         # Stars
         for i in range(len(betas)):
             if not np.isfinite(betas[i]):
@@ -266,6 +247,32 @@ for set_name in electrode_sets:
                 va = "top"
 
             ax.text(x[i], y_star, "*", ha="center", va=va, fontsize=16)
+
+
+        # vertical padding so stars and error bars do not crowd the axes
+        y_candidates = []
+        
+        for i in range(len(betas)):
+            if not np.isfinite(betas[i]):
+                continue
+            y_candidates.append(betas[i])
+            
+            if np.isfinite(se[i]):
+                y_candidates.append(betas[i] + se[i])
+                y_candidates.append(betas[i] - se[i])
+
+        if len(y_candidates) > 0:
+            y_min = min(y_candidates)
+            y_max = max(y_candidates)
+            y_range = y_max - y_min
+
+            if y_range == 0:
+                y_range = 0.2
+
+            pad_top = 0.18 * y_range
+            pad_bottom = 0.22 * y_range  
+
+            ax.set_ylim(y_min - pad_bottom, y_max + pad_top)
 
         style_axes(ax)
         fig.tight_layout()
