@@ -83,7 +83,7 @@ parallel        = True      # parallel #
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
     "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8","mod_9", "mod_10",
-                  "mod_11", "mod_12", "mod_13", "mod_14", "mod_15", "mod_16", "mod_17", "mod_18"]     
+                  "mod_11", "mod_12", "mod_13", "mod_14", "mod_15", "mod_16", "mod_17", "mod_18", "mod_19", "mod_20"]     
 }
 
 PHASE_TO_SOURCE = {
@@ -97,7 +97,7 @@ RUN_ALL_MODELS  = True                                           # False = just 
 
 # selectivity
 start_phase = "dec"
-start_version = 17
+start_version = 19
 started = False
 
 # dir
@@ -249,6 +249,14 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         elif version == 18:
             a_reg = {'model': 'a ~ 1 + pain_z + money_z + rp_z + pain_z * rp_z + money_z * rp_z', 'link_func': lambda x: x}
             reg_descr = [a_reg]
+        elif version == 19:
+            v_reg = {'model': 'v ~ 1 + pain_z + money_z', 'link_func': lambda x: x}
+            a_reg = {'model': 'a ~ 1 + pain_z + money_z', 'link_func': lambda x: x}
+            reg_descr = [v_reg, a_reg]
+        elif version == 20:
+            v_reg = {'model': 'v ~ 1 + pain_z + money_z + rp_z + pain_z * rp_z + money_z * rp_z', 'link_func': lambda x: x}
+            a_reg = {'model': 'a ~ 1 + pain_z + money_z + rp_z + pain_z * rp_z + money_z * rp_z', 'link_func': lambda x: x}
+            reg_descr = [v_reg, a_reg]
 
         # elif version == 11:
         # elif version == 11:
