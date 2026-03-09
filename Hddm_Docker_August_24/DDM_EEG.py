@@ -228,12 +228,14 @@ def run_model(trace_id, data, model_dir, model_name, version, phase, samples=120
         elif version == 12:
             v_reg = {'model': 'v ~ 1 + painlevel + moneylevel + painlevel * moneylevel', 'link_func': lambda x: x}
             reg_descr = [v_reg]
+            # did not run 13,14
         elif version == 13:
             v_reg = {'model': 'v ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
             reg_descr = [v_reg]
         elif version == 14:
             a_reg = {'model': 'a ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
             reg_descr = [a_reg]
+            # include sv
         elif version == 15:
             v_reg = {'model': 'v ~ 1 + painlevel + moneylevel', 'link_func': lambda x: x}
             reg_descr = [v_reg]

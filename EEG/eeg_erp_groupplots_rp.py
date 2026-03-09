@@ -29,7 +29,7 @@ layout = BIDSLayout(basepath)
 # -----------------------
 # CONFIG
 # -----------------------
-version = 3            # 1=v, 2=a
+version = 4            # 1=v, 2=a
 stats_subdir = "Zscoring"   
 
 if version == 1:
