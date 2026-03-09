@@ -29,7 +29,7 @@ layout = BIDSLayout(basepath)
 # -----------------------
 # CONFIG
 # -----------------------
-version = 4             # 1=v, 2=a
+version = 3            # 1=v, 2=a
 stats_subdir = "Zscoring"   
 
 if version == 1:
@@ -162,10 +162,9 @@ for set_name in electrode_sets:
         pvals = sdf["p"].to_numpy(float)
         pfdr  = sdf["p_fdr_bh"].to_numpy(float) if has_fdr else np.full_like(pvals, np.nan)
 
-        # compute SE(beta) from beta/t
-        se = np.full_like(betas, np.nan)
-        ok = np.isfinite(betas) & np.isfinite(tvals) & (np.abs(tvals) > 1e-12)
-        se[ok] = np.abs(betas[ok] / tvals[ok])
+        se = sdf["se"].to_numpy(float) if "se" in sdf.columns else np.full_like(betas, np.nan)
+        ci_low = sdf["ci_low"].to_numpy(float) if "ci_low" in sdf.columns else np.full_like(betas, np.nan)
+        ci_high = sdf["ci_high"].to_numpy(float) if "ci_high" in sdf.columns else np.full_like(betas, np.nan)
 
         # Make single-bar plots narrower and less "bloated"
         n_bars = len(x)
