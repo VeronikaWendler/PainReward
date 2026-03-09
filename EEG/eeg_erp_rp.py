@@ -550,13 +550,6 @@ if version in [1, 2, 3, 4, 5]:
             y = sdf["rp_mean_uV"].to_numpy(dtype=float)
             rt_cov = sdf["rt_subj"].to_numpy(dtype=float)
 
-            jt1, jp1, jb1, jt2, jp2, jb2, nj = group_regress_joint2_with_cov(
-                y=y,
-                x1=sdf[pred1_col].to_numpy(dtype=float),
-                x2=sdf[pred2_col].to_numpy(dtype=float),
-                cov=rt_cov
-            )
-
             jt1, jp1, jb1, jse1, jcil1, jcih1, jt2, jp2, jb2, jse2, jcil2, jcih2, nj = group_regress_joint2_with_cov(
                 y=y,
                 x1=sdf[pred1_col].to_numpy(dtype=float),
