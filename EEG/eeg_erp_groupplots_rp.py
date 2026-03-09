@@ -210,7 +210,7 @@ for set_name in electrode_sets:
 
         if lines:
             ax.text(
-                1.02, 1.00,
+                1.1, 1.1,
                 "\n\n".join(lines),
                 transform=ax.transAxes,
                 ha="right",
