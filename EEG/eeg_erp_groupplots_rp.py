@@ -207,19 +207,17 @@ for set_name in electrode_sets:
                 lines.append(f"p = {pvals[i]:.3f}")
 
 
+
         if lines:
-            box = AnchoredText(
+            ax.text(
+                0.98, 0.98,
                 "\n\n".join(lines),
-                loc="upper right",
-                prop=dict(size=9),
-                frameon=False,
-                borderpad=0.2,
-                pad=0.2,
-                bbox_to_anchor=(1.0, 1.0),
-                bbox_transform=ax.transAxes
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+                fontsize=8,
             )
-            ax.add_artist(box)
-            
+
         # Stars
         for i in range(len(betas)):
             if not np.isfinite(betas[i]):
