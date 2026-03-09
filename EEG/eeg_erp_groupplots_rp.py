@@ -202,15 +202,15 @@ for set_name in electrode_sets:
             if not np.isfinite(pvals[i]):
                 continue
             if has_fdr and np.isfinite(pfdr[i]):
-                lines.append(f"p = {pvals[i]:.3f}\nFDR = {pfdr[i]:.3f}")
+                lines.append(f"p = {pvals[i]:.2f}\nFDR = {pfdr[i]:.2f}")
             else:
-                lines.append(f"p = {pvals[i]:.3f}")
+                lines.append(f"p = {pvals[i]:.2f}")
 
 
 
         if lines:
             ax.text(
-                1.1, 1.1,
+                1.1, 0.98,
                 "\n\n".join(lines),
                 transform=ax.transAxes,
                 ha="right",
