@@ -210,7 +210,7 @@ for set_name in electrode_sets:
         if lines:
             box = AnchoredText(
                 "\n\n".join(lines),
-                loc="upper left",
+                loc="upper right",
                 prop=dict(size=9),
                 frameon=False,
                 borderpad=0.25,
