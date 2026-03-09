@@ -194,31 +194,31 @@ for set_name in electrode_sets:
         ax.set_ylabel("beta")
         ax.set_title(f"{out_prefix.upper()} RP_mean_uV ~ {predictor}\n{set_name} (joint + RT)", fontsize=12)
 
-        # Add some empty horizontal space so a single bar does not fill the axis
+        # single bar does not fill axis
         ax.set_xlim(-0.5, n_bars - 0.5)
 
-        # Cleaner annotation box: only p and FDR
         lines = []
         for i in range(len(betas)):
             if not np.isfinite(pvals[i]):
                 continue
             if has_fdr and np.isfinite(pfdr[i]):
-                lines.append(f"p={pvals[i]:.3f}, FDR={pfdr[i]:.3f}")
+                lines.append(f"p = {pvals[i]:.3f}\nFDR = {pfdr[i]:.3f}")
             else:
-                lines.append(f"p={pvals[i]:.3f}")
+                lines.append(f"p = {pvals[i]:.3f}")
+
 
         if lines:
             box = AnchoredText(
-                "\n".join(lines),
+                "\n\n".join(lines),
                 loc="upper left",
                 prop=dict(size=9),
-                frameon=True,
-                borderpad=0.4,
+                frameon=False,
+                borderpad=0.25,
+                pad=0.2,
             )
-            box.patch.set_alpha(0.9)
             ax.add_artist(box)
 
-        # Stars only
+        # Stars 
         for i in range(len(betas)):
             if not np.isfinite(betas[i]):
                 continue
@@ -236,6 +236,36 @@ for set_name in electrode_sets:
                 y_star = betas[i] + se[i] + 0.03
 
             ax.text(x[i], y_star, "*", ha="center", va="bottom", fontsize=15)
+
+        # Stars
+        for i in range(len(betas)):
+            if not np.isfinite(betas[i]):
+                continue
+
+            if has_fdr and np.isfinite(pfdr[i]):
+                sig = pfdr[i] < 0.05
+            else:
+                sig = np.isfinite(pvals[i]) and (pvals[i] < 0.05)
+            
+            if not sig:
+                continue
+
+            pad = 0.04
+
+            if betas[i] >= 0:
+                if np.isfinite(se[i]):
+                    y_star = betas[i] + se[i] + pad
+                else:
+                    y_star = betas[i] + pad
+                va = "bottom"
+            else:
+                if np.isfinite(se[i]):
+                    y_star = betas[i] - se[i] - pad
+                else:
+                    y_star = betas[i] - pad
+                va = "top"
+
+            ax.text(x[i], y_star, "*", ha="center", va=va, fontsize=16)
 
         style_axes(ax)
         fig.tight_layout()
