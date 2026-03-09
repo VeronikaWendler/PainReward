@@ -108,7 +108,7 @@ parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
     "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10","mod_11",
-                 "mod_12","mod_13","mod_14","mod_15","mod_16","mod_17","mod_18",]     
+                 "mod_12","mod_13","mod_14","mod_15","mod_16","mod_17","mod_18"]     
 }
 
 # debugging tip: python starts at 0, unlike Matlab
