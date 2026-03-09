@@ -87,8 +87,9 @@ electrode_sets = sorted(subj_df["set"].unique())
 
 
 # some helpers
+
 def bin_label(tmin, tmax):
-    return f"{tmin:.2f}–{tmax:.2f}s"
+    return f"{tmin:.2f}–{tmax:.2f}s before response"
 
 def style_axes(ax):
     """Minimal, cleaner axes: keep only left/bottom spines."""
@@ -189,7 +190,7 @@ for set_name in electrode_sets:
 
         ax.axhline(0, linestyle="--", color="gray", linewidth=1)
 
-        ax.set_xticks(f"{x} before response")
+        ax.set_xticks(x)
         ax.set_xticklabels(bins_sorted["bin_label"].to_list())
         ax.set_ylabel("beta coefficient")
         ax.set_title(f"{out_prefix.upper()} RP_mean_uV ~ {predictor}\n{set_name} (joint + RT)", fontsize=12)
