@@ -189,9 +189,9 @@ for set_name in electrode_sets:
 
         ax.axhline(0, linestyle="--", color="gray", linewidth=1)
 
-        ax.set_xticks(x)
+        ax.set_xticks(f"{x} before response")
         ax.set_xticklabels(bins_sorted["bin_label"].to_list())
-        ax.set_ylabel("beta")
+        ax.set_ylabel("beta coefficient")
         ax.set_title(f"{out_prefix.upper()} RP_mean_uV ~ {predictor}\n{set_name} (joint + RT)", fontsize=12)
 
         # single bar does not fill axis
