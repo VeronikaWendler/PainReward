@@ -213,11 +213,13 @@ for set_name in electrode_sets:
                 loc="upper right",
                 prop=dict(size=9),
                 frameon=False,
-                borderpad=0.25,
+                borderpad=0.2,
                 pad=0.2,
+                bbox_to_anchor=(1.0, 1.0),
+                bbox_transform=ax.transAxes
             )
             ax.add_artist(box)
-
+            
         # Stars
         for i in range(len(betas)):
             if not np.isfinite(betas[i]):
