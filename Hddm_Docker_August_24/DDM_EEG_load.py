@@ -69,7 +69,7 @@ numba.config.CACHE_ENABLE = False
 # V_sub = value of the worse option
 
 # params:
-version = 11    # defining version #
+version = 17    # defining version #
 run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
@@ -107,10 +107,11 @@ nr_samples      = 6000      # samples per chain - do 6000 (+1000 for burn-in) bu
 parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
-    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10","mod_11"]     
+    "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10","mod_11",
+                 "mod_12","mod_13","mod_14","mod_15","mod_16","mod_17","mod_18",]     
 }
 
-# debugging, tip, python starts at 0, unlike Matlab
+# debugging tip: python starts at 0, unlike Matlab
 # 
 
 if phase not in model_versions:
@@ -126,8 +127,12 @@ model_name = model_versions[phase][version]
 #data_path1 = os.path.join(current_directory, 'data_sets/data_sets_Garcia', 'GarciaParticipants_Eye_Response_Feed_Allfix_addm_OV_Abs_CCT.csv')
 #data = pd.read_csv(data_path1, sep=',')
 
-data = pd.read_csv((PROJECT_DIR / "Hddm_Docker_August_24" / "data_sets" / "behavioural_sv_cleaned_final_3.csv").as_posix(), sep=",")
+#data = pd.read_csv((PROJECT_DIR / "Hddm_Docker_August_24" / "data_sets" / "behavioural_sv_cleaned_final_3.csv").as_posix(), sep=",")
+# for data with trial-by-trial RP:
+data = pd.read_csv("/rds/homes/v/vaw508/projects/PainReward/Hddm_Docker_August_24/data_sets/behavioural_sv_cleaned_final_3_with_rp.csv", sep=",") 
+
 source_phase = PHASE_TO_SOURCE.get(phase, phase)  
+
 
 if phase == "dec":
     data = data[data["TaskName"].isin(["decision"])].copy()
@@ -149,6 +154,27 @@ data                = data[data["rt"] > 0.250]
 data["response"]    = pd.to_numeric(data["response"], errors="coerce")
 
 data["subj_idx"]    = data["subj_idx"]
+data = data[data["badtrial"] == 0]
+
+for s in data['subj_idx'].unique():
+    mask = data['subj_idx'] == s
+    pain_sd = data.loc[mask, 'painlevel'].std()
+    money_sd = data.loc[mask, 'moneylevel'].std()
+
+    if pd.notna(pain_sd) and pain_sd > 0:
+        data.loc[mask, 'pain_z'] = (
+            data.loc[mask, 'painlevel'] - data.loc[mask, 'painlevel'].mean()
+        ) / pain_sd
+    else:
+        data.loc[mask, 'pain_z'] = np.nan
+
+    if pd.notna(money_sd) and money_sd > 0:
+        data.loc[mask, 'money_z'] = (
+            data.loc[mask, 'moneylevel'] - data.loc[mask, 'moneylevel'].mean()
+        ) / money_sd
+    else:
+        data.loc[mask, 'money_z'] = np.nan
+
 subjects = np.unique(data.subj_idx)
 nr_subjects = subjects.shape[0]
 print(nr_subjects)
@@ -158,7 +184,7 @@ exclude_part = {}   # there's a nr of reasons as to why to exclude these ones (e
 #data = data[data['phase'] == phase]
 
 data = data[~data['subj_idx'].isin(exclude_part)]    
-data.dropna(subset=['rt', "painlevel", "moneylevel", "accepted", 'acceptance_pair', 'sv_pain_para'], inplace = True)    #'STA_SAI_Score','STA_TAI_Score','PCS_Score'
+data.dropna(subset=['rt', "painlevel", "moneylevel","pain_z", "money_z", "rp_z", "accepted", 'acceptance_pair'], inplace = True)    #'STA_SAI_Score','STA_TAI_Score','PCS_Score'
 
 
 # debugging information
@@ -718,8 +744,86 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                       'ndt_painlevel',
                       'ndt_moneylevel'
                       ]
+        # include 'sv' - variation in drift
+        elif version == 15:
+            params_of_interest = ['a',
+                                  't',
+                                  'sv', 
+                                  'v_Intercept',
+                                  'v_painlevel',
+                                  'v_moneylevel'
+                                  ]
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Threshold',
+                      'Drift Rate', 
+                      'Drift variability',
+                      'v_Intercept',
+                      'v_painlevel',
+                      'v_moneylevel'
+                      ]
+        elif version == 16:
+            params_of_interest = ['v',
+                                  't',
+                                  'sv', 
+                                  'a_Intercept',
+                                  'a_painlevel',
+                                  'a_moneylevel'
+                                  ]
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Drift Rate',
+                      'Non-dec. time', 
+                      'Drift variability',
+                      'a_Intercept',
+                      'a_painlevel',
+                      'a_moneylevel'
+                      ]
+        # these are the RP-models
+        elif version == 17:
+            params_of_interest = ['t',
+                                  'a', 
+                                  'v_Intercept',
+                                  'v_pain_z',
+                                  'v_money_z',
+                                  'v_rp_z',
+                                  'v_pain_z:rp_z',
+                                  'v_money_z:rp_z'
+                                  ]
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = [
+                      'Non-dec. time', 
+                      'Threshold',
+                      'v_Intercept',
+                      'v_pain_z',
+                      'v_money_z',
+                      'v_rp_z',
+                      'v_pain_z:rp_z',
+                      'v_money_z:rp_z'
+                      ]
+                
+        elif version == 18:
+            params_of_interest = ['v',
+                                  't', 
+                                  'a_Intercept',
+                                  'a_pain_z',
+                                  'a_money_z',
+                                  'a_rp_z',
+                                  'a_pain_z:rp_z',
+                                  'a_money_z:rp_z'
+                                  ]
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Drift Rate',
+                      'Non-dec. time', 
+                      'a_Intercept',
+                      'a_pain_z',
+                      'a_money_z',
+                      'a_rp_z',
+                      'a_pain_z:rp_z',
+                      'a_money_z:rp_z'
+                      ]
         else:
             raise ValueError(f"Invalid version {version}")
+
+
         
     elif phase == "LE_RL":
         if version == 0:
@@ -1141,6 +1245,9 @@ def z_sv_pain_para_contributions(models, data):
 
     return data_with_z_sv_pain_para
 
+
+
+
 # # for mod 9 (old)
 # def v_pain_money_interaction_contributions(models, data):
 
@@ -1391,6 +1498,139 @@ def t_pain_money_interaction_contributions(models, data):
 
     return data_out
 
+
+# new rp models
+def v_pain_money_rp_contributions(models, data):
+
+    combined = kabuki.utils.concat_models(models)
+    data_out = data.copy()
+
+    # allocate space
+    cols = [
+        "v_intercept_subj", 
+        "v_pain_z_subj", 
+        "v_money_z_subj",
+        "v_rp_z_subj",
+        "v_pain_z:rp_z_subj",
+        "v_money_z:rp_z_subj",
+        "v_intercept_contrib",
+        "v_pain_z_contrib",
+        "v_money_z_contrib",
+        "v_rp_z_contrib",
+        "v_pain_z:rp_z_contrib",
+        "v_money_z:rp_z_contrib",
+        "v_full_trial"
+    ]
+    for c in cols:
+        data_out[c] = np.nan
+
+    for subj in data['subj_idx'].unique():
+        subj_mask = data_out['subj_idx'] == subj
+        subj_data = data_out.loc[subj_mask]
+
+        # Subject-specific posterior means
+        b0 = combined.nodes_db.loc[f"v_Intercept_subj.{subj}", "node"].trace().mean()
+        b1 = combined.nodes_db.loc[f"v_pain_z_subj.{subj}", "node"].trace().mean()
+        b2 = combined.nodes_db.loc[f"v_money_z_subj.{subj}", "node"].trace().mean()
+        b3 = combined.nodes_db.loc[f"v_rp_z_subj.{subj}", "node"].trace().mean()
+        b4 = combined.nodes_db.loc[f"v_pain_z:rp_z_subj.{subj}", "node"].trace().mean()
+        b5 = combined.nodes_db.loc[f"v_money_z:rp_z_subj.{subj}", "node"].trace().mean()
+
+        # stable subject-level params
+        data_out.loc[subj_mask, "v_intercept_subj"] = b0
+        data_out.loc[subj_mask, "v_pain_z_subj"] = b1
+        data_out.loc[subj_mask, "v_money_z_subj"] = b2
+        data_out.loc[subj_mask, "v_rp_z_subj"] = b3
+        data_out.loc[subj_mask, "v_pain_z:rp_z_subj"] = b4
+        data_out.loc[subj_mask, "v_money_z:rp_z_subj"] = b5
+
+        # trial level contributions
+        data_out.loc[subj_mask, "v_intercept_contrib"] = b0
+        data_out.loc[subj_mask, "v_pain_z_contrib"] = b1 * subj_data["pain_z"]
+        data_out.loc[subj_mask, "v_money_z_contrib"] = b2 * subj_data["money_z"]
+        data_out.loc[subj_mask, "v_rp_z_contrib"] = b3 * subj_data["rp_z"]
+        data_out.loc[subj_mask, "v_pain_z:rp_z_contrib"] = b4 * (subj_data["pain_z"] * subj_data["rp_z"])
+        data_out.loc[subj_mask, "v_money_z:rp_z_contrib"] = b5 * (subj_data["money_z"] * subj_data["rp_z"])
+
+        # full drift per trial
+        data_out.loc[subj_mask, "v_full_trial"] = (
+            data_out.loc[subj_mask, "v_intercept_contrib"]
+            + data_out.loc[subj_mask, "v_pain_z_contrib"]
+            + data_out.loc[subj_mask, "v_money_z_contrib"]
+            + data_out.loc[subj_mask, "v_rp_z_contrib"]
+            + data_out.loc[subj_mask, "v_pain_z:rp_z_contrib"] 
+            + data_out.loc[subj_mask, "v_money_z:rp_z_contrib"]
+        )
+
+    return data_out
+
+def a_pain_money_rp_contributions(models, data):
+
+    combined = kabuki.utils.concat_models(models)
+    data_out = data.copy()
+
+    # allocate space
+    cols = [
+        "a_intercept_subj", 
+        "a_pain_z_subj", 
+        "a_money_z_subj",
+        "a_rp_z_subj",
+        "a_pain_z:rp_z_subj",
+        "a_money_z:rp_z_subj",
+        "a_intercept_contrib",
+        "a_pain_z_contrib",
+        "a_money_z_contrib",
+        "a_rp_z_contrib",
+        "a_pain_z:rp_z_contrib",
+        "a_money_z:rp_z_contrib",
+        "a_full_trial"
+    ]
+    for c in cols:
+        data_out[c] = np.nan
+
+    for subj in data['subj_idx'].unique():
+        subj_mask = data_out['subj_idx'] == subj
+        subj_data = data_out.loc[subj_mask]
+
+        # Subject-specific posterior means
+        b0 = combined.nodes_db.loc[f"a_Intercept_subj.{subj}", "node"].trace().mean()
+        b1 = combined.nodes_db.loc[f"a_pain_z_subj.{subj}", "node"].trace().mean()
+        b2 = combined.nodes_db.loc[f"a_money_z_subj.{subj}", "node"].trace().mean()
+        b3 = combined.nodes_db.loc[f"a_rp_z_subj.{subj}", "node"].trace().mean()
+        b4 = combined.nodes_db.loc[f"a_pain_z:rp_z_subj.{subj}", "node"].trace().mean()
+        b5 = combined.nodes_db.loc[f"a_money_z:rp_z_subj.{subj}", "node"].trace().mean()
+
+        # stable subject-level params
+        data_out.loc[subj_mask, "a_intercept_subj"] = b0
+        data_out.loc[subj_mask, "a_pain_z_subj"] = b1
+        data_out.loc[subj_mask, "a_money_z_subj"] = b2
+        data_out.loc[subj_mask, "a_rp_z_subj"] = b3
+        data_out.loc[subj_mask, "a_pain_z:rp_z_subj"] = b4
+        data_out.loc[subj_mask, "a_money_z:rp_z_subj"] = b5
+
+        # trial level contributions
+        data_out.loc[subj_mask, "a_intercept_contrib"] = b0
+        data_out.loc[subj_mask, "a_pain_z_contrib"] = b1 * subj_data["pain_z"]
+        data_out.loc[subj_mask, "a_money_z_contrib"] = b2 * subj_data["money_z"]
+        data_out.loc[subj_mask, "a_rp_z_contrib"] = b3 * subj_data["rp_z"]
+        data_out.loc[subj_mask, "a_pain_z:rp_z_contrib"] = b4 * (subj_data["pain_z"] * subj_data["rp_z"])
+        data_out.loc[subj_mask, "a_money_z:rp_z_contrib"] = b5 * (subj_data["money_z"] * subj_data["rp_z"])
+
+        # full drift per trial
+        data_out.loc[subj_mask, "a_full_trial"] = (
+            data_out.loc[subj_mask, "a_intercept_contrib"]
+            + data_out.loc[subj_mask, "a_pain_z_contrib"]
+            + data_out.loc[subj_mask, "a_money_z_contrib"]
+            + data_out.loc[subj_mask, "a_rp_z_contrib"]
+            + data_out.loc[subj_mask, "a_pain_z:rp_z_contrib"] 
+            + data_out.loc[subj_mask, "a_money_z:rp_z_contrib"]
+        )
+
+    return data_out
+
+
+
+
 # # for model NR2
 # def full_sv_pain_para_contributions(models, data):
 #     data_full_sv_pain_para = data.copy()
@@ -1612,6 +1852,12 @@ else:
         elif version == 11:
             sv_contribute = t_pain_money_interaction_contributions(models, data)
             sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 't_pain_money.csv' ))
+        elif version == 17:
+            sv_contribute = v_pain_money_rp_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'v_pain_money_rp.csv' ))
+        elif version == 18:
+            sv_contribute = a_pain_money_rp_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'a_pain_money_rp.csv' ))
         else:
             print('None')
             
