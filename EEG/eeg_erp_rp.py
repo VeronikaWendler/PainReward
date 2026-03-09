@@ -62,7 +62,7 @@ if not os.path.exists(outpath):
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
 # ---- versions ----
 
-version = 5
+version = 3
 v1_mode = "joint"
 v2_mode = "joint"
 v3_mode = "joint"
@@ -223,8 +223,10 @@ def ols_with_t(X, y):
     y = y[keep]
     n, p = X.shape
     df = n - p
+
     if df <= 0 or n <= p + 1:
-        return (np.full(p, np.nan), np.full(p, np.nan), np.full(p, np.nan), df)
+        nan_arr = np.full(p, np.nan)
+        return nan_arr, nan_arr, nan_arr, nan_arr, nan_arr, nan_arr, df
 
     beta, *_ = np.linalg.lstsq(X, y, rcond=None)
     resid = y - X @ beta
@@ -233,7 +235,13 @@ def ols_with_t(X, y):
     se = np.sqrt(np.diag(XtX_inv) * s2)
     tvals = beta / se
     pvals = 2 * stats.t.sf(np.abs(tvals), df)
-    return beta, tvals, pvals, df
+
+    tcrit = stats.t.ppf(0.975, df)
+    ci_low = beta - tcrit * se
+    ci_high = beta + tcrit * se
+
+    return beta, se, tvals, pvals, ci_low, ci_high, df
+
 
 def group_regress_joint2_with_cov(y, x1, x2, cov):
     """
@@ -248,18 +256,25 @@ def group_regress_joint2_with_cov(y, x1, x2, cov):
     cov = np.asarray(cov, float)
 
     keep = np.isfinite(y) & np.isfinite(x1) & np.isfinite(x2) & np.isfinite(cov)
-    y = y[keep]; x1 = x1[keep]; x2 = x2[keep]; cov = cov[keep]
+    y = y[keep]
+    x1 = x1[keep]
+    x2 = x2[keep]
+    cov = cov[keep]
     n = len(y)
+
     if n < 10:
-        return (np.nan, np.nan, np.nan,
-                np.nan, np.nan, np.nan, n)
+        return (np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
+                np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, n)
 
     X = np.column_stack([np.ones(n), z(x1), z(x2), z(cov)])
-    beta, tvals, pvals, _ = ols_with_t(X, y)
+    beta, se, tvals, pvals, ci_low, ci_high, _ = ols_with_t(X, y)
+
     # indices: 1=x1, 2=x2, 3=cov
-    return (float(tvals[1]), float(pvals[1]), float(beta[1]),
-            float(tvals[2]), float(pvals[2]), float(beta[2]),
-            int(n))
+    return (
+        float(tvals[1]), float(pvals[1]), float(beta[1]), float(se[1]), float(ci_low[1]), float(ci_high[1]),
+        float(tvals[2]), float(pvals[2]), float(beta[2]), float(se[2]), float(ci_low[2]), float(ci_high[2]),
+        int(n)
+    )
 
 def bh_fdr(pvals):
     pvals = np.asarray(pvals, float)
@@ -542,19 +557,40 @@ if version in [1, 2, 3, 4, 5]:
                 cov=rt_cov
             )
 
+            jt1, jp1, jb1, jse1, jcil1, jcih1, jt2, jp2, jb2, jse2, jcil2, jcih2, nj = group_regress_joint2_with_cov(
+                y=y,
+                x1=sdf[pred1_col].to_numpy(dtype=float),
+                x2=sdf[pred2_col].to_numpy(dtype=float),
+                cov=rt_cov
+            )
+
+            
             group_rows.append({
                 "set": set_name, "bin_tmin": tmin, "bin_tmax": tmax,
                 "model": "joint_plus_rt",
                 "dv": "rp_mean_uV", "predictor": pred1_col,
-                "n_subj": nj, "beta_z": jb1, "t": jt1, "p": jp1
-            })
+                "n_subj": nj,
+                "beta_z": jb1,
+                "se": jse1,
+                "t": jt1,
+                "p": jp1,
+                "ci_low": jcil1,
+                "ci_high": jcih1,
+                })
+            
             group_rows.append({
                 "set": set_name, "bin_tmin": tmin, "bin_tmax": tmax,
                 "model": "joint_plus_rt",
                 "dv": "rp_mean_uV", "predictor": pred2_col,
-                "n_subj": nj, "beta_z": jb2, "t": jt2, "p": jp2
-            })
-
+                "n_subj": nj,
+                "beta_z": jb2,
+                "se": jse2,
+                "t": jt2,
+                "p": jp2,
+                "ci_low": jcil2,
+                "ci_high": jcih2,
+                })
+            
     group_df = pd.DataFrame(group_rows)
 
     # -----------------------
