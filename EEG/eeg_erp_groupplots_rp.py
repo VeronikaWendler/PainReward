@@ -210,12 +210,13 @@ for set_name in electrode_sets:
 
         if lines:
             ax.text(
-                0.98, 0.98,
+                1.02, 1.00,
                 "\n\n".join(lines),
                 transform=ax.transAxes,
                 ha="right",
                 va="top",
                 fontsize=8,
+                clip_on=False
             )
 
         # Stars
