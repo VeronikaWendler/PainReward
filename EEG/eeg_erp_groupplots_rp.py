@@ -29,36 +29,46 @@ layout = BIDSLayout(basepath)
 # -----------------------
 # CONFIG
 # -----------------------
-version = 4           # 1=v, 2=a
-stats_subdir = "Zscoring"   
+version = 6
+stats_subdir = "Zscoring"
 
 if version == 1:
     out_prefix = "v1"
-    pred1_col, pred2_col = "v_painlevel_subj", "v_moneylevel_subj"
+    predictor_cols = ["v_painlevel_subj", "v_moneylevel_subj"]
     analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "v1_rp_drift_joint"
 
 elif version == 2:
     out_prefix = "v2"
-    pred1_col, pred2_col = "a_painlevel_subj", "a_moneylevel_subj"
+    predictor_cols = ["a_painlevel_subj", "a_moneylevel_subj"]
     analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "v2_rp_boundary_joint"
 
 elif version == 3:
     out_prefix = "v3"
-    pred1_col, pred2_col = "v_painlevel_subj", "v_moneylevel_subj"
-    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "mod_9"   #v3_rp_drift_joint_longwindow
+    predictor_cols = ["v_painlevel_subj", "v_moneylevel_subj"]
+    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "mod_9"
 
 elif version == 4:
     out_prefix = "v4"
-    pred1_col, pred2_col = "a_painlevel_subj", "a_moneylevel_subj"
-    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "mod_10"   #v4_rp_boundary_joint_longwindow
+    predictor_cols = ["a_painlevel_subj", "a_moneylevel_subj"]
+    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "mod_10"
 
 elif version == 5:
     out_prefix = "v5"
-    pred1_col, pred2_col = "t_painlevel_subj", "t_moneylevel_subj"
+    predictor_cols = ["t_painlevel_subj", "t_moneylevel_subj"]
     analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "v5_rp_ndt_joint_longwindow"
 
+elif version == 6:
+    out_prefix = "v6"
+    predictor_cols = [
+        "v_pain_z_subj",
+        "v_money_z_subj",
+        "a_pain_z_subj",
+        "a_money_z_subj",
+    ]
+    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "mod_19"
+
 else:
-    raise ValueError("version must be 1, 2, 3, 4, 5")
+    raise ValueError("version must be 1, 2, 3, 4, 5, 6")
 
 
 rp_dir = analysis_dir / stats_subdir
@@ -144,7 +154,7 @@ for set_name in electrode_sets:
     if sdf_set.empty:
         continue
 
-    for predictor in [pred1_col, pred2_col]:
+    for predictor in predictor_cols:
         sdf = sdf_set[sdf_set["predictor"] == predictor].copy()
         if sdf.empty:
             continue
@@ -343,24 +353,26 @@ for set_name in electrode_sets:
         y  = sdf_bin["rp_mean_uV"].to_numpy(float)
         rt = sdf_bin["rt_subj"].to_numpy(float)
 
-        for target_pred, other_pred in [(pred1_col, pred2_col), (pred2_col, pred1_col)]:
-            if target_pred not in sdf_bin.columns or other_pred not in sdf_bin.columns:
+        for target_pred in predictor_cols:
+            if target_pred not in sdf_bin.columns:
                 continue
 
-            x       = sdf_bin[target_pred].to_numpy(float)
-            x_other = sdf_bin[other_pred].to_numpy(float)
+            other_preds = [p for p in predictor_cols if p != target_pred]
+            missing_others = [p for p in other_preds if p not in sdf_bin.columns]
+            if len(missing_others):
+                continue
 
-            # nuisance matrix: intercept + z(other_pred) + z(rt)
-            Z = np.column_stack([
-                np.ones(len(y)),
-                z_np(x_other),
-                z_np(rt),
-            ])
+            x = sdf_bin[target_pred].to_numpy(float)
 
-            # Added-variable plot residuals:
-            #   resid(y | Z) vs resid(z(target_pred) | Z)
+            # nuisance matrix: intercept + all other predictors + RT
+            Z_cols = [np.ones(len(y))]
+            for op in other_preds:
+                Z_cols.append(z_np(sdf_bin[op].to_numpy(float)))
+            Z_cols.append(z_np(rt))
+            Z = np.column_stack(Z_cols)
             y_resid = residualize(y, Z)
             x_resid = residualize(z_np(x), Z)
+
 
             keep = np.isfinite(x_resid) & np.isfinite(y_resid)
             if keep.sum() < 8:
@@ -380,7 +392,7 @@ for set_name in electrode_sets:
 
             ax.axhline(0, linestyle="--", color="gray", linewidth=1)
             ax.axvline(0, linestyle="--", color="gray", linewidth=1)
-            ax.set_xlabel(f"{target_pred} (unique | {other_pred}, RT)")
+            ax.set_xlabel(f"{target_pred} (unique | other DDM params, RT)")
             ax.set_ylabel("RP mean (µV) (unique residual)")
             ax.set_title(
                 f"{out_prefix.upper()} added-variable plot (joint+RT)\n"

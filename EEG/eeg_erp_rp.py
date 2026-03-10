@@ -130,7 +130,7 @@ mod_data_a = pd.read_csv(mod_data_a_path, sep=None, engine="python")
 mod_data_t_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_11" / "diagnostics" / "t_pain_money.csv"
 mod_data_t = pd.read_csv(mod_data_t_path, sep=None, engine="python")
 
-mod_data_v_a_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_17" / "diagnostics" / "v_a_pain_money.csv"
+mod_data_v_a_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_19" / "diagnostics" / "v_a_pain_money.csv"
 mod_data_v_a = pd.read_csv(mod_data_v_a_path, sep=None, engine="python")
 
 for _df in [mod_data, mod_data_a, mod_data_t, mod_data_v_a]:
