@@ -697,7 +697,6 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                       'Non-dec. time']
         elif version == 9:
             params_of_interest = ['a',
-                                  'v',
                                   't', 
                                   'v_Intercept',
                                   'v_painlevel',
@@ -705,14 +704,13 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                                   ]
             params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
             titles = ['Threshold',
-                      'Drift Rate', 
                       'Non-dec. time',
                       'v_Intercept',
                       'v_painlevel',
                       'v_moneylevel',
                       ]
         elif version == 10:
-            params_of_interest = ['a',
+            params_of_interest = [
                                   'v',
                                   't', 
                                   'a_Intercept',
@@ -720,7 +718,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                                   'a_moneylevel'
                                   ]
             params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
-            titles = ['Threshold',
+            titles = [
                       'Drift Rate', 
                       'Non-dec. time',
                       'a_Intercept',
