@@ -45,12 +45,12 @@ elif version == 2:
 elif version == 3:
     out_prefix = "v3"
     pred1_col, pred2_col = "v_painlevel_subj", "v_moneylevel_subj"
-    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "v3_rp_drift_joint_longwindow"
+    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "mod_9"   #v3_rp_drift_joint_longwindow
 
 elif version == 4:
     out_prefix = "v4"
     pred1_col, pred2_col = "a_painlevel_subj", "a_moneylevel_subj"
-    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "v4_rp_boundary_joint_longwindow"
+    analysis_dir = OUT_DIR / "erps_massuni_sv_cuelong" / "mod_10"   #v4_rp_boundary_joint_longwindow
 
 elif version == 5:
     out_prefix = "v5"
