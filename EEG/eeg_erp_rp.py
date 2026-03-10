@@ -84,7 +84,7 @@ elif version == 4:
 elif version == 5:
     outpath = opj(base_root, "v5_rp_ndt_joint_longwindow")   #v5_rp_ndt_joint_longwindow
 elif version == 6:
-    outpath = opj(base_root, "mod_17")   
+    outpath = opj(base_root, "mod_19")   
 else:
     raise ValueError("version must be 1, 2, 3, 4, 5, ....")
 
@@ -130,10 +130,10 @@ mod_data_a = pd.read_csv(mod_data_a_path, sep=None, engine="python")
 mod_data_t_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_11" / "diagnostics" / "t_pain_money.csv"
 mod_data_t = pd.read_csv(mod_data_t_path, sep=None, engine="python")
 
-mod_data_v_rp_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_17" / "diagnostics" / "v_pain_money_rp.csv"
-mod_data_v_rp = pd.read_csv(mod_data_v_rp_path, sep=None, engine="python")
+mod_data_v_a_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_17" / "diagnostics" / "v_a_pain_money.csv"
+mod_data_v_a = pd.read_csv(mod_data_v_a_path, sep=None, engine="python")
 
-for _df in [mod_data, mod_data_a, mod_data_t, mod_data_v_rp]:
+for _df in [mod_data, mod_data_a, mod_data_t, mod_data_v_a]:
     _df["rt"] = _df["choice_resp.rt"]
     _df["interaction"] = _df["moneylevel"] * _df["painlevel"]
     _df["trialsnum"] = (
@@ -145,31 +145,30 @@ for _df in [mod_data, mod_data_a, mod_data_t, mod_data_v_rp]:
 
 # -----------------------
 # predictor columns based on version
-if version in [1, 3]:   # drift (v)
+if version in [1, 3]:
     beh_df = mod_data
-    pred1_col = "v_painlevel_subj"
-    pred2_col = "v_moneylevel_subj"
+    predictor_cols = ["v_painlevel_subj", "v_moneylevel_subj"]
     out_prefix = "v1" if version == 1 else "v3"
 
-elif version in [2, 4]: # boundary (a)
+elif version in [2, 4]:
     beh_df = mod_data_a
-    pred1_col = "a_painlevel_subj"
-    pred2_col = "a_moneylevel_subj"
+    predictor_cols = ["a_painlevel_subj", "a_moneylevel_subj"]
     out_prefix = "v2" if version == 2 else "v4"
 
-elif version in [5]: # t
+elif version in [5]:
     beh_df = mod_data_t
-    pred1_col = "t_painlevel_subj"
-    pred2_col = "t_moneylevel_subj"
-    out_prefix = "v5" if version == 5 else "v5"
-elif version in [6]: # v
-    beh_df = mod_data_t
-    pred1_col = "v_pain_z_subj"
-    pred2_col = "v_money_z_subj"
-    pred3_col = "v_rp_z_subj"
-    pred4_col = "v_pain_z:rp_z_subj"
-    pred5_col = "v_money_z:rp_z_subj"
-    out_prefix = "v6" if version == 6 else "v6"
+    predictor_cols = ["t_painlevel_subj", "t_moneylevel_subj"]
+    out_prefix = "v5"
+
+elif version in [6]:
+    beh_df = mod_data_v_a
+    predictor_cols = [
+        "v_pain_z_subj",
+        "v_money_z_subj",
+        "a_pain_z_subj",
+        "a_money_z_subj",
+    ]
+    out_prefix = "v6"
 
 else:
     raise ValueError("version must be 1, 2, 3, 4, 5,6")
@@ -257,38 +256,84 @@ def ols_with_t(X, y):
     return beta, se, tvals, pvals, ci_low, ci_high, df
 
 
-def group_regress_joint2_with_cov(y, x1, x2, cov):
+def group_regress_multi_with_cov(y, X_pred, pred_names, cov_dict=None):
     """
-    JOINT regression across subjects:
-        y ~ z(x1) + z(x2) + z(cov) + intercept
-    returns unique effects for x1 and x2:
-        t1,p1,b1, t2,p2,b2, n
+    regression across subjects:
+        y ~ predictors + covariates + intercept
+
+    Returns
+    -------
+    rows : list of dict
+        One dict per predictor with beta, se, t, p, ci_low, ci_high, n
     """
     y = np.asarray(y, float)
-    x1 = np.asarray(x1, float)
-    x2 = np.asarray(x2, float)
-    cov = np.asarray(cov, float)
+    X_pred = np.asarray(X_pred, float)
 
-    keep = np.isfinite(y) & np.isfinite(x1) & np.isfinite(x2) & np.isfinite(cov)
+    if X_pred.ndim == 1:
+        X_pred = X_pred[:, None]
+
+    keep = np.isfinite(y) & np.isfinite(X_pred).all(axis=1)
+
+    cov_names = []
+    cov_arrays = []
+    if cov_dict is not None:
+        for k, v in cov_dict.items():
+            v = np.asarray(v, float)
+            keep &= np.isfinite(v)
+            cov_names.append(k)
+            cov_arrays.append(v)
+
     y = y[keep]
-    x1 = x1[keep]
-    x2 = x2[keep]
-    cov = cov[keep]
+    X_pred = X_pred[keep, :]
+
+    cov_arrays_kept = []
+    for v in cov_arrays:
+        cov_arrays_kept.append(v[keep])
+
     n = len(y)
+    p = X_pred.shape[1]
 
-    if n < 10:
-        return (np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
-                np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, n)
+    if n < (p + 5):
+        rows = []
+        for name in pred_names:
+            rows.append({
+                "predictor": name,
+                "beta_z": np.nan,
+                "se": np.nan,
+                "t": np.nan,
+                "p": np.nan,
+                "ci_low": np.nan,
+                "ci_high": np.nan,
+                "n_subj": n,
+            })
+        return rows
 
-    X = np.column_stack([np.ones(n), z(x1), z(x2), z(cov)])
+    X_cols = [np.ones(n)]
+    for j in range(p):
+        X_cols.append(z(X_pred[:, j]))
+
+    for v in cov_arrays_kept:
+        X_cols.append(z(v))
+
+    X = np.column_stack(X_cols)
+
     beta, se, tvals, pvals, ci_low, ci_high, _ = ols_with_t(X, y)
 
-    # indices: 1=x1, 2=x2, 3=cov
-    return (
-        float(tvals[1]), float(pvals[1]), float(beta[1]), float(se[1]), float(ci_low[1]), float(ci_high[1]),
-        float(tvals[2]), float(pvals[2]), float(beta[2]), float(se[2]), float(ci_low[2]), float(ci_high[2]),
-        int(n)
-    )
+    rows = []
+    # predictor coefficients start at index 1
+    for j, name in enumerate(pred_names, start=1):
+        rows.append({
+            "predictor": name,
+            "beta_z": float(beta[j]),
+            "se": float(se[j]),
+            "t": float(tvals[j]),
+            "p": float(pvals[j]),
+            "ci_low": float(ci_low[j]),
+            "ci_high": float(ci_high[j]),
+            "n_subj": int(n),
+        })
+
+    return rows
 
 def bh_fdr(pvals):
     pvals = np.asarray(pvals, float)
@@ -322,12 +367,12 @@ part.sort()
 #------------------------------------------------------------------------------------------------------------------------------------------------
 # Creating the dataframes (only needed for versions 1–4)
 
-if version in [1,2,3,4,5]:
+if version in [1,2,3,4,5,6]:
     filtered_data = []
     for p in part:
         df = beh_df[beh_df["participant"] == p]
         
-        if version in [1,2,3,4,5]:
+        if version in [1,2,3,4,5,6]:
             epo = mne.read_epochs(
                 opj(basepath, "derivatives", p, "eeg", "erps_resp_rp",
                     f"{p}_decision_resp_rp_singletrials-epo.fif"),
@@ -399,7 +444,7 @@ if version in [1,2,3,4,5]:
 
 #----------------------------------------------------------------------------------------
 
-if version in [1, 2, 3, 4, 5]:
+if version in [1, 2, 3, 4, 5,6]:
 
     # -----------------------
     # Only JOINT model + RT covariate
@@ -409,7 +454,7 @@ if version in [1, 2, 3, 4, 5]:
 
     if version in [1, 2]:
         bins = [(-0.4, -0.2), (-0.2, -0.1)]          # original: two bins
-    elif version in [3, 4, 5]:
+    elif version in [3, 4, 5, 6]:
         bins = [(-0.5, -0.1)]                      # new: one long bin
     else:
         raise ValueError("version must be 1-5")
@@ -437,7 +482,7 @@ if version in [1, 2, 3, 4, 5]:
     }
 
     # subject-level predictors (constant within subject)
-    predictors = [pred1_col, pred2_col]
+    predictors = predictor_cols
 
     # RT summary covariate (subject-level)
     rt_col = "rt"
@@ -496,8 +541,9 @@ if version in [1, 2, 3, 4, 5]:
             continue
 
         # subject-level predictors 
-        x1 = float(mod2[pred1_col].iloc[0])
-        x2 = float(mod2[pred2_col].iloc[0])
+        subj_pred_vals = {}
+        for c in predictors:
+            subj_pred_vals[c] = float(mod2[c].iloc[0])
 
         # subject-level RT
         rt_vals = mod2[rt_col].to_numpy(dtype=float) if rt_col in mod2.columns else np.array([])
@@ -532,10 +578,9 @@ if version in [1, 2, 3, 4, 5]:
                     "bin_tmax": float(tmax),
                     "rp_mean_uV": rp_mean_uV,
                     "n_trials": int(len(rp_amp_trials)),
-                    pred1_col: x1,
-                    pred2_col: x2,
                     "rt_subj": rt_subj,
                     "chs_used": "+".join(used_chs),
+                    **subj_pred_vals,
                 })
 
         if any_set_used:
@@ -564,40 +609,32 @@ if version in [1, 2, 3, 4, 5]:
             y = sdf["rp_mean_uV"].to_numpy(dtype=float)
             rt_cov = sdf["rt_subj"].to_numpy(dtype=float)
 
-            jt1, jp1, jb1, jse1, jcil1, jcih1, jt2, jp2, jb2, jse2, jcil2, jcih2, nj = group_regress_joint2_with_cov(
+            pred_matrix = sdf[predictors].to_numpy(dtype=float)
+
+            res_rows = group_regress_multi_with_cov(
                 y=y,
-                x1=sdf[pred1_col].to_numpy(dtype=float),
-                x2=sdf[pred2_col].to_numpy(dtype=float),
-                cov=rt_cov
+                X_pred=pred_matrix,
+                pred_names=predictors,
+                cov_dict={"rt_subj": rt_cov}
             )
 
-            
-            group_rows.append({
-                "set": set_name, "bin_tmin": tmin, "bin_tmax": tmax,
-                "model": "joint_plus_rt",
-                "dv": "rp_mean_uV", "predictor": pred1_col,
-                "n_subj": nj,
-                "beta_z": jb1,
-                "se": jse1,
-                "t": jt1,
-                "p": jp1,
-                "ci_low": jcil1,
-                "ci_high": jcih1,
+            for rr in res_rows:
+                group_rows.append({
+                    "set": set_name,
+                    "bin_tmin": tmin,
+                    "bin_tmax": tmax,
+                    "model": "joint_plus_rt",
+                    "dv": "rp_mean_uV",
+                    "predictor": rr["predictor"],
+                    "n_subj": rr["n_subj"],
+                    "beta_z": rr["beta_z"],
+                    "se": rr["se"],
+                    "t": rr["t"],
+                    "p": rr["p"],
+                    "ci_low": rr["ci_low"],
+                    "ci_high": rr["ci_high"],
                 })
-            
-            group_rows.append({
-                "set": set_name, "bin_tmin": tmin, "bin_tmax": tmax,
-                "model": "joint_plus_rt",
-                "dv": "rp_mean_uV", "predictor": pred2_col,
-                "n_subj": nj,
-                "beta_z": jb2,
-                "se": jse2,
-                "t": jt2,
-                "p": jp2,
-                "ci_low": jcil2,
-                "ci_high": jcih2,
-                })
-            
+
     group_df = pd.DataFrame(group_rows)
 
     # -----------------------
