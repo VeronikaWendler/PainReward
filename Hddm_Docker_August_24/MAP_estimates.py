@@ -572,11 +572,11 @@ def run_mod_19():
     print(stats_summary[stats_summary.index.isin([
         't', 
         'v_Intercept',
-        'v_painlevel',
-        'v_moneylevel',
+        'v_pain_z',
+        'v_money_z',
         'a_Intercept',
-        'a_painlevel',
-        'a_moneylevel',
+        'a_pain_z',
+        'a_money_z',
     ])])
     print("DIC:", combinedModels.dic)          
     # some diagnostics
@@ -585,11 +585,11 @@ def run_mod_19():
     # nodes for OV:
     t        = combinedModels.nodes_db.node['t']
     v_inter  = combinedModels.nodes_db.node['v_Intercept']
-    v_pain   = combinedModels.nodes_db.node['v_painlevel']
-    v_money  = combinedModels.nodes_db.node['v_moneylevel']
+    v_pain   = combinedModels.nodes_db.node['v_pain_z']
+    v_money  = combinedModels.nodes_db.node['v_money_z']
     a_inter  = combinedModels.nodes_db.node['a_Intercept']
-    a_pain   = combinedModels.nodes_db.node['a_painlevel']
-    a_money  = combinedModels.nodes_db.node['a_moneylevel']
+    a_pain   = combinedModels.nodes_db.node['a_pain_z']
+    a_money  = combinedModels.nodes_db.node['a_money_z']
     
     # Group-level Table for OV (theta = b2 / b1 per OV level)
     delta_v  = v_money.trace() / v_pain.trace()
