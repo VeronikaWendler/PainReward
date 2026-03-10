@@ -50,6 +50,6 @@ apptainer exec --cleanenv \
   --env FIG_DIR="/rds_out/figures" \
   --env LOG_DIR="/rds_out/logs" \
   "${IMAGE}" \
-  python "${PROJECT_DIR}/Hddm_Docker_August_24/DDM_EEG.py"
+  python "${PROJECT_DIR}/Hddm_Docker_August_24/DDM_EEG_load.py"
 
 

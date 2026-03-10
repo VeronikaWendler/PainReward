@@ -69,7 +69,7 @@ numba.config.CACHE_ENABLE = False
 # V_sub = value of the worse option
 
 # params:
-version = 18    # defining version #
+version = 19    # defining version #
 run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
@@ -108,7 +108,7 @@ parallel        = True      # parallel
 model_base_name = "painreward_behavioural_data_"
 model_versions  = {
     "dec":      ["mod_0","mod_1","mod_2","mod_3","mod_4","mod_5","mod_6","mod_7","mod_8", "mod_9", "mod_10","mod_11",
-                 "mod_12","mod_13","mod_14","mod_15","mod_16","mod_17","mod_18"]     
+                 "mod_12","mod_13","mod_14","mod_15","mod_16","mod_17","mod_18","mod_19", "mod_20"]     
 }
 
 # debugging tip: python starts at 0, unlike Matlab
@@ -820,6 +820,58 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
                       'a_pain_z:rp_z',
                       'a_money_z:rp_z'
                       ]
+            
+        elif version == 19:
+            params_of_interest = ['t', 
+                                  'v_Intercept',
+                                  'v_painlevel',
+                                  'v_moneylevel',
+                                  'a_Intercept',
+                                  'a_painlevel',
+                                  'a_moneylevel'
+                                  ]
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = ['Non-dec. time',
+                      'v_Intercept',
+                      'v_painlevel',
+                      'v_moneylevel',
+                      'a_Intercept',
+                      'a_painlevel',
+                      'a_moneylevel'
+                      ]
+                # these are the RP-models
+        elif version == 20:
+            params_of_interest = ['t',
+                                  'v_Intercept',
+                                  'v_pain_z',
+                                  'v_money_z',
+                                  'v_rp_z',
+                                  'v_pain_z:rp_z',
+                                  'v_money_z:rp_z',
+                                  'a_Intercept',
+                                  'a_pain_z',
+                                  'a_money_z',
+                                  'a_rp_z',
+                                  'a_pain_z:rp_z',
+                                  'a_money_z:rp_z'
+                                  ]
+            params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
+            titles = [
+                      'Non-dec. time', 
+                      'v_Intercept',
+                      'v_pain_z',
+                      'v_money_z',
+                      'v_rp_z',
+                      'v_pain_z:rp_z',
+                      'v_money_z:rp_z',
+                      'a_Intercept',
+                      'a_pain_z',
+                      'a_money_z',
+                      'a_rp_z',
+                      'a_pain_z:rp_z',
+                      'a_money_z:rp_z'
+                      ]
+        
         else:
             raise ValueError(f"Invalid version {version}")
 
