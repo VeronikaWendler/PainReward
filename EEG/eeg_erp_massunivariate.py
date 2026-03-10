@@ -50,9 +50,9 @@ ensure_dir(outroot)
 version = 1
 
 if version == 1:
-    outpath = outroot / "erps_massuni_passive_regression"
+    outpath = outroot / "erps_massuni_passive"
 elif version == 2:
-    outpath = outroot / "erps_massuni_regression"
+    outpath = outroot / "erps_massuni_decision"
 else:
     raise ValueError("version must be 1 (passive) or 2 (decision)")
 ensure_dir(outpath)
