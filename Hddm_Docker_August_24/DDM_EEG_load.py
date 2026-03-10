@@ -977,68 +977,68 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
 #      print("No traces found for attention/inattention weights; skipping panel.")
 #  
 #  
-#  group_params_to_plot = [
-#      'z',
-#      'a',
-#      't',
-#      'v_sv_pain_para'
-#      ]
-#  
-#  group_vplot_dir = diag_dir / "group_param_vertical_kdes"
-#  group_vplot_dir.mkdir(parents=True, exist_ok=True)
-#  
-#  # bigger, readable fonts
-#  vz_title = 27
-#  vz_label = 26
-#  vz_tick  = 24
-#  
-#  for param in group_params_to_plot:
-#      tr = _get_trace(combined_model, param)
-#      if tr is None:
-#          print(f"Skipping missing parameter: {param}")
-#          continue
-#  
-#      fig, ax = plt.subplots(figsize=(5, 8))
-#      sns.kdeplot(y=tr, fill=True, ax=ax)
-#      ax.set_facecolor("white")
-#  
-#      if param == "z":
-#          ax.axhline(0.5, color="red", linestyle="--", linewidth=5)
-#  
-#          # Two-sided posterior probability that z != 0.5
-#          tr_arr = np.asarray(tr)
-#          p_gt = np.mean(tr_arr > 0.5)
-#          p_lt = np.mean(tr_arr < 0.5)
-#          p_two_sided = 2 * min(p_gt, p_lt)
-#  
-#          # HDI for delta = z - 0.5 ( to check whether it's sig. differnet from 50%)
-#          delta = tr_arr - 0.5
-#          hdi_lo, hdi_hi = az.hdi(delta, hdi_prob=0.95).ravel()
-#          hdi_text = f"95% HDI(z-0.5)=[{hdi_lo:.3f}, {hdi_hi:.3f}]"
-#  
-#          # ROPE around 0.5 (0.02 by default similar to the tutorials by Pan et al., 2025)
-#          rope = 0.02
-#          p_in_rope = np.mean((np.abs(delta) <= rope))
-#  
-#          ax.set_title(
-#              f"{param}  |P(z!=0.5)={1-p_two_sided:.3f}\n{hdi_text} | P(|z-0.5|<={rope:.2f})={p_in_rope:.3f}",
-#              fontsize=vz_title, pad=12
-#          )
-#      else:
-#          ax.set_title(param, fontsize=vz_title, pad=12)
-#  
-#      ax.set_xlabel("Density", fontsize=vz_label, labelpad=10)
-#      ax.set_ylabel("Value", fontsize=vz_label)
-#      ax.tick_params(axis="both", labelsize=vz_tick, width=1.2)
-#      for side in ["top","right"]:
-#          ax.spines[side].set_visible(False)
-#      for side in ["left","bottom"]:
-#          ax.spines[side].set_linewidth(1.2)
-#  
-#      plt.tight_layout()
-#      fig.savefig(group_vplot_dir / f"{param}_vertical_kde_big.pdf", bbox_inches="tight")
-#      plt.close(fig)
-#  
+    group_params_to_plot = [
+     'z',
+     'a',
+     't',
+     'v_sv_pain_para'
+     ]
+ 
+ group_vplot_dir = diag_dir / "group_param_vertical_kdes"
+ group_vplot_dir.mkdir(parents=True, exist_ok=True)
+ 
+ # bigger, readable fonts
+ vz_title = 27
+ vz_label = 26
+ vz_tick  = 24
+ 
+ for param in group_params_to_plot:
+     tr = _get_trace(combined_model, param)
+     if tr is None:
+         print(f"Skipping missing parameter: {param}")
+         continue
+ 
+     fig, ax = plt.subplots(figsize=(5, 8))
+     sns.kdeplot(y=tr, fill=True, ax=ax)
+     ax.set_facecolor("white")
+ 
+     if param == "z":
+         ax.axhline(0.5, color="red", linestyle="--", linewidth=5)
+ 
+         # Two-sided posterior probability that z != 0.5
+         tr_arr = np.asarray(tr)
+         p_gt = np.mean(tr_arr > 0.5)
+         p_lt = np.mean(tr_arr < 0.5)
+         p_two_sided = 2 * min(p_gt, p_lt)
+ 
+         # HDI for delta = z - 0.5 ( to check whether it's sig. differnet from 50%)
+         delta = tr_arr - 0.5
+         hdi_lo, hdi_hi = az.hdi(delta, hdi_prob=0.95).ravel()
+         hdi_text = f"95% HDI(z-0.5)=[{hdi_lo:.3f}, {hdi_hi:.3f}]"
+ 
+         # ROPE around 0.5 (0.02 by default similar to the tutorials by Pan et al., 2025)
+         rope = 0.02
+         p_in_rope = np.mean((np.abs(delta) <= rope))
+ 
+         ax.set_title(
+             f"{param}  |P(z!=0.5)={1-p_two_sided:.3f}\n{hdi_text} | P(|z-0.5|<={rope:.2f})={p_in_rope:.3f}",
+             fontsize=vz_title, pad=12
+         )
+     else:
+         ax.set_title(param, fontsize=vz_title, pad=12)
+ 
+     ax.set_xlabel("Density", fontsize=vz_label, labelpad=10)
+     ax.set_ylabel("Value", fontsize=vz_label)
+     ax.tick_params(axis="both", labelsize=vz_tick, width=1.2)
+     for side in ["top","right"]:
+         ax.spines[side].set_visible(False)
+     for side in ["left","bottom"]:
+         ax.spines[side].set_linewidth(1.2)
+ 
+     plt.tight_layout()
+     fig.savefig(group_vplot_dir / f"{param}_vertical_kde_big.pdf", bbox_inches="tight")
+     plt.close(fig)
+ 
 #  
 #  #  z-diagnostics text file
 #  z_trace = _get_trace(combined_model, "z")
@@ -1073,119 +1073,7 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
         if safe != f:
             os.rename(diag_dir / f, diag_dir / safe)
 
-
-# def plot_inatt_forest(
-#     fig_dir,
-#     model_dir,
-#     model_base,
-#     hdi_prob=0.95,
-#     param_E="v_ES_InattentionW_E_subj",
-#     param_S="v_ES_InattentionW_S_subj",
-#     n_chains=3
-#     ):
-#     """
-#     HDI forest plot from .nc posterior samples.
-#     Also computes Bayes factor (Savage-Dickey) for group-level Δ = |S| - |E|.
-#     """
-
-#     from scipy.stats import gaussian_kde, norm
-
-#     out_dir = Path(fig_dir) / "diagnostics"
-#     out_dir.mkdir(parents=True, exist_ok=True)
-
-#     # load nc files
-#     nc_files = []
-#     for c in range(n_chains):
-#         candidate = Path(model_dir) / f"{model_base}_{c}.nc"
-#         if candidate.exists():
-#             nc_files.append(candidate)
-#     if not nc_files:
-#         print(f"[HDI] No .nc files found under {model_dir} for base '{model_base}_<chain>.nc'")
-#         return
-
-#     idatas = [az.from_netcdf(str(f)) for f in nc_files]
-#     idata  = az.concat(idatas, dim="chain")
-#     post   = idata.posterior.stack(sample=("chain", "draw"))
-
-#     # find all subject-level vars
-#     subj_E = [v for v in post.data_vars if v.startswith(param_E)]
-#     subj_S = [v for v in post.data_vars if v.startswith(param_S)]
-
-#     ids_E = {int(v.split(".")[-1]) for v in subj_E}
-#     ids_S = {int(v.split(".")[-1]) for v in subj_S}
-#     subj_ids = sorted(ids_E & ids_S)
-
-#     if not subj_ids:
-#         print("No overlapping subjects in .nc posterior")
-#         return
-
-#     rows = []
-#     all_deltas = []
-#     for subj in subj_ids:
-#         keyE = f"{param_E}.{subj}"
-#         keyS = f"{param_S}.{subj}"
-#         E = np.abs(np.asarray(post[keyE]))
-#         S = np.abs(np.asarray(post[keyS]))
-#         delta = S - E
-#         all_deltas.append(delta)
-
-#         hdi_bounds = np.asarray(az.hdi(delta, hdi_prob=hdi_prob)).ravel()
-#         hdi_low, hdi_high = float(hdi_bounds[0]), float(hdi_bounds[-1])
-
-#         rows.append({
-#             "subj": subj,
-#             "delta_mean": float(delta.mean()),
-#             "hdi_low": hdi_low,
-#             "hdi_high": hdi_high,
-#             "credible": int((hdi_low > 0) or (hdi_high < 0))
-#         })
-
-#     hdi_df = pd.DataFrame(rows).sort_values("subj")
-#     hdi_csv = out_dir / "inatt_asymmetry_HDI.csv"
-#     hdi_df.to_csv(hdi_csv, index=False)
-#     print(f"[HDI] Saved: {hdi_csv}")
-
-#     # group-level Bayes factor
-#     group_delta = np.concatenate(all_deltas)
-#     kde = gaussian_kde(group_delta)
-#     post_at_0 = kde.evaluate([0])[0]
-
-#     # prior density at 0
-#     prior_at_0 = norm.pdf(0, loc=0, scale=1)
-
-#     BF_01 = post_at_0 / prior_at_0
-#     BF_10 = 1 / BF_01
-
-#     bf_file = out_dir / "inatt_asymmetry_BayesFactor.txt"
-#     with open(bf_file, "w") as f:
-#         f.write(f"BF_01 (H0/H1): {BF_01:.3f}\n")
-#         f.write(f"BF_10 (H1/H0): {BF_10:.3f}\n")
-
-#     print(f"Saved Bayes factor results to {bf_file}")
-#     print(f"  BF_01 = {BF_01:.3f}, BF_10 = {BF_10:.3f}")
-
-#     # forest plot
-#     fig, ax = plt.subplots(figsize=(6, 0.35 * len(hdi_df)))
-#     ax.set_facecolor("white")
-#     ax.grid(False)
-
-#     ypos = np.arange(len(hdi_df))
-#     for i, row in enumerate(hdi_df.itertuples(index=False)):
-#         ax.plot([row.hdi_low, row.hdi_high], [ypos[i], ypos[i]], "k-", lw=1)
-#         ax.plot(row.delta_mean, ypos[i], "o", color="purple")
-
-#     ax.axvline(0, color="red", ls="--", lw=1)
-#     ax.set_yticks(ypos)
-#     ax.set_yticklabels(hdi_df["subj"])
-#     ax.invert_yaxis()
-#     ax.set_xlabel(f"Δ inattentional weight (|S| − |E|), {int(hdi_prob*100)}% HDI")
-#     ax.set_title(f"Subject-level inattentional asymmetry (HDI)\nGroup BF_10={BF_10:.2f}")
-#     fig.tight_layout()
-#     fig.savefig(out_dir / "forest_inatt_asymmetry_HDI.pdf", bbox_inches="tight")
-#     plt.close(fig)
-
     
-
 
 model_dir = MODEL_DIR
 ensure_dir(model_dir)

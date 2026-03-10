@@ -337,6 +337,16 @@ if version == 2:
         mod2k = mod2.iloc[keep].reset_index(drop=True)
         epo_keep = epo_filt.copy()[keep]
 
+        if epo_keep.metadata is None:
+            epo_keep.metadata = pd.DataFrame(index=np.arange(len(epo_keep)))
+        else:
+            epo_keep.metadata = epo_keep.metadata.reset_index(drop=True).copy()
+
+        epo_keep.metadata["painlevel"] = mod2k["painlevel"].to_numpy(dtype=float)
+        epo_keep.metadata["moneylevel"] = mod2k["moneylevel"].to_numpy(dtype=float)
+        epo_keep.metadata["participant_id"] = pa
+        epo_keep.metadata["rt"] = mod2k[rt_col].to_numpy(dtype=float)
+        
         scale = Scaler(scalings="mean")
         epo_z = mne.EpochsArray(scale.fit_transform(epo_keep.get_data()), epo_keep.info)
 
