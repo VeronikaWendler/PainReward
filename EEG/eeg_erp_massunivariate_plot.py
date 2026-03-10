@@ -4,14 +4,6 @@
 # @ Date: 2024
 # @ Description: plotting the EEG regression models from the massunivariate script
 #
-# This plotting code is aligned to the MASSUNIVARIATE script below:
-# - OUT_DIR defaults to basepath / "statistics"
-# - version==2 uses outpath = OUT_DIR / "erps_massuni_regression"
-# - glm_version "z" reads from outpath / "Zscoring"
-# - regvars saved as filenames: ...epo_painlevel.fif and ...epo_moneylevel.fif
-# - diff files saved as:
-#   ols_2ndlevel_tval_diff_pain_minus_money.npy
-#   ols_2ndlevel_pval_diff_pain_minus_money.npy
 
 import mne
 import pandas as pd
@@ -37,18 +29,18 @@ OUT_DIR = Path(os.getenv("OUT_DIR", basepath / "statistics"))
 layout = BIDSLayout(basepath)
 
 # ---------------------------------------------------------------------------------------------------
-# Version + GLM version (keep version-sensitive structure)
-# version = 2 -> decision plotting (UNCHANGED)
-# version = 1 -> passive plotting (ADDED; mirrors decision plotting)
+# Version + GLM version 
+# version = 2 -> decision plotting 
+# version = 1 -> passive plotting 
 version = 1
 glm_version = "z"  # noz / z / partz
 
 # ---------------------------------------------------------------------------------------------------
 # Output path selection (MATCH MASSUNIVARIATE)
 if version == 1:
-    outpath = opj(OUT_DIR, "erps_massuni_passive_regression")
+    outpath = opj(OUT_DIR, "erps_massuni_passive")
 elif version == 2:
-    outpath = opj(OUT_DIR, "erps_massuni_regression")
+    outpath = opj(OUT_DIR, "erps_massuni_decision")
 else:
     raise ValueError("No Version")
 
@@ -190,22 +182,14 @@ for ridx, regvar in enumerate(regvars):
 
         fig, ax = plt.subplots(figsize=(4, 2.5))
 
-        nbins = 5
+
         all_epos.metadata = all_epos.metadata.reset_index(drop=True)
-        all_epos.metadata["bin"] = 0
-
-        # IMPORTANT: this requires the epochs metadata to contain regvar column.
-        # Your passive script explicitly creates painlevel/moneylevel in epo.metadata.
-        unique_vals = all_epos.metadata[regvar].nunique()
-        nbins_eff = min(nbins, unique_vals)
-
-        all_epos.metadata["bin"], bins = pd.qcut(
-            all_epos.metadata[regvar],
-            q=nbins_eff,
-            labels=False,
-            retbins=True,
-            duplicates="drop"
-        )
+        level_vals = pd.to_numeric(all_epos.metadata[regvar], errors="coerce")
+        unique_levels = np.sort(level_vals.dropna().unique())
+        unique_levels = unique_levels[unique_levels > 0]
+        level_to_bin = {lev: i for i, lev in enumerate(unique_levels)}
+        all_epos.metadata["bin"] = level_vals.map(level_to_bin)
+        nbins_eff = len(unique_levels)
 
         # participant-wise averages then grand average
         sub_evokeds = []
@@ -234,11 +218,12 @@ for ridx, regvar in enumerate(regvars):
 
         bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
         for i, bin_id in enumerate(bin_ids):
+            actual_level = unique_levels[int(bin_id)]
             ax.plot(
                 all_epos[0].times * 1000,
                 evokeds[bin_id].data[pick, :] * 1e6,
                 linewidth=2,
-                label=str(i + 1),
+                label=str(int(actual_level)),
                 color=plt.get_cmap(cmap)(i / max(1, len(bin_ids) - 1)),
             )
 
