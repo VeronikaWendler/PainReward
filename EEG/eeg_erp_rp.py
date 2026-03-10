@@ -62,7 +62,7 @@ if not os.path.exists(outpath):
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
 # ---- versions ----
 
-version = 4
+version = 3
 v1_mode = "joint"
 v2_mode = "joint"
 v3_mode = "joint"
@@ -73,15 +73,15 @@ base_root = opj(outpath, "erps_massuni_sv_cuelong")
 os.makedirs(base_root, exist_ok=True)
 
 if version == 1:
-    outpath = opj(base_root, "v1_rp_drift_joint")
+    outpath = opj(base_root, "")         #v1_rp_drift_joint
 elif version == 2:
-    outpath = opj(base_root, "v2_rp_boundary_joint")
+    outpath = opj(base_root, "")      # v2_rp_boundary_joint
 elif version == 3:
-    outpath = opj(base_root, "v3_rp_drift_joint_longwindow")
+    outpath = opj(base_root, "mod_9")   # v3_rp_drift_joint_longwindow
 elif version == 4:
-    outpath = opj(base_root, "v4_rp_boundary_joint_longwindow")
+    outpath = opj(base_root, "mod_10")  # v4_rp_boundary_joint_longwindow
 elif version == 5:
-    outpath = opj(base_root, "v5_rp_ndt_joint_longwindow")
+    outpath = opj(base_root, "v5_rp_ndt_joint_longwindow")   #v5_rp_ndt_joint_longwindow
 else:
     raise ValueError("version must be 1, 2, 3, 4, 5")
 
