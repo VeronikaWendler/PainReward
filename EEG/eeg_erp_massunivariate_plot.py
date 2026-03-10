@@ -32,7 +32,7 @@ layout = BIDSLayout(basepath)
 # Version + GLM version 
 # version = 2 -> decision plotting 
 # version = 1 -> passive plotting 
-version = 2
+version = 1
 glm_version = "z"  # noz / z / partz
 
 # ---------------------------------------------------------------------------------------------------
@@ -109,11 +109,12 @@ for ridx, regvar in enumerate(regvars):
     regvarname = regvarsnames[ridx]
 
     if regvar == "painlevel":
-        cmap = "Blues"
+        cmap = "Reds"
     elif regvar == "moneylevel":
-        cmap = "Greens"
+        cmap = "Blues"
     else:
         cmap = "viridis"
+    
 
     # Load epochs saved by massunivariate (MATCH filenames)
     # NOTE: passive regression script saves these .fif epochs too, so this works for BOTH versions.
