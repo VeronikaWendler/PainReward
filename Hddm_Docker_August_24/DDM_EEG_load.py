@@ -984,60 +984,36 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
      'v_sv_pain_para'
      ]
  
- group_vplot_dir = diag_dir / "group_param_vertical_kdes"
- group_vplot_dir.mkdir(parents=True, exist_ok=True)
+    group_vplot_dir = diag_dir / "group_param_vertical_kdes"
+    group_vplot_dir.mkdir(parents=True, exist_ok=True)
  
- # bigger, readable fonts
- vz_title = 27
- vz_label = 26
- vz_tick  = 24
+    # bigger, readable fonts
+    vz_title = 25
+    vz_label = 23
+    vz_tick  = 23
  
- for param in group_params_to_plot:
-     tr = _get_trace(combined_model, param)
-     if tr is None:
-         print(f"Skipping missing parameter: {param}")
-         continue
+    for param in group_params_to_plot:
+        tr = _get_trace(combined_model, param)
+        if tr is None:
+            print(f"Skipping missing parameter: {param}")
+            continue
  
-     fig, ax = plt.subplots(figsize=(5, 8))
-     sns.kdeplot(y=tr, fill=True, ax=ax)
-     ax.set_facecolor("white")
+        fig, ax = plt.subplots(figsize=(5, 8))
+        sns.kdeplot(y=tr, fill=True, ax=ax)
+        ax.set_facecolor("white")
  
-     if param == "z":
-         ax.axhline(0.5, color="red", linestyle="--", linewidth=5)
+        ax.set_title(param, fontsize=vz_title, pad=12)
+        ax.set_xlabel("Density", fontsize=vz_label, labelpad=10)
+        ax.set_ylabel("Value", fontsize=vz_label)
+        ax.tick_params(axis="both", labelsize=vz_tick, width=1.2)
+        for side in ["top","right"]:
+            ax.spines[side].set_visible(False)
+        for side in ["left","bottom"]:
+            ax.spines[side].set_linewidth(1.2)
  
-         # Two-sided posterior probability that z != 0.5
-         tr_arr = np.asarray(tr)
-         p_gt = np.mean(tr_arr > 0.5)
-         p_lt = np.mean(tr_arr < 0.5)
-         p_two_sided = 2 * min(p_gt, p_lt)
- 
-         # HDI for delta = z - 0.5 ( to check whether it's sig. differnet from 50%)
-         delta = tr_arr - 0.5
-         hdi_lo, hdi_hi = az.hdi(delta, hdi_prob=0.95).ravel()
-         hdi_text = f"95% HDI(z-0.5)=[{hdi_lo:.3f}, {hdi_hi:.3f}]"
- 
-         # ROPE around 0.5 (0.02 by default similar to the tutorials by Pan et al., 2025)
-         rope = 0.02
-         p_in_rope = np.mean((np.abs(delta) <= rope))
- 
-         ax.set_title(
-             f"{param}  |P(z!=0.5)={1-p_two_sided:.3f}\n{hdi_text} | P(|z-0.5|<={rope:.2f})={p_in_rope:.3f}",
-             fontsize=vz_title, pad=12
-         )
-     else:
-         ax.set_title(param, fontsize=vz_title, pad=12)
- 
-     ax.set_xlabel("Density", fontsize=vz_label, labelpad=10)
-     ax.set_ylabel("Value", fontsize=vz_label)
-     ax.tick_params(axis="both", labelsize=vz_tick, width=1.2)
-     for side in ["top","right"]:
-         ax.spines[side].set_visible(False)
-     for side in ["left","bottom"]:
-         ax.spines[side].set_linewidth(1.2)
- 
-     plt.tight_layout()
-     fig.savefig(group_vplot_dir / f"{param}_vertical_kde_big.pdf", bbox_inches="tight")
-     plt.close(fig)
+        plt.tight_layout()
+        fig.savefig(group_vplot_dir / f"{param}_vertical_kde_big.pdf", bbox_inches="tight")
+        plt.close(fig)
  
 #  
 #  #  z-diagnostics text file
