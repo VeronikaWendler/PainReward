@@ -47,7 +47,7 @@ ensure_dir(outroot)
 # -----------------------
 # version = 1 passive level from passive_beh.tsv; no RT
 # version = 2 decision HDDM-based pain/money + RT
-version = 1
+version = 2
 
 if version == 1:
     outpath = outroot / "erps_massuni_passive"

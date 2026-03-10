@@ -79,7 +79,7 @@ regvars = ["painlevel", "moneylevel"]
 regvarsnames = ["Painlevel", "Moneylevel"]
 
 param = {
-    "alpha": 0.05 / len(regvars),
+    "alpha": 0.05,
     "titlefontsize": 12,
     "labelfontsize": 12,
     "ticksfontsize": 11,
@@ -100,9 +100,9 @@ plot_times = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.3, 1.4]
 chan_to_plot = ["Fz", "FCz", "POz", "Cz", "CPz", "Pz", "Oz"]
 
 # ---------------------------------------------------------------------------------------------------
-# Load group-level stats (MATCH filenames saved by massunivariate)
-tvals = np.load(opj(outpath_glm, "ols_2ndlevel_tvals.npy"))   # (n_reg, n_times, n_chans)
-pvals = np.load(opj(outpath_glm, "ols_2ndlevel_pvals.npy"))   # (n_reg, n_times, n_chans)
+# Load group-level stats
+tvals = np.load(opj(outpath_glm, "ols_2ndlevel_tvals.npy"))         # (n_reg, n_times, n_chans)
+pvals = np.load(opj(outpath_glm, "ols_2ndlevel_pvals_fdr.npy"))     # corrected p-maps
 
 beta_gavg = np.load(opj(outpath_glm, "ols_2ndlevel_betasavg.npy"), allow_pickle=True)  # list of Evoked
 allbetas = np.load(opj(outpath_glm, "ols_2ndlevel_betas.npy"), allow_pickle=True)     # (n_subj, n_reg, n_ch, n_t)
@@ -293,11 +293,10 @@ for ridx, regvar in enumerate(regvars):
         plt.close(fig)
 
 # ---------------------------------------------------------------------------------------------------
-# Difference maps: pain - money (MATCH exact saved filenames)
-# NOTE: In your passive massunivariate script you DO save these. In decision you may or may not.
-# To keep decision plotting unchanged, we do a safe check: only plot if files exist.
+# Difference maps: pain - money
+
 diff_t_path = opj(outpath_glm, "ols_2ndlevel_tval_diff_pain_minus_money.npy")
-diff_p_path = opj(outpath_glm, "ols_2ndlevel_pval_diff_pain_minus_money.npy")
+diff_p_path = opj(outpath_glm, "ols_2ndlevel_pval_fdr_diff_pain_minus_money.npy")
 
 if os.path.exists(diff_t_path) and os.path.exists(diff_p_path):
     tdiff = np.load(diff_t_path)
