@@ -17,7 +17,6 @@ mkdir -p logs
 module purge
 module load bb-singularity-conf/live
 
-
 # Environment 
 export PYTHONUNBUFFERED=1
 export PYTHONNOUSERSITE=1

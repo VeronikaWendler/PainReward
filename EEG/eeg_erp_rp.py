@@ -503,7 +503,7 @@ if version in [1, 2, 3, 4, 5,6]:
     included, skipped = [], []
 
     for pa in part:
-        print(f"\n[{out_prefix}] rp ~ {pred1_col}+{pred2_col} joint+RT] {pa}")
+        print(f"\n[{out_prefix}] rp ~ {' + '.join(predictors)} + RT] {pa}")
         epo_path = opj(basepath, "derivatives", pa, "eeg", "erps_resp_rp", f"{pa}_decision_resp_rp_singletrials-epo.fif")
         if not os.path.exists(epo_path):
             print("  missing epochs:", epo_path)
