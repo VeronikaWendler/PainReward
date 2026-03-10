@@ -62,12 +62,13 @@ if not os.path.exists(outpath):
 # here for decision its just erps_massuni_drift_mod_9 and for passive it is: erps_massuni_drift_mod_9_2_passive
 # ---- versions ----
 
-version = 4
+version = 6
 v1_mode = "joint"
 v2_mode = "joint"
 v3_mode = "joint"
 v4_mode = "joint"
 v5_mode = "joint"
+v6_mode = "joint"
 
 base_root = opj(outpath, "erps_massuni_sv_cuelong")
 os.makedirs(base_root, exist_ok=True)
@@ -82,8 +83,10 @@ elif version == 4:
     outpath = opj(base_root, "mod_10")  # v4_rp_boundary_joint_longwindow
 elif version == 5:
     outpath = opj(base_root, "v5_rp_ndt_joint_longwindow")   #v5_rp_ndt_joint_longwindow
+elif version == 6:
+    outpath = opj(base_root, "mod_17")   
 else:
-    raise ValueError("version must be 1, 2, 3, 4, 5")
+    raise ValueError("version must be 1, 2, 3, 4, 5, ....")
 
 os.makedirs(outpath, exist_ok=True)
 
@@ -127,7 +130,10 @@ mod_data_a = pd.read_csv(mod_data_a_path, sep=None, engine="python")
 mod_data_t_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_11" / "diagnostics" / "t_pain_money.csv"
 mod_data_t = pd.read_csv(mod_data_t_path, sep=None, engine="python")
 
-for _df in [mod_data, mod_data_a, mod_data_t]:
+mod_data_v_rp_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_17" / "diagnostics" / "v_pain_money_rp.csv"
+mod_data_v_rp = pd.read_csv(mod_data_v_rp_path, sep=None, engine="python")
+
+for _df in [mod_data, mod_data_a, mod_data_t, mod_data_v_rp]:
     _df["rt"] = _df["choice_resp.rt"]
     _df["interaction"] = _df["moneylevel"] * _df["painlevel"]
     _df["trialsnum"] = (
@@ -151,14 +157,22 @@ elif version in [2, 4]: # boundary (a)
     pred2_col = "a_moneylevel_subj"
     out_prefix = "v2" if version == 2 else "v4"
 
-elif version in [5]: # boundary (a)
+elif version in [5]: # t
     beh_df = mod_data_t
     pred1_col = "t_painlevel_subj"
     pred2_col = "t_moneylevel_subj"
     out_prefix = "v5" if version == 5 else "v5"
+elif version in [6]: # v
+    beh_df = mod_data_t
+    pred1_col = "v_pain_z_subj"
+    pred2_col = "v_money_z_subj"
+    pred3_col = "v_rp_z_subj"
+    pred4_col = "v_pain_z:rp_z_subj"
+    pred5_col = "v_money_z:rp_z_subj"
+    out_prefix = "v6" if version == 6 else "v6"
 
 else:
-    raise ValueError("version must be 1, 2, 3, 4, 5")
+    raise ValueError("version must be 1, 2, 3, 4, 5,6")
 
 # Subjects in EEG 
 # EEG participants from participants.tsv

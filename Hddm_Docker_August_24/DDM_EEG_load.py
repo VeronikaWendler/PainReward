@@ -69,7 +69,7 @@ numba.config.CACHE_ENABLE = False
 # V_sub = value of the worse option
 
 # params:
-version = 20    # defining version #
+version = 19    # defining version #
 run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
@@ -1679,6 +1679,71 @@ def a_pain_money_rp_contributions(models, data):
     return data_out
 
 
+# for mod 19 
+def v_a_pain_money_contributions(models, data):
+
+    combined = kabuki.utils.concat_models(models)
+    data_out = data.copy()
+
+    # allocate space
+    cols = [
+        "v_intercept_subj", 
+        "v_pain_z_subj", 
+        "v_money_z_subj",
+        "v_intercept_contrib",
+        "v_pain_z_contrib",
+        "v_money_z_contrib",
+        "v_full_trial",
+        "a_intercept_subj", 
+        "a_pain_z_subj", 
+        "a_money_z_subj",
+        "a_intercept_contrib",
+        "a_pain_z_contrib",
+        "a_money_z_contrib",
+        "a_full_trial",
+        
+    ]
+    for c in cols:
+        data_out[c] = np.nan
+
+    for subj in data['subj_idx'].unique():
+        subj_mask = data_out['subj_idx'] == subj
+        subj_data = data_out.loc[subj_mask]
+
+        # Subject-specific posterior means
+        b0 = combined.nodes_db.loc[f"v_Intercept_subj.{subj}", "node"].trace().mean()
+        b1 = combined.nodes_db.loc[f"v_pain_z_subj.{subj}", "node"].trace().mean()
+        b2 = combined.nodes_db.loc[f"v_money_z_subj.{subj}", "node"].trace().mean()
+        b3 = combined.nodes_db.loc[f"a_Intercept_subj.{subj}", "node"].trace().mean()
+        b4 = combined.nodes_db.loc[f"a_pain_z_subj.{subj}", "node"].trace().mean()
+        b5 = combined.nodes_db.loc[f"a_money_z_subj.{subj}", "node"].trace().mean()
+
+        # stable subject-level params
+        data_out.loc[subj_mask, "v_intercept_subj"] = b0
+        data_out.loc[subj_mask, "v_pain_z_subj"] = b1
+        data_out.loc[subj_mask, "v_money_z_subj"] = b2
+        data_out.loc[subj_mask, "a_intercept_subj"] = b3
+        data_out.loc[subj_mask, "a_pain_z_subj"] = b4
+        data_out.loc[subj_mask, "a_money_z_subj"] = b5
+
+        # trial level contributions
+        data_out.loc[subj_mask, "v_intercept_contrib"] = b0
+        data_out.loc[subj_mask, "v_pain_z_contrib"] = b1 * subj_data["pain_z"]
+        data_out.loc[subj_mask, "v_money_z_contrib"] = b2 * subj_data["money_z"]
+        data_out.loc[subj_mask, "a_intercept_contrib"] = b3
+        data_out.loc[subj_mask, "a_pain_z_contrib"] = b4 * subj_data["pain_z"]
+        data_out.loc[subj_mask, "a_money_z_contrib"] = b5 * subj_data["money_z"]
+
+        # full drift per trial
+        data_out.loc[subj_mask, "v_full_trial"] = (
+            data_out.loc[subj_mask, "v_intercept_contrib"]
+            + data_out.loc[subj_mask, "v_pain_z_contrib"]
+            + data_out.loc[subj_mask, "v_money_z_contrib"]
+            + data_out.loc[subj_mask, "a_pain_z_contrib"]
+            + data_out.loc[subj_mask, "a_money_z_contrib"]
+        )
+
+    return data_out
 
 
 # # for model NR2
@@ -1908,6 +1973,9 @@ else:
         elif version == 18:
             sv_contribute = a_pain_money_rp_contributions(models, data)
             sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'a_pain_money_rp.csv' ))
+        elif version == 19:
+            sv_contribute = v_a_pain_money_contributions(models, data)
+            sv_contribute.to_csv(os.path.join(fig_dir, 'diagnostics', 'v_a_pain_money.csv' ))
         else:
             print('None')
             
