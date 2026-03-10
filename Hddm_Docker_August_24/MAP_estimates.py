@@ -853,7 +853,7 @@ def run_mod_20():
 
 if __name__ == "__main__":
     
-    version = 9
+    version = 10
     if version == 9:
         run_mod_9()
     elif version == 10: 
