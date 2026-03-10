@@ -135,7 +135,7 @@ def run_mod_9():
     })
     rows.append({
         "Parameter": "delta",
-        "Group-level": format_estimate(delta.trace()),
+        "Group-level": format_estimate(delta),
     })
 
     df_combined = pd.DataFrame(rows, columns=["Parameter", "Group-level"])
@@ -244,7 +244,7 @@ def run_mod_10():
     })
     rows.append({
         "Parameter": "delta",
-        "Group-level": format_estimate(delta.trace()),
+        "Group-level": format_estimate(delta.trace),
     })
     
     df_combined = pd.DataFrame(rows, columns=["Parameter", "Group-level"])
@@ -382,15 +382,15 @@ def run_mod_17():
     })
     rows.append({
         "Parameter": "delta",
-        "Group-level": format_estimate(delta.trace()),
+        "Group-level": format_estimate(delta.trace),
     })
     rows.append({
         "Parameter": "delta_rp_p",
-        "Group-level": format_estimate(delta_rp_p.trace()),
+        "Group-level": format_estimate(delta_rp_p.trace),
     })
     rows.append({
         "Parameter": "delta_rp_m",
-        "Group-level": format_estimate(delta_rp_m.trace()),
+        "Group-level": format_estimate(delta_rp_m.trace),
     })
  
 
@@ -531,15 +531,15 @@ def run_mod_18():
     })
     rows.append({
         "Parameter": "delta",
-        "Group-level": format_estimate(delta.trace()),
+        "Group-level": format_estimate(delta.trace),
     })
     rows.append({
         "Parameter": "delta_rp_p",
-        "Group-level": format_estimate(delta_rp_p.trace()),
+        "Group-level": format_estimate(delta_rp_p.trace),
     })
     rows.append({
         "Parameter": "delta_rp_m",
-        "Group-level": format_estimate(delta_rp_m.trace()),
+        "Group-level": format_estimate(delta_rp_m.trace),
     })
  
 
@@ -667,11 +667,11 @@ def run_mod_19():
     })
     rows.append({
         "Parameter": "delta_v",
-        "Group-level": format_estimate(delta_v.trace()),
+        "Group-level": format_estimate(delta_v.trace),
     })
     rows.append({
         "Parameter": "delta_a",
-        "Group-level": format_estimate(delta_a.trace()),
+        "Group-level": format_estimate(delta_a.trace),
     })
 
     df_combined = pd.DataFrame(rows, columns=["Parameter", "Group-level"])
