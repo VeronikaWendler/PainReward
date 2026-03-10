@@ -218,7 +218,7 @@ for ridx, regvar in enumerate(regvars):
 
         bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
         for i, bin_id in enumerate(bin_ids):
-            actual_level = unique_levels[int(bin_id)]
+            actual_level = unique_levels[int(bin_id) - 1]
             ax.plot(
                 all_epos[0].times * 1000,
                 evokeds[bin_id].data[pick, :] * 1e6,
