@@ -978,17 +978,20 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
 #  
 #  
     group_params_to_plot = [
-     'z',
-     'a',
-     't',
-     'v_sv_pain_para'
-     ]
+        't', 
+        'v_Intercept',
+        'v_painlevel',
+        'v_moneylevel',
+        'a_Intercept',
+        'a_painlevel',
+        'a_moneylevel'
+        ]
  
     group_vplot_dir = diag_dir / "group_param_vertical_kdes"
     group_vplot_dir.mkdir(parents=True, exist_ok=True)
  
     # bigger, readable fonts
-    vz_title = 25
+    vz_title = 23
     vz_label = 23
     vz_tick  = 23
  
