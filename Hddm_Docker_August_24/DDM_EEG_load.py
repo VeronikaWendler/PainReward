@@ -1012,9 +1012,20 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
             print(f"Skipping parameter with too few valid samples: {param}")
             continue
 
+        # 95% posterior interval
+        ci_low, ci_high = np.percentile(tr, [2.5, 97.5])
+        post_mean = np.mean(tr)
+
         fig, ax = plt.subplots(figsize=(5, 8))
         sns.kdeplot(y=tr, fill=True, ax=ax)
         ax.set_facecolor("white")
+
+        # dotted interval lines
+        ax.axhline(ci_low, linestyle=":", linewidth=2)
+        ax.axhline(ci_high, linestyle=":", linewidth=2)
+
+        # optional: posterior mean or median
+        ax.axhline(post_mean, linestyle="--", linewidth=1.8)
 
         ax.set_title(param, fontsize=vz_title, pad=12)
         ax.set_xlabel("Density", fontsize=vz_label, labelpad=10)
