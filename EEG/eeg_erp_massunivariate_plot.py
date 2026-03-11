@@ -82,6 +82,12 @@ param = {
 plt.rc("axes.spines", top=False, right=False)
 plt.rcParams["font.family"] = "DejaVu Sans"
 
+
+def get_bin_colors(cmap_name, n_bins, minval=0.25, maxval=0.95):
+    cmap = plt.get_cmap(cmap_name)
+    if n_bins == 1:
+        return [cmap(0.7)]
+    return [cmap(x) for x in np.linspace(minval, maxval, n_bins)]
 # ---------------------------------------------------------------------------------------------------
 # Regressors (MATCH MASSUNIVARIATE regvars list + filenames)
 # For BOTH decision and passive, group-level outputs are saved under these names in your script.
@@ -174,71 +180,91 @@ for ridx, regvar in enumerate(regvars):
                     dpi=600, bbox_inches="tight")
         plt.close(fig)
 
-    # -----------------------------
-    # Binned ERP plots
-    # -----------------------------
-    for ch in chan_to_plot:
-        if ch not in beta_ev.ch_names:
-            continue
+        #--------------------------------------------------------------------------------------------------------------------
 
-        fig, ax = plt.subplots(figsize=(4, 2.5))
-
-
-        all_epos.metadata = all_epos.metadata.reset_index(drop=True)
-        level_vals = pd.to_numeric(all_epos.metadata[regvar], errors="coerce")
-        unique_levels = np.sort(level_vals.dropna().unique())
-        unique_levels = unique_levels[unique_levels > 0]
-        level_to_bin = {lev: i for i, lev in enumerate(unique_levels)}
-        all_epos.metadata["bin"] = level_vals.map(level_to_bin)
-        nbins_eff = len(unique_levels)
-
-        # participant-wise averages then grand average
-        sub_evokeds = []
-        for p_id in all_epos.metadata["participant_id"].unique():
-            sub_dat = all_epos[all_epos.metadata["participant_id"] == p_id]
-            sub_evoked = {}
-            for b in range(nbins_eff):
-                if np.sum(sub_dat.metadata["bin"] == b) != 0:
-                    sub_evoked[b] = sub_dat[sub_dat.metadata["bin"] == b].average()
-                else:
-                    sub_evoked[b] = 0
-            sub_evokeds.append(sub_evoked)
-
-        evokeds = {}
-        for b in range(nbins_eff):
-            evoked_list = [sd[b] for sd in sub_evokeds if sd[b] != 0]
-            if len(evoked_list) == 0:
+        # -----------------------------
+        # Binned ERP plots
+        # -----------------------------
+        for ch in chan_to_plot:
+            if ch not in beta_ev.ch_names:
                 continue
-            evokeds[str(b + 1)] = mne.grand_average(evoked_list)
 
-        pick = beta_ev.ch_names.index(ch)
+            fig, ax = plt.subplots(figsize=(4, 2.5))
 
-        ax.set_title(f"{ch} – binned by {regvarname}", fontsize=param["titlefontsize"])
-        ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
-        ax.set_ylabel("Amplitude (µV)", fontsize=param["labelfontsize"])
+            all_epos.metadata = all_epos.metadata.reset_index(drop=True)
+            level_vals = pd.to_numeric(all_epos.metadata[regvar], errors="coerce")
+            unique_levels = np.sort(level_vals.dropna().unique())
+            unique_levels = unique_levels[unique_levels > 0]
+            level_to_bin = {lev: i for i, lev in enumerate(unique_levels)}
+            all_epos.metadata["bin"] = level_vals.map(level_to_bin)
+            nbins_eff = len(unique_levels)
 
-        bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
-        for i, bin_id in enumerate(bin_ids):
-            actual_level = unique_levels[int(bin_id) - 1]
-            ax.plot(
-                all_epos[0].times * 1000,
-                evokeds[bin_id].data[pick, :] * 1e6,
-                linewidth=2,
-                label=str(int(actual_level)),
-                color=plt.get_cmap(cmap)(i / max(1, len(bin_ids) - 1)),
+            # participant-wise averages then grand average
+            sub_evokeds = []
+            for p_id in all_epos.metadata["participant_id"].unique():
+                sub_dat = all_epos[all_epos.metadata["participant_id"] == p_id]
+                sub_evoked = {}
+                for b in range(nbins_eff):
+                    if np.sum(sub_dat.metadata["bin"] == b) != 0:
+                        sub_evoked[b] = sub_dat[sub_dat.metadata["bin"] == b].average()
+                    else:
+                        sub_evoked[b] = 0
+                sub_evokeds.append(sub_evoked)
+
+            evokeds = {}
+            for b in range(nbins_eff):
+                evoked_list = [sd[b] for sd in sub_evokeds if sd[b] != 0]
+                if len(evoked_list) == 0:
+                    continue
+                evokeds[str(b + 1)] = mne.grand_average(evoked_list)
+
+            pick = beta_ev.ch_names.index(ch)
+
+            ax.set_title(f"{ch} – binned by {regvarname}", fontsize=param["titlefontsize"])
+            ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
+            ax.set_ylabel("Amplitude (µV)", fontsize=param["labelfontsize"])
+
+            bin_ids = sorted(evokeds.keys(), key=lambda x: int(x))
+            bin_colors = get_bin_colors(cmap, len(bin_ids), minval=0.25, maxval=0.95)
+
+            for i, bin_id in enumerate(bin_ids):
+                actual_level = unique_levels[int(bin_id) - 1]
+                ax.plot(
+                    all_epos[0].times * 1000,
+                    evokeds[bin_id].data[pick, :] * 1e6,
+                    linewidth=2,
+                    label=str(int(actual_level)),
+                    color=bin_colors[i],
+                )
+
+            ax.axhline(0, linestyle="--", color="gray")
+            ax.axvline(0, linestyle="--", color="gray")
+            ax.set_xticks(np.arange(-200, 1200, 200))
+            ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
+            ax.tick_params(labelsize=param["ticksfontsize"])
+
+            ax.legend(
+                fontsize=8,
+                title="Bin",
+                title_fontsize=9,
+                frameon=False,
+                loc="upper left",
+                bbox_to_anchor=(0.02, 0.98),
+                borderaxespad=0.0,
+                handlelength=1.6,
+                labelspacing=0.3,
             )
 
-        ax.axhline(0, linestyle="--", color="gray")
-        ax.axvline(0, linestyle="--", color="gray")
-        ax.set_xticks(np.arange(-200, 1200, 200))
-        ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
-        ax.tick_params(labelsize=param["ticksfontsize"])
-        ax.legend(fontsize=param["legendfontsize"], frameon=False, title="Bin")
+            fig.tight_layout()
+            fig.savefig(
+                opj(outfigpath, f"{fig_prefix}fig_ols_erps_amp_bins_{regvar}_{ch}.svg"),
+                dpi=600,
+                bbox_inches="tight"
+            )
+            plt.close(fig)
 
-        fig.tight_layout()
-        fig.savefig(opj(outfigpath, f"{fig_prefix}fig_ols_erps_amp_bins_{regvar}_{ch}.svg"),
-                    dpi=600, bbox_inches="tight")
-        plt.close(fig)
+
+
 
     # -----------------------------
     # Mean beta + SEM (sig marks)
