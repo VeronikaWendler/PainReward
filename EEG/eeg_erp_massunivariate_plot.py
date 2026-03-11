@@ -32,7 +32,7 @@ layout = BIDSLayout(basepath)
 # Version + GLM version 
 # version = 2 -> decision plotting 
 # version = 1 -> passive plotting 
-version = 1
+version = 2
 glm_version = "z"  # noz / z / partz
 
 # ---------------------------------------------------------------------------------------------------
