@@ -822,20 +822,20 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
         elif version == 19:
             params_of_interest = ['t', 
                                   'v_Intercept',
-                                  'v_painlevel',
-                                  'v_moneylevel',
+                                  'v_pain_z',
+                                  'v_money_z',
                                   'a_Intercept',
-                                  'a_painlevel',
-                                  'a_moneylevel'
+                                  'a_pain_z',
+                                  'a_money_z'
                                   ]
             params_of_interest_s = [f'{p}_subj' for p in params_of_interest]
             titles = ['Non-dec. time',
                       'v_Intercept',
-                      'v_painlevel',
-                      'v_moneylevel',
+                      'v_pain_z',
+                      'v_money_z',
                       'a_Intercept',
-                      'a_painlevel',
-                      'a_moneylevel'
+                      'a_pain_z',
+                      'a_money_z'
                       ]
                 # these are the RP-models
         elif version == 20:
@@ -980,20 +980,20 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
     group_params_to_plot = [
         't', 
         'v_Intercept',
-        'v_painlevel',
-        'v_moneylevel',
+        'v_pain_z',
+        'v_money_z',
         'a_Intercept',
-        'a_painlevel',
-        'a_moneylevel'
+        'a_pain_z',
+        'a_money_z'
         ]
  
     group_vplot_dir = diag_dir / "group_param_vertical_kdes"
     group_vplot_dir.mkdir(parents=True, exist_ok=True)
  
     # bigger, readable fonts
-    vz_title = 23
-    vz_label = 23
-    vz_tick  = 23
+    vz_title = 26
+    vz_label = 25
+    vz_tick  = 25
  
     for param in group_params_to_plot:
         tr = _get_trace(combined_model, param)
