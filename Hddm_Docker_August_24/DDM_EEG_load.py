@@ -977,65 +977,58 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
 #      print("No traces found for attention/inattention weights; skipping panel.")
 #  
 #  
-    def _get_trace(model, name):
-        try:
-            return model.nodes_db.loc[name, "node"].trace()
-        except Exception:
-            return None
 
-    # collect all group-level parameters that have traces
-    group_params_to_plot = []
+    # only the group-level parameters you actually want
+    group_params_to_plot = [
+    "t",
+    "v_Intercept",
+    "v_pain_z",
+    "v_money_z",
+    "a_Intercept",
+    "a_pain_z",
+    "a_money_z",
+    ]
 
-    for idx in combined_model.nodes_db.index:
-        name = str(idx)
-
-        # skip subject-specific nodes
-        if "_subj" in name:
-            continue
-
-        # skip obvious bookkeeping / nuisance nodes
-        if any(x in name for x in ["wfpt", "like", "deviance", "response", "rt"]):
-            continue
-
-        tr = _get_trace(combined_model, name)
-        if tr is None:
-            continue
-
-        group_params_to_plot.append(name)
-
-    print("\nGroup-level parameters to plot:")
-    for p in group_params_to_plot:
-        print(p)
- 
     group_vplot_dir = diag_dir / "group_param_vertical_kdes"
     group_vplot_dir.mkdir(parents=True, exist_ok=True)
- 
-    # bigger, readable fonts
+
     vz_title = 26
     vz_label = 25
     vz_tick  = 25
- 
+
     for param in group_params_to_plot:
         tr = _get_trace(combined_model, param)
         if tr is None:
             print(f"Skipping missing parameter: {param}")
             continue
- 
+
+        # force 1D numeric array
+        tr = np.asarray(tr).astype(float).ravel()
+
+        # drop NaN / inf just in case
+        tr = tr[np.isfinite(tr)]
+
+        if tr.size < 2:
+            print(f"Skipping parameter with too few valid samples: {param}")
+            continue
+
         fig, ax = plt.subplots(figsize=(5, 8))
         sns.kdeplot(y=tr, fill=True, ax=ax)
         ax.set_facecolor("white")
- 
+
         ax.set_title(param, fontsize=vz_title, pad=12)
         ax.set_xlabel("Density", fontsize=vz_label, labelpad=10)
         ax.set_ylabel("Value", fontsize=vz_label)
         ax.tick_params(axis="both", labelsize=vz_tick, width=1.2)
-        for side in ["top","right"]:
+
+        for side in ["top", "right"]:
             ax.spines[side].set_visible(False)
-        for side in ["left","bottom"]:
+        for side in ["left", "bottom"]:
             ax.spines[side].set_linewidth(1.2)
- 
+
         plt.tight_layout()
-        fig.savefig(group_vplot_dir / f"{param}_vertical_kde_big.pdf", bbox_inches="tight")
+        fig.savefig(group_vplot_dir / f"{_sanitize_filename(param)}_vertical_kde_big.pdf",
+                    bbox_inches="tight")
         plt.close(fig)
  
     
