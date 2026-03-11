@@ -69,7 +69,7 @@ numba.config.CACHE_ENABLE = False
 # V_sub = value of the worse option
 
 # params:
-version = 19    # defining version #
+version = 20    # defining version #
 run = False        # if True, the the models run, if False the models load
 
 phase = ['dec']  #['ES', 'EE']  # Defines which phase you want ('ES', 'EE', 'LE', or the combinations)
@@ -980,14 +980,29 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
 
     # only the group-level parameters you actually want
     group_params_to_plot = [
-    "t",
-    "v_Intercept",
-    "v_pain_z",
-    "v_money_z",
-    "a_Intercept",
-    "a_pain_z",
-    "a_money_z",
+    't',
+    'v_Intercept',
+    'v_pain_z',
+    'v_money_z',
+    'v_rp_z',
+    'v_pain_z:rp_z',
+    'v_money_z:rp_z',
+    'a_Intercept',
+    'a_pain_z',
+    'a_money_z',
+    'a_rp_z',
+    'a_pain_z:rp_z',
+    'a_money_z:rp_z'
     ]
+
+
+    # "t",
+    # "v_Intercept",
+    # "v_pain_z",
+    # "v_money_z",
+    # "a_Intercept",
+    # "a_pain_z",
+    # "a_money_z",
 
     group_vplot_dir = diag_dir / "group_param_vertical_kdes"
     group_vplot_dir.mkdir(parents=True, exist_ok=True)
