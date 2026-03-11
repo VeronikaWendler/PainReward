@@ -977,15 +977,35 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
 #      print("No traces found for attention/inattention weights; skipping panel.")
 #  
 #  
-    group_params_to_plot = [
-        't', 
-        'v_Intercept',
-        'v_pain_z',
-        'v_money_z',
-        'a_Intercept',
-        'a_pain_z',
-        'a_money_z'
-        ]
+    def _get_trace(model, name):
+        try:
+            return model.nodes_db.loc[name, "node"].trace()
+        except Exception:
+            return None
+
+    # collect all group-level parameters that have traces
+    group_params_to_plot = []
+
+    for idx in combined_model.nodes_db.index:
+        name = str(idx)
+
+        # skip subject-specific nodes
+        if "_subj" in name:
+            continue
+
+        # skip obvious bookkeeping / nuisance nodes
+        if any(x in name for x in ["wfpt", "like", "deviance", "response", "rt"]):
+            continue
+
+        tr = _get_trace(combined_model, name)
+        if tr is None:
+            continue
+
+        group_params_to_plot.append(name)
+
+    print("\nGroup-level parameters to plot:")
+    for p in group_params_to_plot:
+        print(p)
  
     group_vplot_dir = diag_dir / "group_param_vertical_kdes"
     group_vplot_dir.mkdir(parents=True, exist_ok=True)
@@ -1018,32 +1038,6 @@ def analyze_model(models, fig_dir, nr_models, version, phase):
         fig.savefig(group_vplot_dir / f"{param}_vertical_kde_big.pdf", bbox_inches="tight")
         plt.close(fig)
  
-#  
-#  #  z-diagnostics text file
-#  z_trace = _get_trace(combined_model, "z")
-#  if z_trace is not None:
-#      z_arr = np.asarray(z_trace)
-#      delta = z_arr - 0.5
-#      p_gt = np.mean(z_arr > 0.5)
-#      p_lt = np.mean(z_arr < 0.5)
-#      p_two_sided = 2 * min(p_gt, p_lt)
-#      hdi_lo, hdi_hi = az.hdi(delta, hdi_prob=0.95).ravel()
-#      rope = 0.02
-#      p_in_rope = np.mean((np.abs(delta) <= rope))
-#  
-#      with open(diag_dir / "z_diagnostics.txt", "w") as f:
-#          f.write("z diagnostics (group-level)\n")
-#          f.write("---------------------------\n")
-#          f.write(f"mean(z)        = {z_arr.mean():.4f}\n")
-#          f.write(f"sd(z)          = {z_arr.std(ddof=1):.4f}\n")
-#          f.write(f"P(z > 0.5)     = {p_gt:.4f}\n")
-#          f.write(f"P(z < 0.5)     = {p_lt:.4f}\n")
-#          f.write(f"Two-sided P(z != 0.5) = {1 - p_two_sided:.4f}\n")
-#          f.write(f"95% HDI(z-0.5) = [{hdi_lo:.4f}, {hdi_hi:.4f}]  (excludes 0? {'YES' if (hdi_lo>0 or hdi_hi<0) else 'NO'})\n")
-#          f.write(f"ROPE +- {rope:.2f}: P(|z-0.5| <= ROPE) = {p_in_rope:.4f}\n")
-#  else:
-#      print("No group-level z trace found; skipping z_diagnostics.")
-    
     
     for f in os.listdir(diag_dir):
         if not f.endswith('.pdf') and not f.endswith('.csv'):
