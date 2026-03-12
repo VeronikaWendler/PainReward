@@ -5,8 +5,9 @@
 #
 # 1. versions
 # 2. cleaning and z scoring
-# 3. grand average & second-level cluster test
-# 4. BH-FDR across cluster p-values within analysis family
+# 3. grand average & second-level mass-univariate inference
+# 4. switchable inference: classic cluster-mass OR TFCE
+# 5. across-map correction (Holm / Bonferroni / none)
 #
 
 import os
@@ -19,7 +20,6 @@ import numpy as np
 import pandas as pd
 from mne.decoding import Scaler
 from mne.stats import spatio_temporal_cluster_1samp_test as st_clust_1s_ttest
-from mne.stats import fdr_correction
 from scipy import stats
 from bids import BIDSLayout
 
@@ -43,6 +43,37 @@ outroot = Path(os.getenv("OUT_DIR", basepath / "statistics"))
 ensure_dir(outroot)
 
 # -----------------------
+# Params
+# -----------------------
+param = {
+    "njobs": 20,
+    "nperms": 5000,
+    "random_state": 23,
+    "testresampfreq": 1024,
+
+    # Inference mode:
+    #   "tfce"    -> threshold-free cluster enhancement
+    #   "cluster" -> classic cluster-mass inference
+    "inference_method": "tfce",
+
+    # For classic cluster inference only:
+    # cluster-forming p-threshold (two-sided converted to t-threshold)
+    "cluster_forming_p": 0.01,
+
+    # For TFCE only:
+    # MNE activates TFCE when threshold is a dict with "start" and "step"
+    "tfce_start": 0.0,
+    "tfce_step": 0.2,
+
+    # Across-map correction (pain, money, diff)
+    "map_alpha": 0.05,
+    "map_correction": "holm",   # "holm", "bonferroni", or "none"
+
+    # Pointwise threshold for writing binary significance masks
+    "point_alpha": 0.05,
+}
+
+# -----------------------
 # Choose version
 # -----------------------
 # version = 1 passive level from passive_beh.tsv; no RT
@@ -57,17 +88,9 @@ else:
     raise ValueError("version must be 1 (passive) or 2 (decision)")
 ensure_dir(outpath)
 
-# -----------------------
-# Params
-# -----------------------
-param = {
-    "njobs": 20,
-    "nperms": 5000,
-    "random_state": 23,
-    "testresampfreq": 1024,
-    "cluster_threshold": 0.01,
-    "fdr_alpha": 0.05,
-}
+# TFCE and cluster outputs are separate
+z_dir = outpath / f"Zscoring_{param['inference_method'].lower()}"
+ensure_dir(z_dir)
 
 # -----------------------
 # Participants
@@ -85,7 +108,10 @@ def get_common_subjects_eeg_hddm(participants_eeg):
             "HDDM_DIR is not set or does not exist, but you asked to restrict subjects to EEG ∩ HDDM."
         )
 
-    mod_data_path = HDDM_DIR / "figures" / "painreward_behavioural_data_mod_9" / "diagnostics" / "v_pain_money.csv"
+    mod_data_path = (
+        HDDM_DIR / "figures" / "painreward_behavioural_data_mod_9" /
+        "diagnostics" / "v_pain_money.csv"
+    )
     if not mod_data_path.exists():
         raise RuntimeError(f"Missing HDDM decision file: {mod_data_path}")
 
@@ -96,140 +122,242 @@ def get_common_subjects_eeg_hddm(participants_eeg):
     return common, mod_data
 
 common_participants, mod_data_decision = get_common_subjects_eeg_hddm(part_eeg)
-print("\nSubjects in EEG ∩ HDDM (decision selection):", common_participants)
+print("\nSubjects in EEG ∩ HDDM:", common_participants)
 print("N =", len(common_participants))
 
 # -----------------------
-# Cluster / FDR helpers
+# Inference helpers
 # -----------------------
-def compute_cluster_threshold(n_samples, cluster_threshold):
-    if not isinstance(cluster_threshold, dict):
-        p_thresh = cluster_threshold / 2
-        return -stats.t.ppf(p_thresh, n_samples - 1)
-    return cluster_threshold
+def compute_threshold(n_samples, param):
+    """
+    Returns the threshold argument to pass into
+    mne.stats.spatio_temporal_cluster_1samp_test.
 
-def run_cluster_test(data_3d, connect, cluster_threshold, param):
+    - For classic cluster inference: numeric t-threshold
+    - For TFCE: dict(start=..., step=...)
+    """
+    method = param["inference_method"].lower()
+
+    if method == "tfce":
+        return {
+            "start": float(param["tfce_start"]),
+            "step": float(param["tfce_step"]),
+        }
+
+    if method == "cluster":
+        # two-sided threshold because tail=0 below
+        p_thresh = float(param["cluster_forming_p"]) / 2.0
+        t_thresh = -stats.t.ppf(p_thresh, n_samples - 1)
+        return float(t_thresh)
+
+    raise ValueError(f"Unknown inference_method: {method}")
+
+
+def run_massuni_test(data_3d, connect, param):
     """
     data_3d: (n_subj, n_ch, n_time)
-    returns:
-        tval: (n_time, n_ch)
-        clusters
-        cluster_p_values
+
+    Returns dict with:
+        stat_map:          (n_time, n_ch)
+        clusters:          cluster definitions returned by MNE
+        cluster_p_values:  corrected p-values returned by MNE
+        pmap_corrected:    corrected pointwise p-map
+        sig_mask:          corrected significance mask
+        threshold_used:    numeric threshold or TFCE dict
+        method:            "cluster" or "tfce"
     """
     testdata = np.swapaxes(data_3d, 2, 1)  # -> (n_subj, n_time, n_ch)
+    threshold = compute_threshold(testdata.shape[0], param)
 
-    tval, clusters, cluster_p_values, _ = st_clust_1s_ttest(
+    stat_map, clusters, cluster_p_values, _ = st_clust_1s_ttest(
         testdata,
         n_jobs=param["njobs"],
-        threshold=cluster_threshold,
+        threshold=threshold,
         adjacency=connect,
         n_permutations=param["nperms"],
         buffer_size=None,
         seed=param["random_state"],
+        tail=0,  # two-sided
     )
 
-    return tval, clusters, np.asarray(cluster_p_values, dtype=float)
+    cluster_p_values = np.asarray(cluster_p_values, dtype=float)
 
-def cluster_pmap_from_values(shape, clusters, cluster_p_values):
-    pmap = np.ones(shape, dtype=float)
-    for c, p_val in zip(clusters, cluster_p_values):
-        pmap[c] = p_val
-    return pmap
+    # Build corrected pointwise p-map
+    pmap_corrected = np.ones(stat_map.shape, dtype=float)
+    for clu, p_val in zip(clusters, cluster_p_values):
+        pmap_corrected[clu] = np.minimum(pmap_corrected[clu], p_val)
 
-def apply_fdr_to_cluster_results(cluster_results, alpha=0.05):
+    sig_mask = pmap_corrected < float(param["point_alpha"])
+
+    return {
+        "stat_map": stat_map,
+        "clusters": clusters,
+        "cluster_p_values": cluster_p_values,
+        "pmap_corrected": pmap_corrected,
+        "sig_mask": sig_mask,
+        "threshold_used": threshold,
+        "method": param["inference_method"].lower(),
+    }
+
+
+def extract_map_level_p(result):
     """
-    cluster_results: list of dicts with keys:
-        name, tval, clusters, cluster_p_values
+    Derive one omnibus p-value per statistical map.
 
-    returns updated cluster_results with:
-        pmap_raw, pmap_fdr
-    plus cluster table dataframe
+    We use the minimum corrected cluster/TFCE p-value returned by MNE.
+    If nothing is returned, assign p=1.
     """
-    all_cluster_ps = []
-    cluster_index = []
+    pvals = np.asarray(result["cluster_p_values"], dtype=float)
+    if pvals.size == 0:
+        return 1.0
+    return float(np.min(pvals))
 
-    for r_idx, res in enumerate(cluster_results):
-        for c_idx, p in enumerate(res["cluster_p_values"]):
-            all_cluster_ps.append(p)
-            cluster_index.append((r_idx, c_idx))
 
-    all_cluster_ps = np.asarray(all_cluster_ps, dtype=float)
+def holm_correction(pvals, alpha=0.05):
+    """
+    Holm-Bonferroni correction.
+    Returns:
+        reject, p_adj
+    """
+    pvals = np.asarray(pvals, dtype=float)
+    m = len(pvals)
 
-    if len(all_cluster_ps) > 0:
-        rej_fdr, p_fdr = fdr_correction(all_cluster_ps, alpha=alpha, method="indep")
+    if m == 0:
+        return np.array([], dtype=bool), np.array([], dtype=float)
+
+    order = np.argsort(pvals)
+    p_sorted = pvals[order]
+
+    adj_sorted = np.empty(m, dtype=float)
+    for i, p in enumerate(p_sorted):
+        adj_sorted[i] = (m - i) * p
+
+    # enforce monotonicity
+    adj_sorted = np.maximum.accumulate(adj_sorted)
+    adj_sorted = np.clip(adj_sorted, 0, 1)
+
+    p_adj = np.empty(m, dtype=float)
+    p_adj[order] = adj_sorted
+
+    reject = p_adj < float(alpha)
+    return reject, p_adj
+
+
+def correct_across_maps(results, alpha=0.05, method="holm"):
+    """
+    results: list of dicts returned by run_massuni_test, each with a 'name' key.
+
+    Adds:
+        map_p_raw
+        map_p_adj
+        map_sig
+
+    Returns:
+        updated results, map_table
+    """
+    raw_ps = np.array([extract_map_level_p(r) for r in results], dtype=float)
+
+    method = method.lower()
+    if method == "holm":
+        reject, p_adj = holm_correction(raw_ps, alpha=alpha)
+    elif method == "bonferroni":
+        p_adj = np.clip(raw_ps * len(raw_ps), 0, 1)
+        reject = p_adj < alpha
+    elif method == "none":
+        p_adj = raw_ps.copy()
+        reject = p_adj < alpha
     else:
-        rej_fdr = np.array([], dtype=bool)
-        p_fdr = np.array([], dtype=float)
+        raise ValueError(f"Unknown map_correction method: {method}")
 
     rows = []
-    for r_idx, res in enumerate(cluster_results):
-        shape = res["tval"].shape
-        pmap_raw = np.ones(shape, dtype=float)
-        pmap_fdr = np.ones(shape, dtype=float)
+    for i, r in enumerate(results):
+        r["map_p_raw"] = float(raw_ps[i])
+        r["map_p_adj"] = float(p_adj[i])
+        r["map_sig"] = bool(reject[i])
 
-        for c_idx, cluster in enumerate(res["clusters"]):
-            raw_p = float(res["cluster_p_values"][c_idx])
+        rows.append({
+            "map": r["name"],
+            "inference_method": r["method"],
+            "threshold_used": str(r["threshold_used"]),
+            "map_p_raw": r["map_p_raw"],
+            "map_p_adj": r["map_p_adj"],
+            "map_sig": r["map_sig"],
+        })
 
-            match = [i for i, (rr, cc) in enumerate(cluster_index) if rr == r_idx and cc == c_idx]
-            if len(match) == 1:
-                adj_p = float(p_fdr[match[0]])
-                sig_fdr = bool(rej_fdr[match[0]])
-            else:
-                adj_p = 1.0
-                sig_fdr = False
+    return results, pd.DataFrame(rows)
 
-            pmap_raw[cluster] = raw_p
-            pmap_fdr[cluster] = adj_p
 
-            rows.append({
-                "map": res["name"],
-                "cluster_idx": c_idx,
-                "cluster_p_raw": raw_p,
-                "cluster_p_fdr": adj_p,
-                "sig_fdr": sig_fdr,
-            })
-
-        res["pmap_raw"] = pmap_raw
-        res["pmap_fdr"] = pmap_fdr
-
-    cluster_table = pd.DataFrame(rows)
-    return cluster_results, cluster_table
-
-def save_cluster_family_outputs(cluster_results, regvars_main, z_dir):
+def save_massuni_outputs(results, regvars_main, z_dir):
     """
-    Saves:
-      - per-map raw/fdr p-maps
-      - stacked arrays for main regressors
-      - optional diff files if present
+    Saves per-map stats and corrected p-maps.
     """
-    for res in cluster_results:
+    for res in results:
         name = res["name"]
-        np.save(z_dir / f"ols_2ndlevel_tval_{name}.npy", res["tval"])
-        np.save(z_dir / f"ols_2ndlevel_pval_raw_{name}.npy", res["pmap_raw"])
-        np.save(z_dir / f"ols_2ndlevel_pval_fdr_{name}.npy", res["pmap_fdr"])
 
-    # main regressors stack
-    main_results = [r for r in cluster_results if r["name"] in regvars_main]
+        np.save(z_dir / f"ols_2ndlevel_tval_{name}.npy", res["stat_map"])
+        np.save(z_dir / f"ols_2ndlevel_pval_corr_{name}.npy", res["pmap_corrected"])
+        np.save(z_dir / f"ols_2ndlevel_sigmask_{name}.npy", res["sig_mask"])
+        np.save(
+            z_dir / f"ols_2ndlevel_cluster_pvals_{name}.npy",
+            np.asarray(res["cluster_p_values"], dtype=float),
+        )
 
-    tvals = np.stack([r["tval"] for r in main_results])
-    pvals_raw = np.stack([r["pmap_raw"] for r in main_results])
-    pvals_fdr = np.stack([r["pmap_fdr"] for r in main_results])
+    main_results = [r for r in results if r["name"] in regvars_main]
+
+    tvals = np.stack([r["stat_map"] for r in main_results])
+    pvals_corr = np.stack([r["pmap_corrected"] for r in main_results])
+    sigmasks = np.stack([r["sig_mask"] for r in main_results])
 
     np.save(z_dir / "ols_2ndlevel_tvals.npy", tvals)
-    np.save(z_dir / "ols_2ndlevel_pvals_raw.npy", pvals_raw)
-    np.save(z_dir / "ols_2ndlevel_pvals_fdr.npy", pvals_fdr)
+    np.save(z_dir / "ols_2ndlevel_pvals.npy", pvals_corr)  # backward-compatible final corrected maps
+    np.save(z_dir / "ols_2ndlevel_pvals_corr.npy", pvals_corr)
+    np.save(z_dir / "ols_2ndlevel_sigmasks.npy", sigmasks)
 
-    # backward compatibility: if old plotting still expects this name,
-    # write it as the FINAL corrected maps, not raw maps.
-    np.save(z_dir / "ols_2ndlevel_pvals.npy", pvals_fdr)
+
+def run_second_level_family(allbetas, beta_gavg, regvars, z_dir, param):
+    """
+    Shared second-level inference for both version 1 and version 2.
+
+    allbetas shape: (n_subj, 2, n_ch, n_time)
+    """
+    connect, _ = mne.channels.find_ch_adjacency(beta_gavg[0].info, ch_type="eeg")
+
+    massuni_results = []
+
+    for idx, regvar in enumerate(regvars):
+        print(f"\nSecond-level {param['inference_method'].upper()} test for {regvar}")
+        data_reg = allbetas[:, idx, :, :]
+        res_reg = run_massuni_test(data_reg, connect, param)
+        res_reg["name"] = regvar
+        massuni_results.append(res_reg)
+
+    print(f"\nSecond-level {param['inference_method'].upper()} test for pain - money beta difference ...")
+    beta_diff = allbetas[:, 0, :, :] - allbetas[:, 1, :, :]
+    res_diff = run_massuni_test(beta_diff, connect, param)
+    res_diff["name"] = "diff_pain_minus_money"
+    massuni_results.append(res_diff)
+
+    massuni_results, map_table = correct_across_maps(
+        massuni_results,
+        alpha=param["map_alpha"],
+        method=param["map_correction"],
+    )
+    map_table.to_csv(z_dir / "map_table_corrected.csv", index=False)
+
+    save_massuni_outputs(massuni_results, regvars_main=regvars, z_dir=z_dir)
+
+    diff_res = [r for r in massuni_results if r["name"] == "diff_pain_minus_money"][0]
+    np.save(z_dir / "ols_2ndlevel_tval_diff_pain_minus_money.npy", diff_res["stat_map"])
+    np.save(z_dir / "ols_2ndlevel_pval_diff_pain_minus_money.npy", diff_res["pmap_corrected"])
+    np.save(z_dir / "ols_2ndlevel_sigmask_diff_pain_minus_money.npy", diff_res["sig_mask"])
+
+    return massuni_results, map_table
 
 # ============================================================
 # v2 DECISION
 # ============================================================
 if version == 2:
     regvars = ["painlevel", "moneylevel"]
-    z_dir = Path(outpath) / "Zscoring"
-    ensure_dir(z_dir)
 
     mod_data = mod_data_decision.copy()
     mod_data = mod_data[mod_data["participant"].isin(common_participants)].copy()
@@ -346,7 +474,7 @@ if version == 2:
         epo_keep.metadata["moneylevel"] = mod2k["moneylevel"].to_numpy(dtype=float)
         epo_keep.metadata["participant_id"] = pa
         epo_keep.metadata["rt"] = mod2k[rt_col].to_numpy(dtype=float)
-        
+
         scale = Scaler(scalings="mean")
         epo_z = mne.EpochsArray(scale.fit_transform(epo_keep.get_data()), epo_keep.info)
 
@@ -358,6 +486,11 @@ if version == 2:
 
         names = ["Intercept", "pain_z", "money_z", "RT_z"]
         design = df_reg[names]
+
+        if not np.all(np.isfinite(design.to_numpy())):
+            print(f"Skipping {pa}: NaN/Inf in design")
+            skipped_subjects.append(pa)
+            continue
 
         res = mne.stats.linear_regression(epo_z, design, names=names)
         beta_pain = res["pain_z"].beta
@@ -378,52 +511,13 @@ if version == 2:
     allbetas = np.stack(allbetasnp)  # (n_subj, 2, n_ch, n_time)
     beta_gavg = [mne.grand_average(betas[i]) for i in range(len(regvars))]
 
-    connect, _ = mne.channels.find_ch_adjacency(beta_gavg[0].info, ch_type="eeg")
-    cluster_threshold = compute_cluster_threshold(allbetas.shape[0], param["cluster_threshold"])
-
-    # main regressor cluster tests
-    cluster_results = []
-    for idx, regvar in enumerate(regvars):
-        print(f"\nDECISION second-level cluster test for {regvar}")
-        data_reg = allbetas[:, idx, :, :]
-        tval, clusters, cluster_p_values = run_cluster_test(
-            data_reg, connect, cluster_threshold, param
-        )
-        cluster_results.append({
-            "name": regvar,
-            "tval": tval,
-            "clusters": clusters,
-            "cluster_p_values": cluster_p_values,
-        })
-
-    # optional pain-minus-money difference map, included in the same FDR family
-    print("\nDECISION: pain - money beta difference cluster test ...")
-    beta_diff = allbetas[:, 0, :, :] - allbetas[:, 1, :, :]
-    tval_diff, clusters_diff, cluster_p_values_diff = run_cluster_test(
-        beta_diff, connect, cluster_threshold, param
+    massuni_results, map_table = run_second_level_family(
+        allbetas=allbetas,
+        beta_gavg=beta_gavg,
+        regvars=regvars,
+        z_dir=z_dir,
+        param=param,
     )
-    cluster_results.append({
-        "name": "diff_pain_minus_money",
-        "tval": tval_diff,
-        "clusters": clusters_diff,
-        "cluster_p_values": cluster_p_values_diff,
-    })
-
-    cluster_results, cluster_table = apply_fdr_to_cluster_results(
-        cluster_results, alpha=param["fdr_alpha"]
-    )
-    cluster_table.to_csv(z_dir / "cluster_table_fdr.csv", index=False)
-
-    save_cluster_family_outputs(cluster_results, regvars_main=regvars, z_dir=z_dir)
-
-    # save compatibility names for diff map
-    diff_res = [r for r in cluster_results if r["name"] == "diff_pain_minus_money"][0]
-    np.save(z_dir / "ols_2ndlevel_tval_diff_pain_minus_money.npy", diff_res["tval"])
-    np.save(z_dir / "ols_2ndlevel_pval_raw_diff_pain_minus_money.npy", diff_res["pmap_raw"])
-    np.save(z_dir / "ols_2ndlevel_pval_fdr_diff_pain_minus_money.npy", diff_res["pmap_fdr"])
-
-    # save old compatibility name as final corrected map
-    np.save(z_dir / "ols_2ndlevel_pval_diff_pain_minus_money.npy", diff_res["pmap_fdr"])
 
     np.save(z_dir / "ols_2ndlevel_betas.npy", allbetas)
     np.save(z_dir / "included_subjects.npy", np.array(included_subjects, dtype=object))
@@ -436,6 +530,7 @@ if version == 2:
         epo_save.save(z_dir / f"ols_2ndlevel_allepochs-epo_{regvar}.fif", overwrite=True)
 
     print("\nDECISION finished.")
+    print("Inference method:", param["inference_method"])
     print("Saved outputs in:", z_dir)
     print("Included subjects:", included_subjects)
     print("Skipped subjects:", skipped_subjects)
@@ -445,8 +540,6 @@ if version == 2:
 # ============================================================
 elif version == 1:
     regvars = ["painlevel", "moneylevel"]
-    z_dir = Path(outpath) / "Zscoring"
-    ensure_dir(z_dir)
 
     all_epos = [[] for _ in range(len(regvars))]
     allbetasnp = []
@@ -607,49 +700,13 @@ elif version == 1:
     allbetas = np.stack(allbetasnp)
     beta_gavg = [mne.grand_average(betas[i]) for i in range(len(regvars))]
 
-    connect, _ = mne.channels.find_ch_adjacency(beta_gavg[0].info, ch_type="eeg")
-    cluster_threshold = compute_cluster_threshold(allbetas.shape[0], param["cluster_threshold"])
-
-    cluster_results = []
-    for idx, regvar in enumerate(regvars):
-        print(f"\nPASSIVE second-level cluster test for {regvar}")
-        data_reg = allbetas[:, idx, :, :]
-        tval, clusters, cluster_p_values = run_cluster_test(
-            data_reg, connect, cluster_threshold, param
-        )
-        cluster_results.append({
-            "name": regvar,
-            "tval": tval,
-            "clusters": clusters,
-            "cluster_p_values": cluster_p_values,
-        })
-
-    print("\nPASSIVE: pain - money beta difference cluster test ...")
-    beta_diff = allbetas[:, 0, :, :] - allbetas[:, 1, :, :]
-    tval_diff, clusters_diff, cluster_p_values_diff = run_cluster_test(
-        beta_diff, connect, cluster_threshold, param
+    massuni_results, map_table = run_second_level_family(
+        allbetas=allbetas,
+        beta_gavg=beta_gavg,
+        regvars=regvars,
+        z_dir=z_dir,
+        param=param,
     )
-    cluster_results.append({
-        "name": "diff_pain_minus_money",
-        "tval": tval_diff,
-        "clusters": clusters_diff,
-        "cluster_p_values": cluster_p_values_diff,
-    })
-
-    cluster_results, cluster_table = apply_fdr_to_cluster_results(
-        cluster_results, alpha=param["fdr_alpha"]
-    )
-    cluster_table.to_csv(z_dir / "cluster_table_fdr.csv", index=False)
-
-    save_cluster_family_outputs(cluster_results, regvars_main=regvars, z_dir=z_dir)
-
-    diff_res = [r for r in cluster_results if r["name"] == "diff_pain_minus_money"][0]
-    np.save(z_dir / "ols_2ndlevel_tval_diff_pain_minus_money.npy", diff_res["tval"])
-    np.save(z_dir / "ols_2ndlevel_pval_raw_diff_pain_minus_money.npy", diff_res["pmap_raw"])
-    np.save(z_dir / "ols_2ndlevel_pval_fdr_diff_pain_minus_money.npy", diff_res["pmap_fdr"])
-
-    # backward compatibility name -> final corrected map
-    np.save(z_dir / "ols_2ndlevel_pval_diff_pain_minus_money.npy", diff_res["pmap_fdr"])
 
     np.save(z_dir / "ols_2ndlevel_betas.npy", allbetas)
     np.save(z_dir / "included_subjects.npy", np.array(included_subjects, dtype=object))
@@ -662,12 +719,10 @@ elif version == 1:
         epo_save.save(z_dir / f"ols_2ndlevel_allepochs-epo_{regvar}.fif", overwrite=True)
 
     print("\nPASSIVE finished.")
+    print("Inference method:", param["inference_method"])
     print("Saved outputs in:", z_dir)
     print("Included subjects:", included_subjects)
     print("Skipped subjects:", skipped_subjects)
-
-
-
 
 
 
