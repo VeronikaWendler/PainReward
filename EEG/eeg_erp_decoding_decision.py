@@ -3,15 +3,26 @@
 # Vero
 # Decision phase: Time-resolved decoding of money- and pain-cue levels (decision phase)
 #
-# KEEP ONLY:
+# MAIN ANALYSIS
 # 1) Standard binary (low=20/40 vs high=80/100; drops 60)
 #    - money: AUC + balanced accuracy
 #    - pain : AUC + balanced accuracy
-#    - ctrlOtherRT only  (other cue + RT controlled together)
+#    - raw
 #    - shuffle controls
 #    - group TFCE cluster permutation tests over time + time plots
 #
-# 2) Cross-label generalization, binary only
+# CONTROL ANALYSIS
+# 2) Label-residualized regression control
+#    - residualize cue level by:
+#         other cue (lin) + RT (lin)
+#    - decode residualized cue label from EEG
+#    - money: corr-r
+#    - pain : corr-r
+#    - shuffle controls
+#    - group TFCE cluster permutation tests over time + time plots
+#
+# CROSS-GENERALIZATION
+# 3) Cross-label generalization, binary only
 #    (A) Time-resolved diagonal:
 #        - Train on money labels, test on pain labels  (money->pain)
 #        - Train on pain labels, test on money labels  (pain->money)
@@ -20,15 +31,18 @@
 #    (B) Cross-label temporal generalization heatmaps:
 #        - money->pain and pain->money
 #        - binary only
-#        - ONLY for ctrlOtherRT and its shuffle
+#        - raw + shuffle only
 #
-# IMPORTANT CONTROL RULE:
-#    whenever we control for the other cue, we ALWAYS also control for RT
-#    -> ctrlOther == other cue + RT
+# IMPORTANT:
+#   - RT is NOT residualized out of EEG
+#   - Instead, in the control analysis the TARGET LABEL is residualized by:
+#         other cue + RT
+#   - This keeps the neural data intact while testing cue information independent of RT
 #
 # OUTPUTS
-# derivatives/statistics/mvpa_decision_step1_conserv2/
+# derivatives/statistics/mvpa_time_decoding_decision_phase/
 #   binary_lowhigh_auc_bacc/
+#   label_control_regression/
 #   cross_generalization/
 #      binary/
 #   debug/
@@ -44,8 +58,8 @@ import matplotlib.pyplot as plt
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, GroupKFold
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_score
 from sklearn.base import clone
 
@@ -111,13 +125,17 @@ TMAX_STAT = 1.0
 
 # Run flags
 RUN_BINARY = True
+RUN_LABEL_CONTROL = True
 RUN_SHUFFLE = True
-RUN_CONTROL_BY_OTHER = True
 RUN_CROSS_GENERALIZATION = True
 
 # Binary settings
 CHANCE_BIN = 0.5
 BIN_KEEP_LEVELS = np.array([20, 40, 80, 100], dtype=int)
+
+# Label-control regression settings
+CHANCE_REG = 0.0
+LEVELS_FOR_LABELCTRL = np.array([20, 40, 80, 100], dtype=int)
 
 # Heatmap controls (temporal generalization)
 # At 100 Hz, decim=2 -> 20 ms grid for heatmaps
@@ -130,16 +148,18 @@ LEVEL_CODE_TO_LEVEL = {1: 20, 2: 40, 3: 60, 4: 80, 5: 100}
 # output folders
 # -----------------------------
 OUT_DIR_BIN = OUT_DIR / "binary_lowhigh_auc_bacc"
+OUT_DIR_LABELCTRL = OUT_DIR / "label_control_regression"
 
 OUT_DIR_XGEN = OUT_DIR / "cross_generalization"
 OUT_DIR_XGEN_BIN = OUT_DIR_XGEN / "binary"
 
-for _d in [OUT_DIR_BIN, OUT_DIR_XGEN_BIN]:
+for _d in [OUT_DIR_BIN, OUT_DIR_LABELCTRL, OUT_DIR_XGEN_BIN]:
     _d.mkdir(parents=True, exist_ok=True)
 
 DEBUG_DIR_BIN = OUT_DIR_BIN / "debug"
+DEBUG_DIR_LABELCTRL = OUT_DIR_LABELCTRL / "debug"
 DEBUG_DIR_XGEN_BIN = OUT_DIR_XGEN_BIN / "debug"
-for _d in [DEBUG_DIR_BIN, DEBUG_DIR_XGEN_BIN]:
+for _d in [DEBUG_DIR_BIN, DEBUG_DIR_LABELCTRL, DEBUG_DIR_XGEN_BIN]:
     _d.mkdir(parents=True, exist_ok=True)
 
 
@@ -451,7 +471,6 @@ def merge_beh_into_epochs_decision(epo: mne.Epochs, beh: pd.DataFrame, sub: str,
             log_print(f"{sub}: epochs.metadata already contains {DEC_MONEY_COL}+{DEC_PAIN_COL} (no merge needed)")
         return epo
 
-    # ---- trialsnum merge ----
     if (KEY_TRIALNUM in md.columns) and (KEY_TRIALNUM in beh.columns):
         merged = md.merge(
             beh,
@@ -467,7 +486,6 @@ def merge_beh_into_epochs_decision(epo: mne.Epochs, beh: pd.DataFrame, sub: str,
         log_print(f"{sub}: merged beh into epochs using '{KEY_TRIALNUM}'")
         return epo
 
-    # ---- key merge ----
     can_key_merge = (
         (KEY_BLOCK in md.columns) and (KEY_TRIAL in md.columns) and
         (KEY_BLOCK in beh.columns) and (KEY_TRIAL in beh.columns)
@@ -501,7 +519,6 @@ def merge_beh_into_epochs_decision(epo: mne.Epochs, beh: pd.DataFrame, sub: str,
         log_print(f"{sub}: merged beh into epochs using KEYS ({KEY_BLOCK}, {KEY_TRIAL})")
         return epo
 
-    # ---- final fallback: order merge ----
     if len(md) == len(beh):
         merged = md.copy()
         for c in beh.columns:
@@ -593,7 +610,7 @@ def save_decision_trial_counts(
 
 
 # =====================================================================
-# Residualization helpers (control-by-other + RT)
+# Residualization helpers (label residualization)
 # =====================================================================
 
 def _design_matrix_from_nuisances(
@@ -603,13 +620,6 @@ def _design_matrix_from_nuisances(
 ) -> np.ndarray:
     """
     Build design matrix with intercept + nuisance terms.
-
-    models:
-      - if str: applied to ALL nuisances ("lin" or "quad")
-      - if list[str]: per-nuisance specification, len(models) == len(nuisances)
-
-    "lin"  -> add nuisance
-    "quad" -> add nuisance + nuisance^2
     """
     if len(nuisances) == 0:
         raise ValueError("No nuisances provided.")
@@ -647,40 +657,34 @@ def _design_matrix_from_nuisances(
     return np.column_stack(cols)
 
 
-def residualize_X_by_nuisances(
-    X: np.ndarray,
+def residualize_target_by_nuisances(
+    y: np.ndarray,
     nuisances: list[np.ndarray],
     models: str | list[str] = "lin"
 ) -> np.ndarray:
     """
-    Residualize EEG features w.r.t. nuisance vector(s) across trials.
-
-    Here ctrlOther means:
-      - other cue level (lin)
-      - RT (lin)
+    Residualize target vector y with respect to nuisance vector(s).
+    Returns y_resid = y - y_hat
     """
-    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float).ravel()
     if len(nuisances) == 0:
-        return X
+        return y
 
-    n_trials = X.shape[0]
     for i, n in enumerate(nuisances):
-        if np.asarray(n).shape[0] != n_trials:
+        if np.asarray(n).shape[0] != y.shape[0]:
             raise ValueError(
-                f"Residualization mismatch: nuisance[{i}] len={np.asarray(n).shape[0]} vs X trials={n_trials}"
+                f"Residualization mismatch: nuisance[{i}] len={np.asarray(n).shape[0]} vs y len={y.shape[0]}"
             )
 
     A = _design_matrix_from_nuisances(nuisances, models=models, zscore=True)
-
-    Y = X.reshape(n_trials, -1)
-    beta, *_ = np.linalg.lstsq(A, Y, rcond=None)
-    Y_hat = A @ beta
-    Y_resid = Y - Y_hat
-    return Y_resid.reshape(X.shape)
+    beta, *_ = np.linalg.lstsq(A, y, rcond=None)
+    y_hat = A @ beta
+    y_resid = y - y_hat
+    return y_resid
 
 
 # =====================================================================
-# Trial selection (standard)
+# Trial selection
 # =====================================================================
 
 def _get_levels_and_rt_from_epochs(epo: mne.Epochs) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -702,14 +706,13 @@ def _get_levels_and_rt_from_epochs(epo: mne.Epochs) -> tuple[np.ndarray, np.ndar
     return money_levels, pain_levels, rt
 
 
-def select_trials_decision_binary(epo: mne.Epochs, which: str, control_resid_by_other: bool):
+def select_trials_decision_binary(epo: mne.Epochs, which: str):
     """
-    BINARY:
+    MAIN BINARY ANALYSIS:
       - keep 20/40/80/100 (drop 60)
       - y = 0/1
       - drop trials with invalid RT
-      - if control_resid_by_other: residualize by [other cue, RT] (lin, lin)
-    Returns: X, y, times, md_f, levels_f, other_f, rt_f, info(dict)
+      - EEG remains untouched
     """
     money_levels, pain_levels, rt = _get_levels_and_rt_from_epochs(epo)
 
@@ -733,13 +736,6 @@ def select_trials_decision_binary(epo: mne.Epochs, which: str, control_resid_by_
     X = epo_f.get_data()
     times = epo_f.times.copy()
 
-    if control_resid_by_other:
-        X = residualize_X_by_nuisances(
-            X,
-            nuisances=[other_f.astype(float), rt_f.astype(float)],
-            models=["lin", "lin"],
-        )
-
     y = make_binary_labels(levels_f.astype(float))
     if np.any(y < 0):
         raise ValueError(f"Unlabeled trials exist after filtering. Levels seen: {np.unique(levels_f)}")
@@ -756,16 +752,63 @@ def select_trials_decision_binary(epo: mne.Epochs, which: str, control_resid_by_
     return X, y, times, md_f, levels_f, other_f, rt_f, info
 
 
-# =====================================================================
-# Trial selection (cross-generalization)
-# =====================================================================
+def select_trials_decision_label_control(epo: mne.Epochs, which: str):
+    """
+    LABEL-CONTROL ANALYSIS:
+      - keep 20/40/80/100 (drop 60)
+      - target = residualized cue level after removing:
+            other cue (lin) + RT (lin)
+      - EEG remains untouched
+      - returns continuous target for regression decoding
+    """
+    money_levels, pain_levels, rt = _get_levels_and_rt_from_epochs(epo)
 
-def select_trials_crossgen_binary(epo: mne.Epochs, control_by_other_train: bool, train: str):
+    levels = money_levels if which == "money" else pain_levels
+    other = pain_levels if which == "money" else money_levels
+
+    n_in = int(len(epo))
+    keep = np.isin(levels, LEVELS_FOR_LABELCTRL) & np.isfinite(rt)
+    n_after_level = int(keep.sum())
+
+    epo_f = epo.copy()[keep]
+    md_f = epo_f.metadata.reset_index(drop=True)
+
+    levels_f = levels[keep].astype(float)
+    other_f = other[keep].astype(float)
+    rt_f = rt[keep].astype(float)
+
+    if len(epo_f) < 10:
+        raise ValueError(f"Too few trials after filtering for decision {which} label-control. n={len(epo_f)}")
+
+    X = epo_f.get_data()
+    times = epo_f.times.copy()
+
+    y_resid = residualize_target_by_nuisances(
+        levels_f,
+        nuisances=[other_f, rt_f],
+        models=["lin", "lin"],
+    )
+
+    info = dict(
+        n_in=n_in,
+        n_after_level=n_after_level,
+        n_after_nan=int(len(y_resid)),
+        n_drop_level=int(n_in - n_after_level),
+        n_drop_nan=0,
+        y_raw_min=float(np.min(levels_f)),
+        y_raw_max=float(np.max(levels_f)),
+        y_resid_mean=float(np.mean(y_resid)),
+        y_resid_sd=float(np.std(y_resid)),
+    )
+    return X, y_resid, times, md_f, levels_f, other_f, rt_f, info
+
+
+def select_trials_crossgen_binary(epo: mne.Epochs, train: str):
     """
     Cross-label binary:
       - keep trials where BOTH money and pain are in BIN_KEEP_LEVELS
       - drop trials with invalid RT
-      - if control_by_other_train: residualize by [other-of-train, RT] (lin, lin)
+      - raw labels only (no RT label-control here)
     """
     money_levels, pain_levels, rt = _get_levels_and_rt_from_epochs(epo)
 
@@ -795,14 +838,6 @@ def select_trials_crossgen_binary(epo: mne.Epochs, control_by_other_train: bool,
     X = epo_f.get_data()
     times = epo_f.times.copy()
 
-    if control_by_other_train:
-        nuis_other = p if train == "money" else m
-        X = residualize_X_by_nuisances(
-            X,
-            nuisances=[nuis_other.astype(float), rt_f.astype(float)],
-            models=["lin", "lin"],
-        )
-
     info = dict(
         n_in=n_in,
         n_after_level=n_after_level,
@@ -818,10 +853,10 @@ def select_trials_crossgen_binary(epo: mne.Epochs, control_by_other_train: bool,
 
 
 # =====================================================================
-# Decoders (standard)
+# Decoders
 # =====================================================================
 
-def _make_cv(y: np.ndarray, groups: np.ndarray | None) -> tuple[object, str]:
+def _make_cv_classification(y: np.ndarray, groups: np.ndarray | None) -> tuple[object, str]:
     cv = None
     if groups is not None:
         groups = np.asarray(groups)
@@ -835,6 +870,19 @@ def _make_cv(y: np.ndarray, groups: np.ndarray | None) -> tuple[object, str]:
 
     cv = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
     return cv, "StratifiedKFold"
+
+
+def _make_cv_regression(groups: np.ndarray | None) -> tuple[object, str]:
+    if groups is not None:
+        groups = np.asarray(groups)
+        ok = ~pd.isna(groups)
+        if ok.sum() == len(groups):
+            n_groups = len(np.unique(groups))
+            if n_groups >= 2:
+                n_splits = min(N_SPLITS, n_groups)
+                return GroupKFold(n_splits=n_splits), "GroupKFold"
+
+    return KFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE), "KFold"
 
 
 def subject_decode_binary(X: np.ndarray, y: np.ndarray, shuffle: bool, groups: np.ndarray | None, metric: str):
@@ -852,7 +900,44 @@ def subject_decode_binary(X: np.ndarray, y: np.ndarray, shuffle: bool, groups: n
     )
     time_decod = SlidingEstimator(clf, scoring=metric)
 
-    cv, cv_used = _make_cv(y_use, groups)
+    cv, cv_used = _make_cv_classification(y_use, groups)
+
+    scores = cross_val_multiscore(
+        time_decod, X, y_use,
+        cv=cv,
+        groups=groups if isinstance(cv, GroupKFold) else None,
+        n_jobs=1
+    )
+    return scores.mean(axis=0), cv_used
+
+
+def _corr_scorer(estimator, X, y_true) -> float:
+    y_pred = estimator.predict(X)
+    y_true = np.asarray(y_true, dtype=float).ravel()
+    y_pred = np.asarray(y_pred, dtype=float).ravel()
+
+    if y_true.size < 3:
+        return 0.0
+    if np.std(y_true) < 1e-12 or np.std(y_pred) < 1e-12:
+        return 0.0
+
+    r = np.corrcoef(y_true, y_pred)[0, 1]
+    if np.isnan(r):
+        return 0.0
+    return float(r)
+
+
+def subject_decode_label_control_regression(X: np.ndarray, y: np.ndarray, shuffle: bool, groups: np.ndarray | None):
+    rng = np.random.default_rng(RANDOM_STATE)
+    y_use = rng.permutation(y) if shuffle else y
+
+    reg = make_pipeline(
+        StandardScaler(),
+        Ridge(alpha=1.0, random_state=RANDOM_STATE),
+    )
+    time_decod = SlidingEstimator(reg, scoring=_corr_scorer)
+
+    cv, cv_used = _make_cv_regression(groups)
 
     scores = cross_val_multiscore(
         time_decod, X, y_use,
@@ -899,15 +984,10 @@ def crossgen_time_resolved(
     metric: str,
     shuffle_train: bool,
 ) -> tuple[np.ndarray, str]:
-    """
-    Cross-label generalization at SAME TIMEPOINTS (diagonal time series):
-      Fit on (X_train[:,:,t], y_train) and evaluate on (X_test[:,:,t], y_test)
-    Returns mean over folds: scores[t]
-    """
     rng = np.random.default_rng(RANDOM_STATE)
     y_tr_use = rng.permutation(y_train) if shuffle_train else y_train
 
-    cv, cv_used = _make_cv(y_tr_use, groups)
+    cv, cv_used = _make_cv_classification(y_tr_use, groups)
     splits = list(cv.split(X, y_tr_use, groups=groups if isinstance(cv, GroupKFold) else None))
 
     n_times = X.shape[2]
@@ -938,20 +1018,10 @@ def crossgen_temporal_generalization_matrix(
     shuffle_train: bool,
     time_idx: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, str]:
-    """
-    Cross-label temporal generalization matrix:
-      For each train-time i and test-time j:
-        fit on X_train[:,:,i] with y_train
-        test on X_test[:,:,j] with y_test
-    Returns:
-      M (nT x nT) averaged over folds,
-      diag (nT,),
-      cv_used
-    """
     rng = np.random.default_rng(RANDOM_STATE)
     y_tr_use = rng.permutation(y_train) if shuffle_train else y_train
 
-    cv, cv_used = _make_cv(y_tr_use, groups)
+    cv, cv_used = _make_cv_classification(y_tr_use, groups)
     splits = list(cv.split(X, y_tr_use, groups=groups if isinstance(cv, GroupKFold) else None))
 
     T = np.asarray(time_idx, dtype=int)
@@ -1187,15 +1257,15 @@ def append_subject_summary(records: list[dict], *, sub: str, which: str, shuffle
 
 
 # =====================================================================
-# RUN: Standard Binary
+# RUN: Main binary
 # =====================================================================
 
-def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
+def run_binary(which: str, shuffle: bool, tag: str):
     OUT = OUT_DIR_BIN
     DBG = DEBUG_DIR_BIN
 
     analysis_name = f"Decision BINARY {which} ({tag})"
-    log_print(f"\n>>> START: {analysis_name} | shuffle={shuffle} | control_by_other={control_by_other}\n")
+    log_print(f"\n>>> START: {analysis_name} | shuffle={shuffle}\n")
 
     subs = list_subjects(DERIV_DIR)
     scores_all_auc, scores_all_bacc, included, skipped = [], [], [], []
@@ -1252,7 +1322,7 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
                 epo = epo.copy().resample(RESAMPLE_SFREQ, npad="auto")
 
             X, y, times, md_used, levels_f, other_f, rt_f, info = select_trials_decision_binary(
-                epo, which=which, control_resid_by_other=control_by_other
+                epo, which=which
             )
 
             trial_stats["total_trials_after_level"] += int(info["n_after_level"])
@@ -1282,10 +1352,6 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
                 extra=dict(
                     n_low=int(np.sum(y == 0)),
                     n_high=int(np.sum(y == 1)),
-                    control_by_other=bool(control_by_other),
-                    control_rt=bool(control_by_other),
-                    other_lin=bool(control_by_other),
-                    rt_lin=bool(control_by_other),
                     n_badtrial_dropped=int(n_bad),
                     n_drop_level=int(info["n_drop_level"]),
                     n_drop_nan=int(info["n_drop_nan"]),
@@ -1306,10 +1372,9 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
     time_mask = (times >= TMIN_STAT) & (times <= TMAX_STAT)
     times_stat = times[time_mask]
 
-    nuisance_model = "other=lin + rt=lin"
-    control_label = "ctrlOtherRT"
+    nuisance_model = "none"
+    control_label = "raw"
 
-    # AUC (tail=1)
     auc_stat = scores_all_auc[:, time_mask]
     stats_auc = group_cluster_metric(auc_stat, times_stat, chance=CHANCE_BIN, tail=1)
     tag_auc = f"decision_{tag}_{which}_auc" + ("_shuffle" if shuffle else "")
@@ -1328,9 +1393,6 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
         resample_sfreq=RESAMPLE_SFREQ if RESAMPLE_SFREQ is not None else -1,
         tmin_stat=TMIN_STAT,
         tmax_stat=TMAX_STAT,
-        control_rt=True,
-        other_lin=True,
-        rt_lin=True,
     )
 
     pd.DataFrame(scores_all_auc, index=included, columns=np.round(times, 6)).to_csv(
@@ -1370,7 +1432,6 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
         trial_stats=trial_stats,
     )
 
-    # bAcc (tail=1)
     bacc_stat = scores_all_bacc[:, time_mask]
     stats_bacc = group_cluster_metric(bacc_stat, times_stat, chance=CHANCE_BIN, tail=1)
     tag_bacc = f"decision_{tag}_{which}_bacc" + ("_shuffle" if shuffle else "")
@@ -1389,9 +1450,6 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
         resample_sfreq=RESAMPLE_SFREQ if RESAMPLE_SFREQ is not None else -1,
         tmin_stat=TMIN_STAT,
         tmax_stat=TMAX_STAT,
-        control_rt=True,
-        other_lin=True,
-        rt_lin=True,
     )
 
     pd.DataFrame(scores_all_bacc, index=included, columns=np.round(times, 6)).to_csv(
@@ -1439,10 +1497,195 @@ def run_binary(which: str, shuffle: bool, tag: str, control_by_other: bool):
 
 
 # =====================================================================
+# RUN: Label-control regression
+# =====================================================================
+
+def run_label_control(which: str, shuffle: bool, tag: str):
+    OUT = OUT_DIR_LABELCTRL
+    DBG = DEBUG_DIR_LABELCTRL
+
+    analysis_name = f"Decision LABELCTRL {which} ({tag})"
+    log_print(f"\n>>> START: {analysis_name} | shuffle={shuffle}\n")
+
+    subs = list_subjects(DERIV_DIR)
+    scores_all_r = []
+    included, skipped = [], []
+    times_ref = None
+    subj_records: list[dict] = []
+
+    trial_stats = dict(
+        n_sub_total=len(subs),
+        total_trials_in=0,
+        total_trials_after_badtrial=0,
+        total_trials_after_level=0,
+        total_trials_after_nan=0,
+        n_trials_per_sub=[],
+    )
+
+    pbar = tqdm(subs, desc=f"LABELCTRL {which} {tag}{'_shuf' if shuffle else ''}", unit="sub",
+                dynamic_ncols=True, leave=True)
+
+    for sub in pbar:
+        try:
+            epo = load_decision_epochs(sub)
+            beh = load_decision_beh(sub)
+            epo = merge_beh_into_epochs_decision(epo, beh, sub=sub, debug_dir=DBG)
+
+            if epo.metadata is None:
+                raise RuntimeError(f"{sub}: metadata is None after merge.")
+
+            n0 = int(len(epo))
+            trial_stats["total_trials_in"] += n0
+
+            if "badtrial" in epo.metadata.columns:
+                bad = epo.metadata["badtrial"].fillna(0).astype(int).to_numpy()
+                n_bad = int(bad.sum())
+                if n_bad > 0:
+                    epo = epo.copy()[bad == 0]
+            else:
+                n_bad = 0
+                log_print(f"{sub}: WARNING no 'badtrial' column found in epochs.metadata (not dropping trials)")
+
+            n1 = int(len(epo))
+            trial_stats["total_trials_after_badtrial"] += n1
+
+            md = epo.metadata.reset_index(drop=True)
+            decision_alignment_sanity_check(md, sub=sub, debug_dir=DBG)
+
+            if md[DEC_MONEY_COL].isna().any() or md[DEC_PAIN_COL].isna().any():
+                md.head(50).to_csv(DBG / f"{sub}_md_aftermerge_head.csv", index=False)
+                raise RuntimeError(f"{sub}: NaNs in merged decision labels. Saved {sub}_md_aftermerge_head.csv")
+
+            if RT_COL not in md.columns:
+                md.head(50).to_csv(DBG / f"{sub}_md_aftermerge_head.csv", index=False)
+                raise RuntimeError(f"{sub}: Missing RT column '{RT_COL}' after merge. Saved {sub}_md_aftermerge_head.csv")
+
+            if RESAMPLE_SFREQ is not None:
+                epo = epo.copy().resample(RESAMPLE_SFREQ, npad="auto")
+
+            X, y, times, md_used, levels_f, other_f, rt_f, info = select_trials_decision_label_control(
+                epo, which=which
+            )
+
+            trial_stats["total_trials_after_level"] += int(info["n_after_level"])
+            trial_stats["total_trials_after_nan"] += int(info["n_after_nan"])
+            trial_stats["n_trials_per_sub"].append(int(len(y)))
+
+            save_decision_trial_counts(OUT, sub=sub, tag=tag, which=which, levels=levels_f, other_levels=other_f, rt=rt_f)
+            groups = md_used[KEY_BLOCK].to_numpy() if (KEY_BLOCK in md_used.columns) else None
+
+            if times_ref is None:
+                times_ref = times
+            else:
+                if len(times) != len(times_ref) or np.max(np.abs(times - times_ref)) > 1e-9:
+                    raise RuntimeError("Time axis mismatch across subjects.")
+
+            scores_r, cv_used = subject_decode_label_control_regression(X, y, shuffle=shuffle, groups=groups)
+
+            scores_all_r.append(scores_r)
+            included.append(sub)
+
+            append_subject_summary(
+                subj_records,
+                sub=sub, which=which, shuffle=shuffle, tag=tag,
+                n_trials=len(y), groups=groups, cv_used=cv_used,
+                extra=dict(
+                    y_raw_min=float(np.min(levels_f)),
+                    y_raw_max=float(np.max(levels_f)),
+                    y_resid_mean=float(np.mean(y)),
+                    y_resid_sd=float(np.std(y)),
+                    other_lin=True,
+                    rt_lin=True,
+                    n_badtrial_dropped=int(n_bad),
+                    n_drop_level=int(info["n_drop_level"]),
+                    n_drop_nan=int(info["n_drop_nan"]),
+                )
+            )
+
+        except Exception as e:
+            skipped.append((sub, str(e)))
+            log_print(f"Skipped {sub} LABELCTRL({which},{tag}{'_shuf' if shuffle else ''}): {e}")
+
+    if len(scores_all_r) < 8:
+        raise RuntimeError(f"Too few subjects included for group stats LABELCTRL({which},{tag}): n={len(scores_all_r)}")
+
+    scores_all_r = np.stack(scores_all_r, axis=0)
+    times = times_ref
+
+    time_mask = (times >= TMIN_STAT) & (times <= TMAX_STAT)
+    times_stat = times[time_mask]
+    r_stat = scores_all_r[:, time_mask]
+
+    stats_r = group_cluster_metric(r_stat, times_stat, chance=CHANCE_REG, tail=0)
+    out_tag = f"decision_{tag}_{which}_labelctrlcorr" + ("_shuffle" if shuffle else "")
+
+    np.savez(
+        OUT / f"{out_tag}_group_results.npz",
+        scores_by_subj=scores_all_r,
+        times=times,
+        included=np.array(included, dtype=object),
+        skipped=np.array(skipped, dtype=object),
+        T_obs=stats_r["T_obs"],
+        p_map=stats_r["p_map"],
+        cluster_pv=stats_r["cluster_pv"],
+        t_thresh=stats_r["t_thresh"],
+        chance=CHANCE_REG,
+        resample_sfreq=RESAMPLE_SFREQ if RESAMPLE_SFREQ is not None else -1,
+        tmin_stat=TMIN_STAT,
+        tmax_stat=TMAX_STAT,
+        other_lin=True,
+        rt_lin=True,
+    )
+
+    pd.DataFrame(scores_all_r, index=included, columns=np.round(times, 6)).to_csv(
+        OUT / f"{out_tag}_scores_by_subject.csv"
+    )
+
+    plot_group_metric(
+        r_stat, times_stat, stats_r["p_map"],
+        title=f"Decision {which} ({tag.upper()} | {'SHUFFLED' if shuffle else 'REAL'}): label-control corr-r",
+        out_png=OUT / f"{out_tag}_group_plot.png",
+        ylabel="Decoding (corr r)",
+        chance=CHANCE_REG,
+        ylim=(-0.10, 0.40),
+    )
+
+    save_group_summaries(
+        tag=out_tag, scores_all=r_stat, times=times_stat, included=included,
+        stats_out=stats_r, out_dir=OUT, alpha=ALPHA_CLUSTER, chance=CHANCE_REG,
+    )
+
+    nuisance_model = "label residualized by other=lin + rt=lin"
+    control_label = "labelCtrlOtherRT"
+
+    summarize_group_results_text(
+        analysis_name=analysis_name,
+        metric_name="CorrR",
+        tag=tag,
+        which=which,
+        shuffle=shuffle,
+        control=control_label,
+        nuisance_model=nuisance_model,
+        out_dir=OUT,
+        scores_all=r_stat,
+        times=times_stat,
+        chance=CHANCE_REG,
+        stats_out=stats_r,
+        alpha=ALPHA_CLUSTER,
+        included=included,
+        skipped=skipped,
+        trial_stats=trial_stats,
+    )
+
+    pd.DataFrame(subj_records).to_csv(OUT / f"{out_tag}_subject_summary.csv", index=False)
+    log_print(f"\n<<< DONE: {analysis_name} | included_subs={len(included)} | skipped_subs={len(skipped)}\n")
+
+
+# =====================================================================
 # RUN: Cross-generalization + heatmaps
 # =====================================================================
 
-def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_train: bool):
+def run_crossgen_binary(train: str, shuffle: bool, tag: str):
     """
     train: "money" or "pain"
     Evaluates diagonal + heatmap for:
@@ -1450,16 +1693,14 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
       - roc_auc
     Output in OUT_DIR_XGEN_BIN
 
-    ctrlOtherTrain now means:
-      - other-of-train cue (lin)
-      - RT (lin)
+    Raw binary cross-generalization only.
     """
     OUT = OUT_DIR_XGEN_BIN
     DBG = DEBUG_DIR_XGEN_BIN
 
     direction = f"{train}_to_{'pain' if train=='money' else 'money'}"
     analysis_name = f"Decision XGEN BIN {direction} ({tag})"
-    log_print(f"\n>>> START: {analysis_name} | shuffle={shuffle} | control_by_other_train={control_by_other_train}\n")
+    log_print(f"\n>>> START: {analysis_name} | shuffle={shuffle}\n")
 
     subs = list_subjects(DERIV_DIR)
     included, skipped = [], []
@@ -1517,7 +1758,7 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
                 epo = epo.copy().resample(RESAMPLE_SFREQ, npad="auto")
 
             X, y_tr, y_te, times, md_used, m_levels, p_levels, rt_f, info = select_trials_crossgen_binary(
-                epo, control_by_other_train=control_by_other_train, train=train
+                epo, train=train
             )
 
             trial_stats["total_trials_after_level"] += int(info["n_after_level"])
@@ -1545,7 +1786,6 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
                 shuffle_train=shuffle,
             )
 
-            # heatmaps ONLY for ctrlOtherRT / its shuffle (raw dropped entirely anyway)
             time_mask = (times >= TMIN_STAT) & (times <= TMAX_STAT)
             idx = np.where(time_mask)[0][::max(1, int(HEATMAP_DECIM))]
 
@@ -1590,7 +1830,7 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
     stats_auc = group_cluster_metric(auc_stat, times_stat, chance=CHANCE_BIN, tail=1)
 
     suffix = "_shuffle" if shuffle else ""
-    ctrl = "ctrlOtherTrainRT"
+    ctrl = "raw"
 
     tag_bacc = f"xgen_{ctrl}_{direction}_bacc{suffix}"
     tag_auc = f"xgen_{ctrl}_{direction}_auc{suffix}"
@@ -1606,9 +1846,6 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         cluster_pv=stats_bacc["cluster_pv"],
         t_thresh=stats_bacc["t_thresh"],
         chance=CHANCE_BIN,
-        control_rt=True,
-        other_lin=True,
-        rt_lin=True,
     )
     np.savez(
         OUT / f"{tag_auc}_diag_group_results.npz",
@@ -1621,9 +1858,6 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         cluster_pv=stats_auc["cluster_pv"],
         t_thresh=stats_auc["t_thresh"],
         chance=CHANCE_BIN,
-        control_rt=True,
-        other_lin=True,
-        rt_lin=True,
     )
 
     plot_group_metric(
@@ -1664,8 +1898,8 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         chance=CHANCE_BIN,
     )
 
-    nuisance_model = "other(train)=lin + rt=lin"
-    control_label = "ctrlOtherTrainRT"
+    nuisance_model = "none"
+    control_label = "raw"
 
     summarize_group_results_text(
         analysis_name=analysis_name,
@@ -1704,7 +1938,6 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         trial_stats=trial_stats,
     )
 
-    # heatmaps
     mats_bacc = np.stack(mats_bacc, axis=0)
     mats_auc = np.stack(mats_auc, axis=0)
     M_bacc_mean = mats_bacc.mean(axis=0)
@@ -1721,9 +1954,6 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         included=np.array(included, dtype=object),
         chance=CHANCE_BIN,
         decim=int(HEATMAP_DECIM),
-        control_rt=True,
-        other_lin=True,
-        rt_lin=True,
     )
     np.savez(
         OUT / f"{tag_auc}_heatmaps.npz",
@@ -1733,9 +1963,6 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
         included=np.array(included, dtype=object),
         chance=CHANCE_BIN,
         decim=int(HEATMAP_DECIM),
-        control_rt=True,
-        other_lin=True,
-        rt_lin=True,
     )
 
     plot_heatmap(
@@ -1760,36 +1987,47 @@ def run_crossgen_binary(train: str, shuffle: bool, tag: str, control_by_other_tr
 
 def main():
     mne.set_log_level("WARNING")
-    log_print(f"\n=== mvpa_decision_step1_conserv2 START ===")
+    log_print(f"\n=== mvpa_time_decoding_decision_phase START ===")
     log_print(f"DATA_DIR: {RAW_DIR}")
     log_print(f"OUT_DIR:  {OUT_DIR}")
     log_print(f"RESAMPLE_SFREQ: {RESAMPLE_SFREQ}")
     log_print(f"N_PERM: {N_PERM} | ALPHA_CLUSTER: {ALPHA_CLUSTER} | STATS WINDOW: [{TMIN_STAT},{TMAX_STAT}] s")
-    log_print("Control model (when enabled): other cue = lin + RT = lin")
-    log_print("TFCE only")
-    log_print("RAW analyses removed; only ctrlOtherRT / ctrlOtherTrainRT kept\n")
+    log_print("Main result: binary raw decoding")
+    log_print("Control result: label residualized by other cue + RT")
+    log_print("Cross-generalization: binary raw only")
+    log_print("TFCE only\n")
 
     # -------------------------
-    # Binary (standard) - ctrlOtherRT only
-    if RUN_BINARY and RUN_CONTROL_BY_OTHER:
-        run_binary("money", shuffle=False, tag="ctrlOtherRT", control_by_other=True)
-        run_binary("pain",  shuffle=False, tag="ctrlOtherRT", control_by_other=True)
+    # Main binary
+    if RUN_BINARY:
+        run_binary("money", shuffle=False, tag="raw")
+        run_binary("pain",  shuffle=False, tag="raw")
 
         if RUN_SHUFFLE:
-            run_binary("money", shuffle=True, tag="ctrlOtherRT", control_by_other=True)
-            run_binary("pain",  shuffle=True, tag="ctrlOtherRT", control_by_other=True)
+            run_binary("money", shuffle=True, tag="raw")
+            run_binary("pain",  shuffle=True, tag="raw")
 
     # -------------------------
-    # Cross-generalization (binary only) - ctrlOtherTrainRT only
-    if RUN_CROSS_GENERALIZATION and RUN_CONTROL_BY_OTHER:
-        run_crossgen_binary(train="money", shuffle=False, tag="ctrlOtherTrainRT", control_by_other_train=True)
-        run_crossgen_binary(train="pain",  shuffle=False, tag="ctrlOtherTrainRT", control_by_other_train=True)
+    # Label-control regression
+    if RUN_LABEL_CONTROL:
+        run_label_control("money", shuffle=False, tag="labelCtrlOtherRT")
+        run_label_control("pain",  shuffle=False, tag="labelCtrlOtherRT")
 
         if RUN_SHUFFLE:
-            run_crossgen_binary(train="money", shuffle=True, tag="ctrlOtherTrainRT", control_by_other_train=True)
-            run_crossgen_binary(train="pain",  shuffle=True, tag="ctrlOtherTrainRT", control_by_other_train=True)
+            run_label_control("money", shuffle=True, tag="labelCtrlOtherRT")
+            run_label_control("pain",  shuffle=True, tag="labelCtrlOtherRT")
 
-    log_print(f"\n=== mvpa_decision_step1_conserv2 DONE ===\n")
+    # -------------------------
+    # Cross-generalization
+    if RUN_CROSS_GENERALIZATION:
+        run_crossgen_binary(train="money", shuffle=False, tag="raw")
+        run_crossgen_binary(train="pain",  shuffle=False, tag="raw")
+
+        if RUN_SHUFFLE:
+            run_crossgen_binary(train="money", shuffle=True, tag="raw")
+            run_crossgen_binary(train="pain",  shuffle=True, tag="raw")
+
+    log_print(f"\n=== mvpa_time_decoding_decision_phase DONE ===\n")
 
 
 if __name__ == "__main__":
