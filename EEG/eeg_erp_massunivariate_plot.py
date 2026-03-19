@@ -34,7 +34,7 @@ layout = BIDSLayout(basepath)
 # Version
 # version = 2 -> decision plotting
 # version = 1 -> passive plotting
-version = 2
+version = 1
 
 # Optional preference if both TFCE and cluster outputs exist
 # set to "tfce", "cluster", or None
