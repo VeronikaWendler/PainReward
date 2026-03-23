@@ -7,7 +7,7 @@ import mne
 # =========================================================
 # SETTINGS
 # =========================================================
-base_stats = Path(r"/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives/erps_massuni_passive/Zscoring_tfce")
+base_stats = Path(r"/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives/erps_massuni_decision/Zscoring_tfce")
 # or decision:
 # base_stats = Path(r"/path/to/your/statistics/erps_massuni_decision/Zscoring_tfce")
 
