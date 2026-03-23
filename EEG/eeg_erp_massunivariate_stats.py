@@ -4,9 +4,9 @@ import mne
 # -----------------------------
 # LOAD YOUR DATA
 # -----------------------------
-base_path = r"/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives/erps_massuni_decision/Zscoring_tfce/"
+base_path = r"/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata/derivatives/erps_massuni_passive/Zscoring_tfce/"
 
-# choose map
+# choose map #
 maps = ["painlevel", "moneylevel", "diff_pain_minus_money"]
 
 beta_gavg = np.load(base_path + "ols_2ndlevel_betasavg.npy", allow_pickle=True)
