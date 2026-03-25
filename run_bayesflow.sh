@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=rp_bf_train
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
-#SBATCH --time=24:00:00
-#SBATCH --cpus-per-task=12
-#SBATCH --mem=48G
+#SBATCH --mem=128G
+#SBATCH --output=logs/eeg_%j.out
+#SBATCH --error=logs/eeg_%j.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=VAW508@student.bham.ac.uk
 
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
@@ -21,7 +21,7 @@ export MPLBACKEND=Agg
 export MPLCONFIGDIR="${TMPDIR:-/tmp}/mplcache"
 mkdir -p "$MPLCONFIGDIR"
 
-# --- EDIT THESE PATHS ---
+# Paths
 PROJECT_DIR=${PROJECT_DIR:-/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/rp_bayesflow_workflow}
 DATA_CSV=${DATA_CSV:-/rds/homes/v/vaw508/projects/PainReward/Hddm_Docker_August_24/data_sets/behavioural_sv_cleaned_final_3_with_rp.csv}
 OUTDIR=${OUTDIR:-${PROJECT_DIR}/runs/pilot_run_01}
