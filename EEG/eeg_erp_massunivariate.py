@@ -7,7 +7,7 @@
 # 2. cleaning and z scoring
 # 3. grand average & second-level mass-univariate inference
 # 4. switchable inference: classic cluster-mass OR TFCE
-# 5. across-map correction (Holm / Bonferroni / none)
+# 5. across-map correction 
 #
 
 import os

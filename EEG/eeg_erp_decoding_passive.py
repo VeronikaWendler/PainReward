@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Step 1 (Passive): Time-resolved decoding of money level (and pain as control)
 
