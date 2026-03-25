@@ -4,15 +4,15 @@
 #  Metrics: balanced accuracy + AUC
 #  Conditions: raw + ctrlOther (residualize by other cue level, lin)
 #  Shuffle controls (optional)
-#  Group spatio-temporal TFCE cluster stats (channel×time)
+#  Group spatio-temporal TFCE cluster stats (channelxtime)
 #  Topomaps bundle like passive searchlight
 
-#- Temporal generalization heatmaps (train-time × test-time) for analyses
+#- Temporal generalization heatmaps (train-time x test-time) for analyses
 #  Score shown as (score - chance), red=above, blue=below
 #  Saves per-subject matrices + group mean matrix
 #  Also extracts diagonal timecourse for cluster stats over time
 
-#- Cross-label generalization (money->pain, pain->money)
+#- Cross-label generalization (money to pain, pain to money)
 #  Diagonal + heatmap
 #  raw + optional ctrlOtherTrain + shuffle
 
