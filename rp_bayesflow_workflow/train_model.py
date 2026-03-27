@@ -73,7 +73,11 @@ def main() -> None:
     set_design_bank(design_bank)
 
     # BayesFlow version in your environment exposes GenerativeModel here:
-    generative_model = bf.simulation.GenerativeModel(prior, batch_simulator)
+    generative_model = bf.simulation.GenerativeModel(
+        prior,
+        batch_simulator,
+        simulator_is_batched=True,
+    )
     trainer = make_trainer(generative_model, checkpoint_dir)
 
     def prior_N(n_min: int = args.n_trials_min, n_max: int = args.n_trials_max) -> int:
