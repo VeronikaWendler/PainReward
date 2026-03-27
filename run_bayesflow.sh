@@ -23,10 +23,9 @@ export MPLBACKEND=Agg
 export MPLCONFIGDIR="${TMPDIR:-/tmp}/mplcache"
 mkdir -p "$MPLCONFIGDIR"
 
-PROJECT_DIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/rp_bayesflow_workflow
+PROJECT_DIR=/rds/homes/v/vaw508/projects/PainReward/rp_bayesflow_workflow
 DATA_CSV=/rds/homes/v/vaw508/projects/PainReward/Hddm_Docker_August_24/data_sets/behavioural_sv_cleaned_final_3_with_rp.csv
-OUTDIR=${PROJECT_DIR}/runs/pilot_run_01
-
+OUTDIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/runs/pilot_run_01
 mkdir -p "${OUTDIR}"
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
