@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 from pathlib import Path
 
 import numpy as np
-from bayesflow.models import GenerativeModel
+import bayesflow as bf
 
 from config import DEFAULT_TRAINING, PARAM_NAMES
 from data_utils import build_design_bank, load_and_prepare_data, save_metadata
@@ -29,6 +30,32 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def train_with_compat(trainer, *, epochs: int, batch_size: int, iterations_per_epoch: int, capacity: int, n_obs):
+    """
+    Compatibility wrapper across BayesFlow trainer versions.
+    Some versions use `capacity`, others `buffer_capacity`.
+    """
+    sig = inspect.signature(trainer.train_experience_replay)
+    kwargs = {
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "iterations_per_epoch": iterations_per_epoch,
+        "n_obs": n_obs,
+    }
+
+    if "capacity" in sig.parameters:
+        kwargs["capacity"] = capacity
+    elif "buffer_capacity" in sig.parameters:
+        kwargs["buffer_capacity"] = capacity
+    else:
+        raise RuntimeError(
+            "Could not find either `capacity` or `buffer_capacity` in "
+            "`trainer.train_experience_replay`. Please inspect your BayesFlow version."
+        )
+
+    return trainer.train_experience_replay(**kwargs)
+
+
 def main() -> None:
     args = parse_args()
     np.random.seed(args.seed)
@@ -45,7 +72,8 @@ def main() -> None:
     design_bank = build_design_bank(df)
     set_design_bank(design_bank)
 
-    generative_model = GenerativeModel(prior, batch_simulator)
+    # BayesFlow version in your environment exposes GenerativeModel here:
+    generative_model = bf.simulation.GenerativeModel(prior, batch_simulator)
     trainer = make_trainer(generative_model, checkpoint_dir)
 
     def prior_N(n_min: int = args.n_trials_min, n_max: int = args.n_trials_max) -> int:
@@ -55,7 +83,8 @@ def main() -> None:
     print(f"Parameter set: {PARAM_NAMES}")
     print(f"Checkpoints: {checkpoint_dir}")
 
-    losses = trainer.train_experience_replay(
+    losses = train_with_compat(
+        trainer,
         epochs=args.epochs,
         batch_size=args.batch_size,
         iterations_per_epoch=args.iterations_per_epoch,
