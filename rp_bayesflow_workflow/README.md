@@ -20,7 +20,7 @@ At the trial level:
 - `signed_rt_i ~ DDM(latent_drift_i, boundary, start_point, ndt)`
 - `rp_i ~ Normal(rp_intercept + rp_loading * latent_drift_i, rp_noise)`
 
-This is structurally closest to the paper's single-trial integrative drift-style models, where a latent single-trial drift variable generates both EEG and behavior, instead of EEG being plugged in as a regressor. fileciteturn15file0 fileciteturn15file4
+This is structurally closest to the paper's single-trial integrative drift-style models, where a latent single-trial drift variable generates both EEG and behavior, instead of EEG being plugged in as a regressor
 
 ## Files
 
@@ -162,7 +162,3 @@ After this first model is stable, the next steps would be:
 2. let the shared latent factor influence both drift and boundary
 3. add subject-level hierarchy
 4. compare drift-linked and boundary-linked integrative RP models
-
-## Important honesty note
-
-I wrote this workflow to be internally consistent with the code pattern you shared and the model family we agreed on. I did **not** run a real BayesFlow training job here, so you should expect some version-specific adjustment, especially if your cluster has a different BayesFlow/TensorFlow version than the one used in the paper.
