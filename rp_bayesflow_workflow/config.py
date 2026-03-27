@@ -56,8 +56,8 @@ PRIOR_HIGH = (
 
 DEFAULT_COLUMNS = {
     "subject": "subj_idx",
-    "pain": "pain_z",
-    "money": "money_z",
+    "pain": "painlevel",
+    "money": "moneylevel",
     "rp": "rp_z",
     "rt": "rt",
     "response": "response",

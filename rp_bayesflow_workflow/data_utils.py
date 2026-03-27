@@ -26,13 +26,17 @@ def load_and_prepare_data(
     min_rt: float = 0.25,
     drop_badtrial_column: str | None = "badtrial",
     zscore_rp_within_subject: bool = False,
+    zscore_pain_money_within_subject: bool = True,
 ) -> pd.DataFrame:
     """Load the real task data and keep the columns needed by the workflow.
 
     Expected columns by default:
-    subj_idx, pain_z, money_z, rp_z, rt, response
+    subj_idx, painlevel, moneylevel, rp_z, rt/choice_resp.rt, response
 
-    Returns a cleaned dataframe with an added column 'signed_rt'.
+    Returns a cleaned dataframe with added columns:
+    - pain_z
+    - money_z
+    - signed_rt
     """
     cols = DEFAULT_COLUMNS.copy()
     if columns:
@@ -59,28 +63,43 @@ def load_and_prepare_data(
     if drop_badtrial_column and drop_badtrial_column in df.columns:
         df = df[df[drop_badtrial_column] == 0].copy()
 
-    # Drop missing values in modeling columns
-    df = df.dropna(subset=required).copy()
+    subj = cols["subject"]
+    pain = cols["pain"]
+    money = cols["money"]
+    rp = cols["rp"]
 
+    # Z-score pain and money within subject
+    if zscore_pain_money_within_subject:
+        df["pain_z"] = df.groupby(subj)[pain].transform(
+            lambda x: (x - x.mean()) / x.std(ddof=0) if x.std(ddof=0) > 0 else np.nan
+        )
+        df["money_z"] = df.groupby(subj)[money].transform(
+            lambda x: (x - x.mean()) / x.std(ddof=0) if x.std(ddof=0) > 0 else np.nan
+        )
+    else:
+        df["pain_z"] = pd.to_numeric(df[pain], errors="coerce")
+        df["money_z"] = pd.to_numeric(df[money], errors="coerce")
+
+    # Optional RP z-scoring within subject
     if zscore_rp_within_subject:
-        subj = cols["subject"]
-        rp = cols["rp"]
         df[rp] = df.groupby(subj)[rp].transform(
             lambda x: (x - x.mean()) / x.std(ddof=0) if x.std(ddof=0) > 0 else np.nan
         )
-        df = df.dropna(subset=[rp]).copy()
 
+    # Drop missing values in modeling columns
+    df = df.dropna(subset=[subj, "pain_z", "money_z", rp, cols["rt"], cols["response"]]).copy()
+
+    # Build signed RT from unsigned RT + response
     df["signed_rt"] = infer_signed_rt(df, cols["rt"], cols["response"])
-    return df
 
+    return df
 
 def build_design_bank(
     df: pd.DataFrame,
     subject_col: str = DEFAULT_COLUMNS["subject"],
-    pain_col: str = DEFAULT_COLUMNS["pain"],
-    money_col: str = DEFAULT_COLUMNS["money"],
+    pain_col: str = "pain_z",
+    money_col: str = "money_z",
 ) -> List[np.ndarray]:
-    """Create a bank of real subject design matrices with columns [pain, money]."""
     bank: List[np.ndarray] = []
     for _, sub_df in df.groupby(subject_col):
         arr = sub_df[[pain_col, money_col]].to_numpy(dtype=np.float32)
@@ -90,15 +109,13 @@ def build_design_bank(
         raise ValueError("Design bank is empty. Check filtering / column names.")
     return bank
 
-
 def build_observed_datasets(
     df: pd.DataFrame,
     subject_col: str = DEFAULT_COLUMNS["subject"],
-    pain_col: str = DEFAULT_COLUMNS["pain"],
-    money_col: str = DEFAULT_COLUMNS["money"],
+    pain_col: str = "pain_z",
+    money_col: str = "money_z",
     rp_col: str = DEFAULT_COLUMNS["rp"],
 ) -> Dict[str, np.ndarray]:
-    """Return one observed dataset per subject with columns [signed_rt, rp, pain, money]."""
     out: Dict[str, np.ndarray] = {}
     for subject, sub_df in df.groupby(subject_col):
         arr = sub_df[["signed_rt", rp_col, pain_col, money_col]].to_numpy(dtype=np.float32)
