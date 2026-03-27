@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--zscore-rp-within-subject", action="store_true")
     return p.parse_args()
 
-
+#
 def train_with_compat(trainer, *, epochs: int, batch_size: int, iterations_per_epoch: int, capacity: int, n_obs):
     """
     Compatibility wrapper across BayesFlow trainer versions.
