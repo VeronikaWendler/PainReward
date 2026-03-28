@@ -100,7 +100,7 @@ def _sample_design(n_obs: int) -> np.ndarray:
     return design[idx].astype(np.float32)
 
 
-def batch_simulator(prior_samples: np.ndarray, n_obs: int) -> np.ndarray:
+def batch_simulator(prior_samples: np.ndarray, n_obs: int = 160) -> np.ndarray:
     """Simulate one BayesFlow batch using randomly drawn real design rows.
 
     Output shape: [batch_size, n_obs, 4]
