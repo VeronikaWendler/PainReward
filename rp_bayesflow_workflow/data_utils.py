@@ -36,7 +36,8 @@ def load_and_prepare_data(
     Returns a cleaned dataframe with added columns:
     - pain_z
     - money_z
-    - signed_rt
+    - rt
+    - choice
     """
     cols = DEFAULT_COLUMNS.copy()
     if columns:
@@ -89,8 +90,11 @@ def load_and_prepare_data(
     # Drop missing values in modeling columns
     df = df.dropna(subset=[subj, "pain_z", "money_z", rp, cols["rt"], cols["response"]]).copy()
 
-    # Build signed RT from unsigned RT + response
-    df["signed_rt"] = infer_signed_rt(df, cols["rt"], cols["response"])
+    # Keep RT unsigned / positive
+    df["rt"] = pd.to_numeric(df[cols["rt"]], errors="coerce")
+    # Build explicit choice column: 1 = upper boundary / accept / response 1, 0 = lower boundary
+    response_num = pd.to_numeric(df[cols["response"]], errors="coerce")
+    df["choice"] = np.where(response_num > 0, 1.0, 0.0).astype(np.float32)
 
     return df
 
@@ -118,7 +122,7 @@ def build_observed_datasets(
 ) -> Dict[str, np.ndarray]:
     out: Dict[str, np.ndarray] = {}
     for subject, sub_df in df.groupby(subject_col):
-        arr = sub_df[["signed_rt", rp_col, pain_col, money_col]].to_numpy(dtype=np.float32)
+        arr = sub_df[["rt", "choice", rp_col, pain_col, money_col]].to_numpy(dtype=np.float32)
         if arr.shape[0] >= 10:
             out[str(subject)] = arr
     if not out:

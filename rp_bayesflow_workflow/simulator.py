@@ -26,20 +26,13 @@ def prior() -> np.ndarray:
 
 
 @njit
-def ddm_signed_rt_trial(
+def ddm_trial(
     drift: float,
     boundary: float,
     ndt: float,
     dc: float = 1.0,
     dt: float = 0.005,
-) -> float:
-    """Simulate one signed RT trial from a simple DDM.
-
-    Positive RT = upper boundary / response 1
-    Negative RT = lower boundary / response 0
-
-    Starting point is fixed at 0.5 * boundary (unbiased).
-    """
+):
     evidence = boundary * 0.5
     n_steps = 0.0
 
@@ -48,7 +41,8 @@ def ddm_signed_rt_trial(
         n_steps += 1.0
 
     rt = n_steps * dt + ndt
-    return rt if evidence >= boundary else -rt
+    choice = 1.0 if evidence >= boundary else 0.0
+    return rt, choice
 
 
 @njit
@@ -64,7 +58,7 @@ def simulate_dataset_from_design(params: np.ndarray, design: np.ndarray, dt: flo
     v_intercept, v_pain, v_money, boundary, ndt, drift_sd, rp_intercept, rp_loading, rp_noise = params
 
     n_trials = design.shape[0]
-    out = np.empty((n_trials, 4), dtype=np.float32)
+    out = np.empty((n_trials, 5), dtype=np.float32)
 
     for i in range(n_trials):
         pain_i = design[i, 0]
@@ -73,7 +67,7 @@ def simulate_dataset_from_design(params: np.ndarray, design: np.ndarray, dt: flo
         mu_drift = v_intercept + v_pain * pain_i + v_money * money_i
         latent_drift = np.random.normal(mu_drift, drift_sd)
 
-        signed_rt = ddm_signed_rt_trial(
+        rt_i, choice_i = ddm_trial(
             drift=latent_drift,
             boundary=boundary,
             ndt=ndt,
@@ -81,10 +75,11 @@ def simulate_dataset_from_design(params: np.ndarray, design: np.ndarray, dt: flo
         )
         rp_i = np.random.normal(rp_intercept + rp_loading * latent_drift, rp_noise)
 
-        out[i, 0] = signed_rt
-        out[i, 1] = rp_i
-        out[i, 2] = pain_i
-        out[i, 3] = money_i
+        out[i, 0] = rt_i
+        out[i, 1] = choice_i
+        out[i, 2] = rp_i
+        out[i, 3] = pain_i
+        out[i, 4] = money_i
 
     return out
 

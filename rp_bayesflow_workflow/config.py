@@ -5,7 +5,7 @@ Model idea
 Pain and money are fixed trial-wise design inputs.
 They determine the mean of a latent *trial-wise drift* variable.
 The latent trial-wise drift then generates both:
-    1) the signed choice RT via a DDM simulator
+    1) the choice RT via a DDM simulator
     2) the observed single-trial RP value via a Gaussian measurement model
 
 This makes the model *truly integrative* rather than directed:
@@ -60,14 +60,14 @@ DEFAULT_COLUMNS = {
 }
 
 DEFAULT_TRAINING = {
-    "epochs": 200,
-    "batch_size": 16,
-    "iterations_per_epoch": 300,
-    "capacity": 100,
+    "epochs": 400,
+    "batch_size": 32,
+    "iterations_per_epoch": 500,
+    "capacity": 300,
     "n_trials_min": 80,
     "n_trials_max": 220,
     "posterior_draws": 1000,
-    "recovery_param_sets": 250,
+    "recovery_param_sets": 500,
 }
 
 DEFAULT_DDM = {

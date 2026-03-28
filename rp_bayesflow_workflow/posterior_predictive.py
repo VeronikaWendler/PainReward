@@ -56,10 +56,10 @@ def main() -> None:
     # simulate a few posterior predictive datasets
     rng = np.random.default_rng(123)
     idx = rng.choice(samples.shape[0], size=min(args.n_sim_draws, samples.shape[0]), replace=False)
-    sims = [simulate_dataset_from_design(samples[i].astype(np.float32), x[:, 2:4].astype(np.float32)) for i in idx]
-
-    obs_rt = np.abs(x[:, 0])
-    obs_rp = x[:, 1]
+    sims = [simulate_dataset_from_design(samples[i].astype(np.float32), x[:, 3:5].astype(np.float32)) for i in idx]
+    obs_rt = x[:, 0]
+    obs_rp = x[:, 2]
+    obs_choice = x[:, 1]
 
     plt.figure(figsize=(7, 4))
     plt.hist(obs_rt, bins=30, density=True, alpha=0.5, label="observed RT")
