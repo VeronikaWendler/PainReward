@@ -40,7 +40,7 @@ def main() -> None:
         simulator_is_batched=True,
     )
     trainer = make_trainer(generative_model, args.checkpoint_dir)
-    amortizer = trainer.network
+    amortizer = trainer.amortizer
 
     true_params = np.stack([prior() for _ in range(args.n_param_sets)], axis=0).astype(np.float32)
     x = batch_simulator(true_params, args.n_trials).astype(np.float32)
