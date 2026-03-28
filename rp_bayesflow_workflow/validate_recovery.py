@@ -48,7 +48,29 @@ def main() -> None:
         {"summary_conditions": x.astype(np.float32)},
         n_samples=args.n_posterior_draws,
     )
-    est = posterior_samples_to_mean(posterior)
+
+    print("true_params shape:", true_params.shape)
+    print("x shape:", x.shape)
+    print("posterior shape:", posterior.shape)
+
+    # Robust handling of BayesFlow posterior layout
+    if posterior.ndim != 3:
+        raise ValueError(f"Unexpected posterior ndim: {posterior.ndim}, shape={posterior.shape}")
+
+    if posterior.shape[0] == args.n_param_sets:
+        # shape: (n_param_sets, n_draws, n_params)
+        est = posterior.mean(axis=1)
+    elif posterior.shape[1] == args.n_param_sets:
+        # shape: (n_draws, n_param_sets, n_params)
+        est = posterior.mean(axis=0)
+    else:
+        raise ValueError(
+            f"Could not infer posterior layout from shape {posterior.shape} "
+            f"with n_param_sets={args.n_param_sets}"
+        )
+
+    print("est shape:", est.shape)
+
 
     np.save(outdir / "true_params.npy", true_params)
     np.save(outdir / "posterior_samples.npy", posterior)
