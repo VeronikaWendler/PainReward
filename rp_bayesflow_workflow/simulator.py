@@ -7,8 +7,6 @@ from numba import njit
 
 from config import PRIOR_HIGH, PRIOR_LOW
 
-# Global design bank used by BayesFlow batch simulation.
-# Each entry is a real subject design matrix with columns [pain, money].
 DESIGN_BANK: List[np.ndarray] | None = None
 
 
@@ -19,20 +17,18 @@ def set_design_bank(bank: Iterable[np.ndarray]) -> None:
         raise ValueError("Design bank is empty.")
 
 
-def prior(batch_size: int) -> np.ndarray:
-    """Sample one batch of global parameters from the prior."""
+def prior() -> np.ndarray:
+    """Sample one parameter vector from the prior."""
     low = np.asarray(PRIOR_LOW, dtype=np.float32)
     high = np.asarray(PRIOR_HIGH, dtype=np.float32)
-    p = np.random.uniform(low=low, high=high, size=(batch_size, len(low)))
+    p = np.random.uniform(low=low, high=high, size=(len(low),))
     return p.astype(np.float32)
 
 
 @njit
-
 def ddm_signed_rt_trial(
     drift: float,
     boundary: float,
-    beta: float,
     ndt: float,
     dc: float = 1.0,
     dt: float = 0.005,
@@ -41,8 +37,10 @@ def ddm_signed_rt_trial(
 
     Positive RT = upper boundary / response 1
     Negative RT = lower boundary / response 0
+
+    Starting point is fixed at 0.5 * boundary (unbiased).
     """
-    evidence = boundary * beta
+    evidence = boundary * 0.5
     n_steps = 0.0
 
     while evidence > 0.0 and evidence < boundary:
@@ -54,20 +52,16 @@ def ddm_signed_rt_trial(
 
 
 @njit
-
 def simulate_dataset_from_design(params: np.ndarray, design: np.ndarray, dt: float = 0.005) -> np.ndarray:
     """Simulate one full dataset with columns [signed_rt, rp, pain, money].
 
     Model:
       mu_drift_i = v_intercept + v_pain * pain_i + v_money * money_i
       delta_i    ~ Normal(mu_drift_i, drift_sd)
-      signed_rt  ~ DDM(delta_i, boundary, start_point, ndt)
+      signed_rt  ~ DDM(delta_i, boundary, ndt)
       rp_i       ~ Normal(rp_intercept + rp_loading * delta_i, rp_noise)
-
-    This is a truly integrative model because the latent trial-wise drift delta_i
-    generates both the neural data (RP) and the behavioral data.
     """
-    v_intercept, v_pain, v_money, boundary, ndt, beta, drift_sd, rp_intercept, rp_loading, rp_noise = params
+    v_intercept, v_pain, v_money, boundary, ndt, drift_sd, rp_intercept, rp_loading, rp_noise = params
 
     n_trials = design.shape[0]
     out = np.empty((n_trials, 4), dtype=np.float32)
@@ -82,7 +76,6 @@ def simulate_dataset_from_design(params: np.ndarray, design: np.ndarray, dt: flo
         signed_rt = ddm_signed_rt_trial(
             drift=latent_drift,
             boundary=boundary,
-            beta=beta,
             ndt=ndt,
             dt=dt,
         )

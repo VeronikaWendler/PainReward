@@ -20,21 +20,18 @@ PARAM_NAMES = [
     "v_money",          # money effect on mean drift
     "boundary",         # boundary separation a
     "ndt",              # non-decision time t
-    "start_point",      # relative starting point beta
     "drift_sd",         # across-trial SD of latent drift
     "rp_intercept",     # baseline RP
     "rp_loading",       # loading of latent drift onto RP
     "rp_noise",         # EEG measurement noise
 ]
 
-# Broad but priors for z-scored pain / money and z-scored RP.
 PRIOR_LOW = (
     -3.0,   # v_intercept
     -3.0,   # v_pain
     -3.0,   # v_money
      0.4,   # boundary
      0.10,  # ndt
-     0.20,  # start_point
      0.05,  # drift_sd
     -2.0,   # rp_intercept
     -2.5,   # rp_loading
@@ -47,7 +44,6 @@ PRIOR_HIGH = (
      3.0,   # v_money
      2.5,   # boundary
      0.80,  # ndt
-     0.80,  # start_point
      1.50,  # drift_sd
      2.0,   # rp_intercept
      2.5,   # rp_loading
