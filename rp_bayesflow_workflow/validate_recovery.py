@@ -44,7 +44,10 @@ def main() -> None:
 
     true_params = np.stack([prior() for _ in range(args.n_param_sets)], axis=0).astype(np.float32)
     x = batch_simulator(true_params, args.n_trials).astype(np.float32)
-    posterior = amortizer.sample(x, n_samples=args.n_posterior_draws)
+    posterior = amortizer.sample(
+        {"summary_conditions": x.astype(np.float32)},
+        n_samples=args.n_posterior_draws,
+    )
     est = posterior_samples_to_mean(posterior)
 
     np.save(outdir / "true_params.npy", true_params)
