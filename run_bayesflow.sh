@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=rp_bf_train
+#SBATCH --job-name=rp_bf_recovery
 #SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=128G
-#SBATCH --output=logs/rp_bf_%j.out
-#SBATCH --error=logs/rp_bf_%j.err
+#SBATCH --output=logs/rp_bf_recovery_%j.out
+#SBATCH --error=logs/rp_bf_recovery_%j.err
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=VAW508@student.bham.ac.uk
 
@@ -34,12 +34,21 @@ export TF_NUM_INTEROP_THREADS=2
 
 cd "${PROJECT_DIR}"
 
-python train_model.py \
+python validate_recovery.py \
   --data "${DATA_CSV}" \
+  --checkpoint-dir "${CHECKPOINT_DIR}" \
   --outdir "${OUTDIR}" \
-  --epochs 200 \
-  --batch-size 16 \
-  --iterations-per-epoch 300 \
-  --capacity 100 \
-  --n-trials-min 80 \
-  --n-trials-max 220
+  --n-param-sets 250 \
+  --n-trials 160 \
+  --n-posterior-draws 1000 \
+  --seed 123
+
+# python train_model.py \
+#   --data "${DATA_CSV}" \
+#   --outdir "${OUTDIR}" \
+#   --epochs 200 \
+#   --batch-size 16 \
+#   --iterations-per-epoch 300 \
+#   --capacity 100 \
+#   --n-trials-min 80 \
+#   --n-trials-max 220

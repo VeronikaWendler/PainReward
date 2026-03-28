@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from bayesflow.models import GenerativeModel
+import bayesflow as bf
 
 from config import DEFAULT_TRAINING, PARAM_NAMES
 from data_utils import build_design_bank, load_and_prepare_data, posterior_samples_to_mean, save_metadata
@@ -34,11 +34,15 @@ def main() -> None:
     df = load_and_prepare_data(args.data)
     set_design_bank(build_design_bank(df))
 
-    generative_model = GenerativeModel(prior, batch_simulator)
+    generative_model = bf.simulation.GenerativeModel(
+        prior,
+        batch_simulator,
+        simulator_is_batched=True,
+    )
     trainer = make_trainer(generative_model, args.checkpoint_dir)
     amortizer = trainer.network
 
-    true_params = prior(args.n_param_sets)
+    true_params = np.stack([prior() for _ in range(args.n_param_sets)], axis=0).astype(np.float32)
     x = batch_simulator(true_params, args.n_trials).astype(np.float32)
     posterior = amortizer.sample(x, n_samples=args.n_posterior_draws)
     est = posterior_samples_to_mean(posterior)
