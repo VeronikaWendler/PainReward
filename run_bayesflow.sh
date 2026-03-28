@@ -25,7 +25,10 @@ mkdir -p "$MPLCONFIGDIR"
 
 PROJECT_DIR=/rds/homes/v/vaw508/projects/PainReward/rp_bayesflow_workflow
 DATA_CSV=/rds/homes/v/vaw508/projects/PainReward/Hddm_Docker_August_24/data_sets/behavioural_sv_cleaned_final_3_with_rp.csv
-OUTDIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/runs/pilot_run_01
+RUN_DIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/runs/pilot_run_01
+CHECKPOINT_DIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/runs/pilot_run_01/checkpoints
+OUTDIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/runs/pilot_run_01/recovery
+
 mkdir -p "${OUTDIR}"
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
@@ -43,12 +46,13 @@ python validate_recovery.py \
   --n-posterior-draws 1000 \
   --seed 123
 
-# python train_model.py \
-#   --data "${DATA_CSV}" \
-#   --outdir "${OUTDIR}" \
-#   --epochs 200 \
-#   --batch-size 16 \
-#   --iterations-per-epoch 300 \
-#   --capacity 100 \
-#   --n-trials-min 80 \
-#   --n-trials-max 220
+
+# # python train_model.py \
+# #   --data "${DATA_CSV}" \
+# #   --outdir "${OUTDIR}" \
+# #   --epochs 200 \
+# #   --batch-size 16 \
+# #   --iterations-per-epoch 300 \
+# #   --capacity 100 \
+# #   --n-trials-min 80 \
+# #   --n-trials-max 220
