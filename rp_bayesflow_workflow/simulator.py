@@ -104,7 +104,7 @@ def batch_simulator(prior_samples: np.ndarray, n_obs: int = 160) -> np.ndarray:
         raise ValueError("n_obs must be a single integer per BayesFlow training step.")
 
     n_sim = prior_samples.shape[0]
-    sim_data = np.empty((n_sim, int(n_obs), 4), dtype=np.float32)
+    sim_data = np.empty((n_sim, int(n_obs), 5), dtype=np.float32)
     for i in range(n_sim):
         design = _sample_design(int(n_obs))
         sim_data[i] = simulate_dataset_from_design(prior_samples[i], design)
