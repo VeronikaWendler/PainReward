@@ -12,8 +12,10 @@ from config import DEFAULT_TRAINING
 from data_utils import build_design_bank, build_observed_datasets, load_and_prepare_data
 from model_utils import (
     get_amortizer_from_trainer,
-    load_training_stats,
+    load_prior_moments,
+    make_configurator,
     make_trainer,
+    prepare_amortizer_input,
     unstandardize_posterior_samples,
 )
 from simulator import batch_simulator, prior, set_design_bank, simulate_dataset_from_design
@@ -28,34 +30,27 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--outdir", required=True)
     p.add_argument("--n-posterior-draws", type=int, default=250)
     p.add_argument("--n-sim-draws", type=int, default=100)
-    p.add_argument(
-        "--subject",
-        default=None,
-        help="Optional single subject id. If omitted, runs all subjects.",
-    )
+    p.add_argument("--subject", default=None, help="Optional single subject id. If omitted, runs all subjects.")
     p.add_argument("--seed", type=int, default=123)
     return p.parse_args()
 
 
-def _normalize_posterior_samples(arr: np.ndarray) -> np.ndarray:
+def _normalize_subject_samples(arr: np.ndarray) -> np.ndarray:
     """
-    Normalize posterior sample output to shape [n_draws, n_params].
-
-    Handles common BayesFlow layouts:
-    - [n_draws, 1, n_params]
-    - [1, n_draws, n_params]
-    - [n_draws, n_params]
+    Return posterior samples as [n_draws, n_params].
+    Handles:
+      [n_draws, n_params]
+      [1, n_draws, n_params]
+      [n_draws, 1, n_params]
     """
-    arr = np.asarray(arr)
+    arr = np.asarray(arr, dtype=np.float32)
 
     if arr.ndim == 2:
         return arr
-
-    if arr.ndim == 3 and arr.shape[1] == 1:
-        return arr[:, 0, :]
-
     if arr.ndim == 3 and arr.shape[0] == 1:
         return arr[0, :, :]
+    if arr.ndim == 3 and arr.shape[1] == 1:
+        return arr[:, 0, :]
 
     raise ValueError(f"Unexpected posterior shape: {arr.shape}")
 
@@ -66,12 +61,6 @@ def simulate_posterior_predictive_datasets(
     n_sim_draws: int,
     rng: np.random.Generator,
 ) -> list[np.ndarray]:
-    """
-    Simulate posterior predictive datasets for one subject.
-
-    posterior_samples: [n_draws, n_params]
-    design: [n_trials, 2] with columns [pain_z, money_z]
-    """
     n_available = posterior_samples.shape[0]
     n_use = min(n_sim_draws, n_available)
     idx = rng.choice(n_available, size=n_use, replace=False)
@@ -92,11 +81,6 @@ def save_subject_ppc_plots(
     sims: list[np.ndarray],
     outdir: Path,
 ) -> dict:
-    """
-    Save RT / choice / RP PPC plots for one subject.
-    observed_x columns: [rt, choice, rp, pain, money]
-    sim columns:        [rt, choice, rp, pain, money]
-    """
     obs_rt = observed_x[:, 0]
     obs_choice = observed_x[:, 1]
     obs_rp = observed_x[:, 2]
@@ -105,7 +89,6 @@ def save_subject_ppc_plots(
     sim_mean_choice = np.array([sim[:, 1].mean() for sim in sims], dtype=np.float32)
     sim_mean_rp = np.array([sim[:, 2].mean() for sim in sims], dtype=np.float32)
 
-    # RT
     plt.figure(figsize=(7, 4))
     plt.hist(obs_rt, bins=30, density=True, alpha=0.5, label="observed RT")
     for sim in sims[:20]:
@@ -118,7 +101,6 @@ def save_subject_ppc_plots(
     plt.savefig(outdir / f"subject_{subject}_ppc_rt.png", dpi=160)
     plt.close()
 
-    # RP
     plt.figure(figsize=(7, 4))
     plt.hist(obs_rp, bins=30, density=True, alpha=0.5, label="observed RP")
     for sim in sims[:20]:
@@ -131,7 +113,6 @@ def save_subject_ppc_plots(
     plt.savefig(outdir / f"subject_{subject}_ppc_rp.png", dpi=160)
     plt.close()
 
-    # Choice probability
     plt.figure(figsize=(7, 4))
     plt.hist(sim_mean_choice, bins=20, density=True, alpha=0.7, label="simulated")
     plt.axvline(obs_choice.mean(), linestyle="--", label="observed mean choice")
@@ -163,9 +144,6 @@ def save_combined_ppc_plots(
     simulated_all: list[np.ndarray],
     outdir: Path,
 ) -> None:
-    """
-    Save pooled PPC plots across all subjects.
-    """
     obs_concat = np.concatenate(observed_all, axis=0)
     sim_concat = np.concatenate(simulated_all, axis=0)
 
@@ -177,7 +155,6 @@ def save_combined_ppc_plots(
     sim_choice = sim_concat[:, 1]
     sim_rp = sim_concat[:, 2]
 
-    # Combined RT
     plt.figure(figsize=(7, 4))
     plt.hist(obs_rt, bins=40, density=True, alpha=0.5, label="observed RT")
     plt.hist(sim_rt, bins=40, density=True, histtype="step", linewidth=2.0, label="simulated RT")
@@ -189,7 +166,6 @@ def save_combined_ppc_plots(
     plt.savefig(outdir / "combined_ppc_rt.png", dpi=160)
     plt.close()
 
-    # Combined RP
     plt.figure(figsize=(7, 4))
     plt.hist(obs_rp, bins=40, density=True, alpha=0.5, label="observed RP")
     plt.hist(sim_rp, bins=40, density=True, histtype="step", linewidth=2.0, label="simulated RP")
@@ -201,7 +177,6 @@ def save_combined_ppc_plots(
     plt.savefig(outdir / "combined_ppc_rp.png", dpi=160)
     plt.close()
 
-    # Combined choice
     plt.figure(figsize=(7, 4))
     plt.hist(sim_choice, bins=30, density=True, alpha=0.7, label="simulated choice")
     plt.axvline(obs_choice.mean(), linestyle="--", label="observed mean choice")
@@ -224,20 +199,36 @@ def main() -> None:
     subject_plot_dir = outdir / "subject_plots"
     subject_plot_dir.mkdir(parents=True, exist_ok=True)
 
+    checkpoint_dir = Path(args.checkpoint_dir)
+    if not checkpoint_dir.exists():
+        raise FileNotFoundError(f"Checkpoint directory does not exist: {checkpoint_dir}")
+
+    prior_norm_path = checkpoint_dir / "prior_norm.npz"
+    if not prior_norm_path.exists():
+        raise FileNotFoundError(
+            f"Could not find prior normalization file at {prior_norm_path}."
+        )
+
     df = load_and_prepare_data(args.data)
     design_bank = build_design_bank(df)
     observed = build_observed_datasets(df)
     set_design_bank(design_bank)
+
+    prior_mean, prior_std = load_prior_moments(prior_norm_path)
+    configurator = make_configurator(prior_mean, prior_std)
 
     generative_model = bf.simulation.GenerativeModel(
         prior,
         batch_simulator,
         simulator_is_batched=True,
     )
-    trainer = make_trainer(generative_model, args.checkpoint_dir)
+    trainer = make_trainer(
+        generative_model=generative_model,
+        checkpoint_path=checkpoint_dir,
+        configurator=configurator,
+        input_dim=5,
+    )
     amortizer = get_amortizer_from_trainer(trainer)
-
-    prior_mean, prior_std = load_training_stats(args.checkpoint_dir)
 
     if args.subject is not None:
         subject_ids = [str(args.subject)]
@@ -255,10 +246,10 @@ def main() -> None:
         design = x[:, 3:5].astype(np.float32)
 
         posterior_std = amortizer.sample(
-            {"summary_conditions": x[None, :, :]},
+            prepare_amortizer_input(x),
             n_samples=args.n_posterior_draws,
         )
-        posterior_std = _normalize_posterior_samples(posterior_std)
+        posterior_std = _normalize_subject_samples(posterior_std)
         posterior = unstandardize_posterior_samples(posterior_std, prior_mean, prior_std)
 
         sims = simulate_posterior_predictive_datasets(
