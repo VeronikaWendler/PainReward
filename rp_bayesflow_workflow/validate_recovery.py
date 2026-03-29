@@ -7,12 +7,15 @@ import numpy as np
 import bayesflow as bf
 
 from config import DEFAULT_TRAINING, PARAM_NAMES
-from data_utils import (
-    build_design_bank,
-    load_and_prepare_data,
-    save_metadata,
+from data_utils import build_design_bank, load_and_prepare_data, save_metadata
+from model_utils import (
+    get_amortizer_from_trainer,
+    load_prior_moments,
+    make_configurator,
+    make_trainer,
+    prepare_amortizer_input,
+    unstandardize_posterior_samples,
 )
-from model_utils import make_trainer
 from plotting_utils import plot_true_vs_estimated
 from simulator import batch_simulator, prior, set_design_bank
 
@@ -24,50 +27,29 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data", required=True)
     p.add_argument("--checkpoint-dir", required=True)
     p.add_argument("--outdir", required=True)
-    p.add_argument(
-        "--n-param-sets",
-        type=int,
-        default=DEFAULT_TRAINING["recovery_param_sets"],
-    )
+    p.add_argument("--n-param-sets", type=int, default=DEFAULT_TRAINING["recovery_param_sets"])
     p.add_argument("--n-trials", type=int, default=160)
-    p.add_argument(
-        "--n-posterior-draws",
-        type=int,
-        default=DEFAULT_TRAINING["posterior_draws"],
-    )
+    p.add_argument("--n-posterior-draws", type=int, default=DEFAULT_TRAINING["posterior_draws"])
     p.add_argument("--seed", type=int, default=123)
     return p.parse_args()
-
-
-def get_amortizer_from_trainer(trainer):
-    """Compatibility across BayesFlow trainer versions."""
-    if hasattr(trainer, "amortizer"):
-        return trainer.amortizer
-    if hasattr(trainer, "network"):
-        return trainer.network
-    raise AttributeError("Trainer has neither `amortizer` nor `network`.")
 
 
 def posterior_to_means(posterior: np.ndarray, n_param_sets: int) -> np.ndarray:
     """
     Convert posterior draws to posterior means.
 
-    Handles either:
+    Handles:
     - (n_param_sets, n_draws, n_params)
     - (n_draws, n_param_sets, n_params)
     """
     posterior = np.asarray(posterior)
 
     if posterior.ndim != 3:
-        raise ValueError(
-            f"Unexpected posterior ndim: {posterior.ndim}, shape={posterior.shape}"
-        )
+        raise ValueError(f"Unexpected posterior ndim: {posterior.ndim}, shape={posterior.shape}")
 
     if posterior.shape[0] == n_param_sets:
-        # (n_param_sets, n_draws, n_params)
         est = posterior.mean(axis=1)
     elif posterior.shape[1] == n_param_sets:
-        # (n_draws, n_param_sets, n_params)
         est = posterior.mean(axis=0)
     else:
         raise ValueError(
@@ -85,50 +67,75 @@ def main() -> None:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Rebuild same design bank used during training
+    checkpoint_dir = Path(args.checkpoint_dir)
+    if not checkpoint_dir.exists():
+        raise FileNotFoundError(f"Checkpoint directory does not exist: {checkpoint_dir}")
+
+    prior_norm_path = checkpoint_dir / "prior_norm.npz"
+    if not prior_norm_path.exists():
+        raise FileNotFoundError(
+            f"Could not find prior normalization file at {prior_norm_path}. "
+            f"Please retrain with the new training code first."
+        )
+
+    # -----------------------------
+    # Load data and rebuild design bank
+    # -----------------------------
     df = load_and_prepare_data(args.data)
     design_bank = build_design_bank(df)
     set_design_bank(design_bank)
 
-    # Rebuild trained model and load checkpoint
+    # -----------------------------
+    # Load prior normalization + configurator
+    # -----------------------------
+    prior_mean, prior_std = load_prior_moments(prior_norm_path)
+    configurator = make_configurator(prior_mean, prior_std)
+
+    # -----------------------------
+    # Rebuild trainer / amortizer
+    # -----------------------------
     generative_model = bf.simulation.GenerativeModel(
         prior,
         batch_simulator,
         simulator_is_batched=True,
     )
-    trainer = make_trainer(generative_model, args.checkpoint_dir)
+    trainer = make_trainer(
+        generative_model=generative_model,
+        checkpoint_path=checkpoint_dir,
+        configurator=configurator,
+        input_dim=5,
+    )
     amortizer = get_amortizer_from_trainer(trainer)
 
-    # Draw true parameters from prior
-    true_params = np.stack(
-        [prior() for _ in range(args.n_param_sets)],
-        axis=0,
-    ).astype(np.float32)
-
+    # -----------------------------
     # Simulate recovery datasets
+    # -----------------------------
+    true_params = np.stack([prior() for _ in range(args.n_param_sets)], axis=0).astype(np.float32)
     x = batch_simulator(true_params, args.n_trials).astype(np.float32)
 
-    # IMPORTANT: this BayesFlow version expects a dict, not a raw ndarray
-    posterior = amortizer.sample(
-        {"summary_conditions": x},
+    posterior_std = amortizer.sample(
+        prepare_amortizer_input(x),
         n_samples=args.n_posterior_draws,
     )
-    posterior = np.asarray(posterior)
+    posterior_std = np.asarray(posterior_std, dtype=np.float32)
 
     print("true_params shape:", true_params.shape)
     print("x shape:", x.shape)
-    print("posterior shape:", posterior.shape)
+    print("posterior_std shape:", posterior_std.shape)
 
-    # Posterior means
+    # undo standardization
+    posterior = unstandardize_posterior_samples(posterior_std, prior_mean, prior_std)
     est = posterior_to_means(posterior, args.n_param_sets)
+
+    print("posterior shape:", posterior.shape)
     print("est shape:", est.shape)
 
     if est.shape != true_params.shape:
-        raise ValueError(
-            f"Shape mismatch: true_params {true_params.shape} vs est {est.shape}"
-        )
+        raise ValueError(f"Shape mismatch: true_params {true_params.shape} vs est {est.shape}")
 
+    # -----------------------------
     # Save outputs
+    # -----------------------------
     np.save(outdir / "true_params.npy", true_params)
     np.save(outdir / "posterior_samples.npy", posterior)
     np.save(outdir / "posterior_means.npy", est)
@@ -152,6 +159,8 @@ def main() -> None:
             "n_trials": args.n_trials,
             "n_posterior_draws": args.n_posterior_draws,
             "correlation_by_parameter": corr,
+            "prior_mean": prior_mean.tolist(),
+            "prior_std": prior_std.tolist(),
         },
     )
 

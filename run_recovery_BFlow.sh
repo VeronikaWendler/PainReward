@@ -30,7 +30,7 @@ export TF_NUM_INTEROP_THREADS=2
 
 PROJECT_DIR=/rds/homes/v/vaw508/projects/PainReward/rp_bayesflow_workflow
 DATA_CSV=/rds/homes/v/vaw508/projects/PainReward/Hddm_Docker_August_24/data_sets/behavioural_sv_cleaned_final_3_with_rp.csv
-RUN_DIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/runs/pilot_run_02
+RUN_DIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/runs/pilot_run_03
 CHECKPOINT_DIR=${RUN_DIR}/checkpoints
 OUTDIR=${RUN_DIR}/recovery
 

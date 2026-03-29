@@ -9,14 +9,19 @@ import bayesflow as bf
 
 from config import DEFAULT_TRAINING, PARAM_NAMES
 from data_utils import build_design_bank, load_and_prepare_data, save_metadata
-from model_utils import make_trainer
+from model_utils import (
+    estimate_prior_moments,
+    make_configurator,
+    make_trainer,
+    save_prior_moments,
+)
 from plotting_utils import plot_losses
 from simulator import batch_simulator, prior, set_design_bank
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Train the true integrative RP–drift BayesFlow model.")
-    p.add_argument("--data", required=True, help="CSV with subj_idx, pain_z, money_z, rp_z, rt, response")
+    p = argparse.ArgumentParser(description="Train the integrative RP-drift BayesFlow model.")
+    p.add_argument("--data", required=True, help="CSV with subj_idx, painlevel, moneylevel, rp_z, rt, response")
     p.add_argument("--outdir", required=True, help="Output directory for checkpoints and logs")
     p.add_argument("--epochs", type=int, default=DEFAULT_TRAINING["epochs"])
     p.add_argument("--batch-size", type=int, default=DEFAULT_TRAINING["batch_size"])
@@ -27,13 +32,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=123)
     p.add_argument("--min-rt", type=float, default=0.25)
     p.add_argument("--zscore-rp-within-subject", action="store_true")
+    p.add_argument("--prior-norm-draws", type=int, default=50000)
     return p.parse_args()
 
 
-def train_with_compat(trainer, *, epochs: int, batch_size: int, iterations_per_epoch: int, capacity: int, n_obs):
+def train_with_compat(
+    trainer,
+    *,
+    epochs: int,
+    batch_size: int,
+    iterations_per_epoch: int,
+    capacity: int,
+    n_obs,
+):
     """
     Compatibility wrapper across BayesFlow trainer versions.
-    Some versions use `capacity`, others `buffer_capacity`.
     """
     sig = inspect.signature(trainer.train_experience_replay)
     kwargs = {
@@ -50,7 +63,7 @@ def train_with_compat(trainer, *, epochs: int, batch_size: int, iterations_per_e
     else:
         raise RuntimeError(
             "Could not find either `capacity` or `buffer_capacity` in "
-            "`trainer.train_experience_replay`. Please inspect your BayesFlow version."
+            "`trainer.train_experience_replay`."
         )
 
     return trainer.train_experience_replay(**kwargs)
@@ -63,7 +76,11 @@ def main() -> None:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = outdir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+    # -----------------------------
+    # Load and prepare data
+    # -----------------------------
     df = load_and_prepare_data(
         csv_path=args.data,
         min_rt=args.min_rt,
@@ -72,13 +89,37 @@ def main() -> None:
     design_bank = build_design_bank(df)
     set_design_bank(design_bank)
 
-    # BayesFlow version in your environment exposes GenerativeModel here:
+    # -----------------------------
+    # Estimate prior normalization
+    # -----------------------------
+    prior_mean, prior_std = estimate_prior_moments(
+        prior_fn=prior,
+        n_draws=args.prior_norm_draws,
+        seed=args.seed,
+    )
+
+    save_prior_moments(checkpoint_dir / "prior_norm.npz", prior_mean, prior_std)
+    save_prior_moments(outdir / "prior_norm.npz", prior_mean, prior_std)
+
+    # -----------------------------
+    # Build configurator
+    # -----------------------------
+    configurator = make_configurator(prior_mean, prior_std)
+
+    # -----------------------------
+    # Build generative model + trainer
+    # -----------------------------
     generative_model = bf.simulation.GenerativeModel(
         prior,
         batch_simulator,
         simulator_is_batched=True,
     )
-    trainer = make_trainer(generative_model, checkpoint_dir)
+    trainer = make_trainer(
+        generative_model=generative_model,
+        checkpoint_path=checkpoint_dir,
+        configurator=configurator,
+        input_dim=5,
+    )
 
     def prior_N(n_min: int = args.n_trials_min, n_max: int = args.n_trials_max) -> int:
         return np.random.randint(n_min, n_max + 1)
@@ -86,7 +127,12 @@ def main() -> None:
     print(f"Training on {len(design_bank)} real subject design matrices")
     print(f"Parameter set: {PARAM_NAMES}")
     print(f"Checkpoints: {checkpoint_dir}")
+    print(f"Prior mean: {prior_mean}")
+    print(f"Prior std: {prior_std}")
 
+    # -----------------------------
+    # Train
+    # -----------------------------
     losses = train_with_compat(
         trainer,
         epochs=args.epochs,
@@ -96,7 +142,10 @@ def main() -> None:
         n_obs=prior_N,
     )
 
-    losses_arr = np.asarray(losses)
+    # -----------------------------
+    # Save outputs
+    # -----------------------------
+    losses_arr = np.asarray(losses, dtype=np.float32)
     np.save(outdir / "losses.npy", losses_arr)
     plot_losses(losses_arr, outdir / "loss_curve.png")
 
@@ -113,8 +162,10 @@ def main() -> None:
             "seed": args.seed,
             "n_subject_designs": len(design_bank),
             "param_names": PARAM_NAMES,
+            "prior_norm_draws": args.prior_norm_draws,
         },
     )
+
     print("Training finished.")
 
 

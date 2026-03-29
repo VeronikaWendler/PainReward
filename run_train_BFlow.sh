@@ -30,7 +30,7 @@ export TF_NUM_INTEROP_THREADS=2
 
 PROJECT_DIR=/rds/homes/v/vaw508/projects/PainReward/rp_bayesflow_workflow
 DATA_CSV=/rds/homes/v/vaw508/projects/PainReward/Hddm_Docker_August_24/data_sets/behavioural_sv_cleaned_final_3_with_rp.csv
-OUTDIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/runs/pilot_run_02
+OUTDIR=/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/runs/pilot_run_03
 
 mkdir -p "${OUTDIR}"
 
