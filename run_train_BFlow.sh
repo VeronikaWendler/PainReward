@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=rp_bf_train_run2
+#SBATCH --job-name=rp_bf_train_run3
 #SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=128G
-#SBATCH --output=logs/rp_bf_train_run2_%j.out
-#SBATCH --error=logs/rp_bf_train_run2_%j.err
+#SBATCH --output=logs/rp_bf_train_run3_%j.out
+#SBATCH --error=logs/rp_bf_train_run3_%j.err
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=VAW508@student.bham.ac.uk
 
