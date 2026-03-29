@@ -143,18 +143,33 @@ def unstandardize_posterior_samples(
     """
     Undo parameter standardization for posterior samples.
 
-    Handles:
-    - [n_sets, n_draws, n_params]
-    - [n_draws, n_sets, n_params]
+    Accepts:
+    - 2D: [n_draws, n_params]
+    - 3D: [n_sets, n_draws, n_params] or [n_draws, n_sets, n_params]
+
+    Returns array of same shape as input.
     """
     arr = np.asarray(samples, dtype=np.float32)
     prior_mean = np.asarray(prior_mean, dtype=np.float32)
     prior_std = np.asarray(prior_std, dtype=np.float32)
 
-    if arr.ndim != 3:
-        raise ValueError(f"Expected 3D posterior sample array, got shape {arr.shape}")
+    if arr.ndim == 2:
+        if arr.shape[-1] != prior_mean.shape[0]:
+            raise ValueError(
+                f"Posterior last dimension {arr.shape[-1]} does not match "
+                f"number of parameters {prior_mean.shape[0]}"
+            )
+        return arr * prior_std[None, :] + prior_mean[None, :]
 
-    return arr * prior_std + prior_mean
+    if arr.ndim == 3:
+        if arr.shape[-1] != prior_mean.shape[0]:
+            raise ValueError(
+                f"Posterior last dimension {arr.shape[-1]} does not match "
+                f"number of parameters {prior_mean.shape[0]}"
+            )
+        return arr * prior_std[None, None, :] + prior_mean[None, None, :]
+
+    raise ValueError(f"Expected 2D or 3D posterior sample array, got shape {arr.shape}")
 
 
 def get_amortizer_from_trainer(trainer):
