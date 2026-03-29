@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=rp_bf_ppc_run3
-#SBATCH --time=24:00:00
+#SBATCH --time=3:00:00
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=128G
 #SBATCH --output=logs/rp_bf_ppc_run3_%j.out
