@@ -27,7 +27,7 @@ if hasattr(dill, "dump"):
 import dill as pickle
 
 import hddm
-import kabuki
+import kabuki  # required by hddm at import time
 
 from joblib import Parallel, delayed
 
@@ -88,10 +88,10 @@ REQUIRED_COLS = {
     1:  ["rt", "response", "painlevel", "moneylevel", "sv_pain_para"],
     2:  ["rt", "response", "painlevel", "moneylevel", "sv_pain_para"],
     3:  ["rt", "response", "painlevel", "moneylevel", "sv_pain_para"],
-    9:  ["rt", "response", "painlevel", "moneylevel", "pain_z", "money_z"],
-    10: ["rt", "response", "painlevel", "moneylevel", "pain_z", "money_z"],
-    11: ["rt", "response", "painlevel", "moneylevel", "pain_z", "money_z"],
-    12: ["rt", "response", "painlevel", "moneylevel", "pain_z", "money_z"],
+    9:  ["rt", "response", "painlevel", "moneylevel"],
+    10: ["rt", "response", "painlevel", "moneylevel"],
+    11: ["rt", "response", "painlevel", "moneylevel"],
+    12: ["rt", "response", "painlevel", "moneylevel"],
     17: ["rt", "response", "pain_z", "money_z", "rp_z"],
     18: ["rt", "response", "pain_z", "money_z", "rp_z"],
     19: ["rt", "response", "pain_z", "money_z"],
