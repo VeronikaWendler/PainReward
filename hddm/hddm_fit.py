@@ -19,7 +19,6 @@ import pandas as pd
 import arviz as az
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import cloudpickle
 import dill
 if hasattr(dill, "dump"):
@@ -44,8 +43,6 @@ sys.modules.setdefault("_gdbm",  types.ModuleType("_gdbm"))
 PROJECT_DIR    = Path(os.getenv("PROJECT_DIR", str(Path(__file__).resolve().parent.parent))).resolve()
 BASE_MODEL_DIR = Path(os.getenv("MODEL_DIR",
                       str(PROJECT_DIR / "Hddm_Docker_August_24" / "models_dir"))).resolve()
-FIG_DIR_ROOT   = Path(os.getenv("FIG_DIR",
-                      str(PROJECT_DIR / "Hddm_Docker_August_24" / "figures_dir"))).resolve()
 
 INPUT_CSV = PROJECT_DIR / "derivatives" / "behav" / "hddm_ready.csv"
 
@@ -58,7 +55,8 @@ def ensure_dir(path: Path) -> None:
 # Model specifications
 # ---------------------------------------------------------------------------
 
-_lf = lambda x: x  # identity link function
+def _lf(x):
+    return x
 
 MODEL_SPECS = {
     0:  {"class": "HDDM",         "regs": None},
@@ -136,8 +134,7 @@ def clean_data(data: pd.DataFrame, version: int) -> pd.DataFrame:
     if version in [17, 18, 20]:
         before = len(df)
         df = df[df["badtrial"] == 0]
-        df = df.dropna(subset=["rp_z"])
-        print(f"  RP filter: removed {before - len(df)} trials, {len(df)} remain.")
+        print(f"  badtrial filter: removed {before - len(df)} trials, {len(df)} remain.")
     req = REQUIRED_COLS[version]
     before = len(df)
     df = df.dropna(subset=req)
@@ -151,7 +148,8 @@ def clean_data(data: pd.DataFrame, version: int) -> pd.DataFrame:
 
 def run_chain(trace_id: int, data: pd.DataFrame, model_dir: Path,
               model_name: str, version: int, samples: int) -> tuple:
-    import os, hddm
+    import os
+    import hddm
     from pathlib import Path
 
     spec = MODEL_SPECS[version]
@@ -204,11 +202,9 @@ if __name__ == "__main__":
     parser.add_argument("--n-chains",  type=int, default=4)
     parser.add_argument("--samples",   type=int, default=12000)
     parser.add_argument("--model-dir", type=Path, default=BASE_MODEL_DIR)
-    parser.add_argument("--fig-dir",   type=Path, default=FIG_DIR_ROOT)
     args = parser.parse_args()
 
     ensure_dir(args.model_dir)
-    ensure_dir(args.fig_dir)
 
     if not INPUT_CSV.exists():
         raise FileNotFoundError(
