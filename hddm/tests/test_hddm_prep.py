@@ -30,7 +30,7 @@ def base_df():
 def test_acceptance_pair(base_df):
     result = compute_acceptance_pair(base_df)
     # money==pain → I; money>pain → M; money<pain → P
-    assert list(result) == ["I", "M", "P", "I", "M"]
+    assert list(result) == ["I", "M", "P", "I", "P"]
 
 
 def test_ov_value(base_df):

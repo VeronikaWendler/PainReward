@@ -17,14 +17,14 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 def compute_acceptance_pair(df: pd.DataFrame) -> pd.Series:
-    """I = equal money/pain, M = money dominant or slight pain, P = pain strongly dominant (diff>=2)."""
+    """I = equal money/pain, M = money dominant, P = pain dominant."""
     money = df["moneylevel"]
     pain  = df["painlevel"]
     return pd.Series(
         np.select(
-            [money == pain, (pain - money) >= 2],
-            ["I",           "P"],
-            default="M",
+            [money == pain, money > pain],
+            ["I",           "M"],
+            default="P",
         ),
         index=df.index,
     )
