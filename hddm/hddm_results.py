@@ -10,12 +10,10 @@ import warnings
 import argparse
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pickle
 import scipy.stats as stats
 import kabuki
-import arviz as az
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -75,13 +73,11 @@ def map_estimates(combined, param_names: list) -> pd.DataFrame:
 
     for name in param_names:
         if name not in available:
-            print(f"  [skip] {name} not in model stats")
-            continue
-        try:
-            trace = combined.nodes_db.node[name].trace()
-        except KeyError:
-            print(f"  [skip] no trace for {name}")
-            continue
+            raise KeyError(
+                f"Parameter '{name}' not found in model stats. "
+                f"Available: {sorted(available)}"
+            )
+        trace = combined.nodes_db.node[name].trace()
         rows.append({
             "parameter": name,
             "MAP":       trace.mean(),
