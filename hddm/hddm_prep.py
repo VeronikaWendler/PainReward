@@ -136,13 +136,13 @@ def prepare_hddm_data(input_csv: Path, output_csv: Path) -> pd.DataFrame:
         raise ValueError("No decision-phase rows found in the input CSV.")
 
     # Rename for HDDM
-    df["rt"]       = pd.to_numeric(df["choice_resp.rt"], errors="coerce")
-    df["response"] = pd.to_numeric(df["accepted"],       errors="coerce")
+    df["rt"]       = pd.to_numeric(df["choice_resp.rt"], errors="raise")
+    df["response"] = pd.to_numeric(df["accepted"],       errors="raise")
     df["subj_idx"] = df["participant"]
 
     # Cast predictors
     for col in ["moneylevel", "painlevel"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df[col] = pd.to_numeric(df[col], errors="raise")
 
     # RT filter
     df = df[df["rt"] > 0.250].copy()
@@ -164,7 +164,7 @@ def prepare_hddm_data(input_csv: Path, output_csv: Path) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    PROJECT_DIR = Path(os.getenv("PROJECT_DIR", Path(__file__).parent.parent)).resolve()
+    PROJECT_DIR = Path(os.getenv("PROJECT_DIR", str(Path(__file__).resolve().parent.parent))).resolve()
 
     default_input = (
         PROJECT_DIR / "Hddm_Docker_August_24" / "data_sets"
