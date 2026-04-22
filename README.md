@@ -1,183 +1,131 @@
-# PainReward — collaborator README
+# PainReward
 
-This repository contains code for the **PainReward** project at Université Laval. In practical terms, the repo is organized around three main analysis streams:
-
-1. **EEG preprocessing and ERP / massunivariate and decoding analyses**
-2. **HDDM / DDM behavioural modelling**
-3. **A newer BayesFlow-based integrative modelling workflow - this is in process and just a try-out**
-
-There are also a few older or exploratory notebooks and standalone scripts.
+Analysis code for the **PainReward** project at Université Laval — pain and reward decision-making with EEG (N=38 participants).
 
 ---
 
-- **main HDDM modelling pipeline:** go to `Hddm_Docker_August_24/`
-- **EEG preprocessing / ERP / mass-univariate / decoding analyses:** go to `EEG/`
-- **EEG --> HDDM bridge dataset:** look at `EEG/rp_into_hddm.py`
-- **You want older exploratory analyses / notebook history:** see `Initial_Preprocessing_and_Basic_Hddm/`, `Quest_Code/`, and `subjective_value_estimation/`
+## Running the pipeline
+
+The entire pipeline is driven by a single script:
+
+```bash
+bash run_all.sh
+```
+
+Scripts are numbered in execution order. HDDM fitting runs inside a Docker container (`hcp4715/hddm`); everything else runs in the local Python environment.
+
+Set the following environment variables if your data are not at the default BIDS root (`../../`, relative to `code/`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `basepath` | `../../` | BIDS data root |
+| `PROJECT_DIR` | `../../` | Used by Docker-based HDDM scripts |
+| `HDDM_DIR` | `<basepath>/derivatives/hddm` | HDDM output directory |
+| `NJOBS` | `n_cpu - 1` | Parallel jobs for EEG permutation tests |
 
 ---
 
-## repository map
+## Repository map
 
-### `EEG/`
-Main EEG analysis folder. This is where most signal-processing and ERP analysis code lives
-
-Key files:
-- `eeg_preprocess.py` — raw EEG cleaning / preprocessing pipeline
-- `eeg_erp_prep.py` — prepares ERP data for downstream analyses
-- `eeg_erp_rp.py` — readiness-potential (RP) analyses and regression summaries
-- `eeg_erp_massunivariate.py` — mass-univariate EEG analyses linking EEG with model-derived parameters
-- `eeg_erp_massunivariate_plot.py` — plots topos and amplitudes and regression plots (e.g. differnece plots) for massunivariate
-- `eeg_erp_massunivariate_stats.py` — post-processing / summarising statistically significant windows and channel effects
-- `eeg_erp_groupplots_rp.py` — group-level RP figures
-- **Files starting with eeg_erp_decoding are work in progress and messy claude-code trials**
-- `eeg_erp_decoding_passive.py` — time-resolved decoding in passive phase
-- `eeg_erp_decoding_decision.py` — time-resolved decoding in decision phase
-- `eeg_erp_crossphase_decoding.py` — cross-phase time-generalisation decoding
-- `mvpa_erp_decoding_searchlight.py` — spatiotemporal searchlight decoding 
-- `rp_into_hddm.py` — creates an updated CSV by extracting RP means and merging them into the behavioural/HDDM dataset
-- `DDM_image.py` — figure / illustration script for DDM figure in paper
-- **IMPORTANT: These EEG files above are launched by the run_EEG.sh script**
-
-Also inside `EEG/`:
-- `MNE_tutorials/` — tutorial material / reference work - stuff for learning
-- `Simulations/` — work in progress: This is for model ppc and parameter recovery of the neurocognitve models
-- `mvpa_old/` — older MVPA code
-
-
----
-
-### `Hddm_Docker_August_24/`
-Main HDDM/DDM modelling folder. This is the large behavioural-model fitting pipeline, especially for cluster/container execution.
-
-Key files:
-- `DDM_EEG_load.py` — main pipeline to load the hddm models fit in the DDM_EEG.py files launched by the root `run_hddm.sh` script
-- `DDM_EEG.py` — main pipeline to run the hddm models launched by the root `run_hddm.sh` script
-- `MAP_estimates.py` — computes group MAP summaries and model-level parameter comparisons for selected model versions
-- `helper_functions.py` — converts behavioural data into HDDM-compatible format
-- `dataframe.py` — merges prepared behavioural data with fit/model information into a modelling dataframe
-- `rename_files.py`, `rewrite_file.py` — utility scripts for file management / rewriting
-- `data_sets/` — local behavioural CSV inputs used by the HDDM pipeline
-
-Inside `data_sets/`:
-- `behavioural_sv_cleaned_final_3.csv`
-- `behavioural_sv_cleaned_final_3_rp.csv`
-- `behavioural_sv_cleaned_try.csv`
-- `old/` — older dataset versions
-
+```
+code/
+├── run_all.sh                     # Single entry point — runs everything in order
+│
+├── behav/                         # Behavioural analyses
+│   ├── 00_questionnaires_score.py
+│   ├── 01a_behav_decision.py      # Decision behaviour, stats, figures
+│   ├── 01b_behav_passive.py       # Passive phase behaviour
+│   └── 02_behav_sv_modelling.py   # Hierarchical subjective-value modelling (PyMC)
+│
+├── eeg/                           # EEG analyses
+│   ├── 03_eeg_preprocess.py       # Raw EEG cleaning / preprocessing
+│   ├── 04_eeg_erp_prep.py         # ERP preparation and RP extraction
+│   ├── 05a_eeg_erp_massunivariate_passive.py   # Mass-univariate ERP — passive phase
+│   └── 05b_eeg_erp_massunivariate_decision.py  # Mass-univariate ERP — decision phase
+│
+├── hddm/                          # Hierarchical drift-diffusion modelling
+│   ├── model_specs.py             # MODEL_SPECS dict — all model versions in one place
+│   ├── 05_hddm_prep.py            # Prepare data for HDDM (outputs hddm_ready.csv)
+│   ├── 06_hddm_fit.py             # Fit all model versions (runs inside Docker)
+│   ├── 07_hddm_results.py         # Load chains, MAP estimates, diagnostics, DIC comparison
+│   ├── 08_hddm_plot.py            # DDM schematic figure for the paper
+│   └── Simulations/               # Model validation
+│       ├── ppc.py                 # Posterior predictive checks
+│       ├── param_recovery.py      # Parameter recovery (group and individual level)
+│       └── model_recovery.py      # Model recovery — can DIC distinguish the main models?
+│
+└── old/                           # Archived code (not part of the active pipeline)
+```
 
 ---
 
-### `rp_bayesflow_workflow/`
-This is a work-in-progress BayesFlow implementation of an truely integrative RP–drift model, where pain and money determine a latent drift variable, and that latent drift generates both signed RTs, choices and RP values - this has not been run yet
+## Pipeline overview
 
-Key files:
-- `config.py` — model parameter names, prior ranges, column defaults, training defaults
-- `data_utils.py` — data loading, cleaning, signed-RT creation, subject design-bank creation, posterior summaries
-- `simulator.py` — prior sampler, simple DDM simulator, latent-drift data simulator, BayesFlow batch simulator
-- `model_utils.py` — amortizer and BayesFlow trainer setup
-- `train_model.py` — model training
-- `validate_recovery.py` — parameter-recovery workflow
-- `fit_real_data.py` — posterior fitting for real subjects
-- `permutation_test.py` — within-subject RP shuffling control analysis
-- `posterior_predictive.py` — posterior predictive checks for RT and RP
-- `plotting_utils.py` — training and recovery plots
-- `requirements.txt` — local dependency list for this workflow
-- `README.md` — folder-specific usage guide
+### 1 — Behaviour (`behav/`)
 
-Default expected columns for this workflow:
-- `subj_idx`
-- `pain_z`
-- `money_z`
-- `rp_z`
-- `rt`
-- `response`
+| Script | Output |
+|---|---|
+| `00_questionnaires_score.py` | Questionnaire summary |
+| `01a_behav_decision.py` | Decision-phase stats and figures |
+| `01b_behav_passive.py` | Passive-phase stats and figures |
+| `02_behav_sv_modelling.py` | Subjective-value estimates per participant |
 
-The workflow creates subject design matrices from real data, trains amortized inference with BayesFlow, does recovery, posterior fitting, permutation tests, and posterior predictive checks - could be used as a thrid modle in our paper
+### 2 — EEG (`eeg/`)
 
----
+| Script | Output |
+|---|---|
+| `03_eeg_preprocess.py` | Cleaned epochs per participant |
+| `04_eeg_erp_prep.py` | ERP data + RP means merged into behavioural CSV |
+| `05a_eeg_erp_massunivariate_passive.py` | TFCE mass-univariate results — passive phase |
+| `05b_eeg_erp_massunivariate_decision.py` | TFCE mass-univariate results — decision phase |
 
-### `subjective_value_estimation/`
-Contains an older standalone **PyMC-based hierarchical subjective-value model**:
-- `Coll_Vogel_sv_pain_bayes.py`
+`05a` and `05b` must be run **after** HDDM results are available (they load trial-level parameter estimates from `hddm/07_hddm_results.py`).
 
-This script compares several candidate pain value transforms (`none`, `linear`, `para`, `expo`, `cubic`, `logarithmic`, `root`, `hyper`) and writes model-comparison outputs plus subject-level value summaries
+### 3 — HDDM (`hddm/`)
 
+Model versions are defined centrally in `model_specs.py`:
 
----
+| Version | Model |
+|---|---|
+| 0 | Null HDDM (a, v, t) |
+| 1 | v ~ 1 + sv_pain (intercept) |
+| 2 | v ~ 0 + sv_pain (no intercept) |
+| 3 | a ~ 1 + sv_pain |
+| 9 | v ~ pain + money |
+| 10 | a ~ pain + money |
+| 11 | t ~ pain + money |
+| 12 | v ~ pain × money |
+| 17 | v ~ pain + money + rp + interactions |
+| 18 | a ~ pain + money + rp + interactions |
+| 19 | v + a ~ pain + money (**primary behavioural model**) |
+| 20 | v + a ~ pain + money + rp + interactions |
 
-### `Initial_Preprocessing_and_Basic_Hddm/`
-Early notebook-based work:
-- `First_DataFrame_Prep.ipynb`
-- `First_hddm_painreward.ipynb`
+`07_hddm_results.py` accepts `--version N` to process one model, or `--compare` to generate a DIC bar chart across all fitted models.
 
-This folder looks like the earliest data-prep + first-pass HDDM exploration
+### 4 — Simulations (`hddm/Simulations/`)
 
----
+Run after fitting to validate the models:
 
-### `Quest_Code/`
-Contains:
-- `quest_analysis.ipynb`
-
-notebook for questionnair-related analysis (not used)
-
----
-
-## Important root-level files
-
-- `run_EEG.sh` — SLURM / Apptainer launch script for EEG analysis on cluster infrastructure
-- `run_hddm.sh` — SLURM / Apptainer launch script for HDDM analysis
-- `run_bayesflow.sh` — SLURM launch script for BayesFlow training
-- `running_images_cluster_info.txt` — notes on how container images were set up and run on the clusters
-- `.gitignore`, `LICENSE` — standard repository stuf
+| Script | Purpose |
+|---|---|
+| `ppc.py` | Posterior predictive checks for a given version |
+| `param_recovery.py` | Can the fitting procedure recover true parameters? |
+| `model_recovery.py` | Can DIC distinguish the theoretically relevant models? |
 
 ---
 
-## How the pieces connect
+## Key results (from manuscript)
 
-A useful mental model is:
-
-1. **Behavioural data are cleaned/prepared**
-   - older preparation helpers live in `Hddm_Docker_August_24/helper_functions.py` and related files
-   - BayesFlow has its own cleaner in `rp_bayesflow_workflow/data_utils.py`
-
-2. **EEG is preprocessed and transformed into ERP/RP features**
-   - mainly in `EEG/eeg_preprocess.py`, `EEG/eeg_erp_prep.py`, and `EEG/eeg_erp_rp.py`
-
-3. **RP features can be merged back into behavioural/HDDM inputs**
-   - via `EEG/rp_into_hddm.py`
-
-4. **Behavioural / joint modelling is then done in one of two main ways**
-   - classic HDDM/DDM workflow in `Hddm_Docker_August_24/`
-   - newer amortized BayesFlow workflow in `rp_bayesflow_workflow/` - not yet in use
-
-5. **Group summaries and follow-up statistics / figures**
-   - EEG statistics and figures are mainly in `EEG/`
-   - HDDM summaries are in `MAP_estimates.py` and related scripts
-   - BayesFlow summaries are produced by `validate_recovery.py`, `fit_real_data.py`, and `posterior_predictive.py`
+- **Behaviour**: N=38; mean RT = 1.06 s (SD = 0.22); acceptance rate = 75.3% (SD = 17.8%)
+- **DDM**: pain → lower drift + lower threshold; money → higher drift + higher threshold
+- **EEG passive phase**: pain effect 263–1200 ms; money effect 285–351 ms + 377–1200 ms
+- **EEG decision phase**: pain significant (TFCE p<.001, peak FT10 t=−79.91); money not significant
+- **RP**: trial-level RP amplitude positively related to drift rate; higher thresholds predicted reduced RP amplitude
 
 ---
 
+## Environment notes
 
-### Most current / most structured
-- `Hddm_Docker_August_24/`
-- the main analysis scripts in `EEG/`
-
-### Older / exploratory / reference
-- `Initial_Preprocessing_and_Basic_Hddm/`
-- `Quest_Code/`
-- `subjective_value_estimation/`
-- `EEG/mvpa_old/`
-
-
----
-
-## Environment and reproducibility notes
-
-A lot of this repo is designed for **cluster execution** 
-
-Things to know before running anything:
-- many scripts expect environment variables such as `PROJECT_DIR`, `DATA_DIR`, `OUT_DIR`, and `HDDM_DIR`
-- several paths are hard-coded to RDS / cluster locations
-- the root run scripts use **SLURM** and **Apptainer/Singularity**
-- most EEG and HDDM workflows rely on container images (e.g. mne pythoin and hddm docker image) than a single shared local Python environment
+- HDDM fitting requires the `hcp4715/hddm` Docker image (run commands are in `run_all.sh`)
+- EEG scripts use MNE-Python in the local environment
+- Scripts raise errors on missing files — no silent fallbacks by design
