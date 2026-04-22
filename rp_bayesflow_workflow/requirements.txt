@@ -1,6 +1,0 @@
-numpy
-pandas
-numba
-matplotlib
-tensorflow
-bayesflow

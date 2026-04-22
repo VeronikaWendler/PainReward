@@ -17,3 +17,15 @@ osf/
 EEG/old/
 EEG/mvpa_old_code
 rp_bayesflow_workflow/out
+._*
+__pycache__/
+.ipynb_checkpoints/
+Mps_notes.md
+.vscode/*
+
+# Temporary
+
+old/*
+CLAUDE.md
+drafts/*
+docs/*
