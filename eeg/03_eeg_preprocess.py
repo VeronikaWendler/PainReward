@@ -11,6 +11,7 @@ import mne
 import numba
 import numpy as np
 import pandas as pd
+import pyprep
 import seaborn as sns
 from mne.preprocessing import ICA
 from mne.report import Report
@@ -26,6 +27,9 @@ basepath = str(os.getenv("basepath", Path(__file__).parent.parent.parent))
 outpath = opj(basepath, "derivatives")
 if not os.path.exists(outpath):
     os.makedirs(outpath)
+
+# pyprep bad channel detection parameters
+repeats = 3
 
 # List participants
 part = [p for p in os.listdir(opj(basepath)) if "sub" in p]
@@ -110,6 +114,20 @@ for p in part:
 
     # Set montage
     passive_raw.set_montage("easycap-M1", on_missing="warn")
+
+    # Detect additional bad channels with pyprep on a low-pass filtered copy
+    raw_for_pyprep = passive_raw.copy().load_data().filter(l_freq=None, h_freq=100)
+    all_bads = list(passive_raw.info["bads"])
+    for _ in range(repeats):
+        nc = pyprep.NoisyChannels(raw=raw_for_pyprep, random_state=42)
+        nc.find_bad_by_deviation()
+        nc.find_bad_by_correlation()
+        bads = nc.get_bads()
+        all_bads = sorted(set(all_bads + bads))
+        raw_for_pyprep.info["bads"] = all_bads
+    passive_raw.info["bads"] = all_bads
+    del raw_for_pyprep
+    stats_frame.loc[p, "n_bad_chans_passive"] = len(passive_raw.info["bads"])
 
     # Plot channels
     fig = passive_raw.plot_sensors(show_names=True, show=False)
@@ -390,6 +408,18 @@ for p in part:
     )
     decision_raw.info["bads"] = channels[channels["status"] != "good"]["name"].tolist()
 
+    # Detect additional bad channels with pyprep on a low-pass filtered copy
+    raw_for_pyprep = decision_raw.copy().load_data().filter(l_freq=None, h_freq=100)
+    all_bads = list(decision_raw.info["bads"])
+    for _ in range(repeats):
+        nc = pyprep.NoisyChannels(raw=raw_for_pyprep, random_state=42)
+        nc.find_bad_by_deviation()
+        nc.find_bad_by_correlation()
+        bads = nc.get_bads()
+        all_bads = sorted(set(all_bads + bads))
+        raw_for_pyprep.info["bads"] = all_bads
+    decision_raw.info["bads"] = all_bads
+    del raw_for_pyprep
     stats_frame.loc[p, "n_bad_chans_decision"] = len(decision_raw.info["bads"])
 
     # Plot channels
@@ -526,7 +556,6 @@ for p in part:
                 "line noise",
                 "heart beat",
                 "eye movement",
-                "other",
             ]
             and prob > 0.70
             else 0

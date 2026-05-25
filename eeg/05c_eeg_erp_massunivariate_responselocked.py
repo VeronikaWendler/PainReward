@@ -1,16 +1,23 @@
 # @ : -*- coding: utf-8 -*-
 # @ Author: Michel-Pierre Coll (michel-pierre.coll@psy.ulaval.ca) & Veronika Wendler (2025)
-# @ Date: 2024
-# @ Description: Decision phase EEG mass-univariate analysis — end-to-end pipeline
+# @ Date: 2025
+# @ Description: Response-locked EEG mass-univariate analysis — end-to-end pipeline
 #
 # Sections:
-#   1. Per-subject first-level regression (painlevel / moneylevel, RT-controlled)
+#   1. Per-subject first-level regression (painlevel / moneylevel)
 #   2. Second-level permutation inference (TFCE or cluster-mass)
 #   3. Stats summary  → CSV reports of significant windows & peak stats
 #   4. Figures        → topomaps, binned ERPs, beta+SEM time-courses
 #
-# Decision epochs are matched to the HDDM-filtered behavioural rows by
-# one-based trial number within the full 125-trial decision task.
+# Epochs: response-locked, tmin=-0.8, tmax=0.2 s, baseline=(-0.8, -0.7)
+# Epoch files:
+#   derivatives/{p}/eeg/erps_decisionresp/{p}_decision_resp_singletrials-epo.fif
+#
+# Trial matching: behavioral data (from HDDM decision file) is sorted by
+# blocks.thisRepN, trials.thisN and matched positionally to the response-locked
+# epochs (temporal order = trial order). Raises if trial counts don't match.
+#
+# No RT covariate — the analysis is already locked to the response.
 
 import os
 import warnings
@@ -47,7 +54,7 @@ def ensure_dir(path: Path):
 outroot = basepath / "derivatives" / "statistics"
 ensure_dir(outroot)
 
-outpath = outroot / "erps_massuni_decision"
+outpath = outroot / "erps_massuni_responselocked"
 ensure_dir(outpath)
 
 # ===========================================================
@@ -93,14 +100,22 @@ fig_prefix = f"z_{param['inference_method']}_"
 regvars = ["painlevel", "moneylevel"]
 regvarsnames = ["Painlevel", "Moneylevel"]
 
-plot_times = [-0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-chan_to_plot = ["Fz", "FCz", "POz", "Cz", "CPz", "Pz", "Oz"]
+plot_times = [-0.8, -0.6, -0.4, -0.2, 0.0, 0.2]
+chan_to_plot = [
+    "Fz",  "F3",  "F4",  "F5",  "F6",
+    "FCz", "FC3", "FC4", "FC5", "FC6",
+    "Cz",  "C3",  "C4",  "C5",  "C6",
+    "CPz", "CP3", "CP4", "CP5", "CP6",
+    "Pz",  "P3",  "P4",  "P5",  "P6",
+    "POz", "PO3", "PO4",
+    "Oz",
+]
 
 plt.rc("axes.spines", top=False, right=False)
 plt.rcParams["font.family"] = "DejaVu Sans"
 
 # ===========================================================
-# Participants — EEG ∩ HDDM
+# Participants — EEG ∩ HDDM (same set as decision analysis)
 # ===========================================================
 part_csv = basepath / "participants.tsv"
 part_eeg = pd.read_csv(part_csv, sep="\t")["participant_id"].unique().tolist()
@@ -394,20 +409,20 @@ def significance_label(method):
 
 
 # ===========================================================
-# SECTION 1: DECISION FIRST-LEVEL REGRESSION
+# SECTION 1: RESPONSE-LOCKED FIRST-LEVEL REGRESSION
+#
+# Behavioral source: cleaned CSV (all 125 trials per participant), not the
+# HDDM file which excludes trials and would cause a count mismatch with the
+# response-locked epochs.  HDDM is used only for participant selection above.
 # ===========================================================
-mod_data = mod_data_decision.copy()
-mod_data = mod_data[mod_data["participant"].isin(common_participants)].copy()
-mod_data["rt"] = mod_data["choice_resp.rt"]
-mod_data["trialsnum"] = (
-    mod_data["blocks.thisRepN"].astype(int) * 25
-    + mod_data["trials.thisN"].astype(int)
-    + 1
-)
+behav_csv = basepath / "derivatives" / "behav" / "behav_cleaned_with_exclusions.csv"
+if not behav_csv.exists():
+    raise FileNotFoundError(f"Cleaned behavioral CSV not found: {behav_csv}")
+behav_all = pd.read_csv(behav_csv)
+behav_all = behav_all[behav_all["participant"].isin(common_participants)].copy()
 
 part = common_participants
 
-# ---- Run decision regression ----
 all_epos = [[] for _ in range(len(regvars))]
 allbetasnp = []
 betas = [[] for _ in range(len(regvars))]
@@ -417,102 +432,72 @@ skipped_subjects = []
 for pa in part:
     print(f"\n--- Processing {pa} ---")
 
-    mod2 = mod_data[mod_data["participant"] == pa].copy().reset_index(drop=True)
-    if mod2["trialsnum"].duplicated().any():
-        dupes = sorted(mod2.loc[mod2["trialsnum"].duplicated(), "trialsnum"].astype(int).unique())
-        raise RuntimeError(f"{pa}: duplicate HDDM trialsnum values: {dupes}")
+    df_beh = behav_all[behav_all["participant"] == pa].copy()
+    df_beh = df_beh.sort_values(["blocks.thisRepN", "trials.thisN"]).reset_index(drop=True)
 
-    epo_cop = mne.read_epochs(
-        opj(basepath, "derivatives", pa, "eeg", "erps_decision",
-            f"{pa}_decision_cues_singletrials-epo.fif"),
-        preload=True,
-    ).copy()
-
-    if epo_cop.metadata is None or "trialsnum" not in epo_cop.metadata.columns:
-        raise RuntimeError(
-            f"{pa}: decision cue epochs are missing metadata['trialsnum']; "
-            "rerun eeg/04_eeg_erp_prep.py or regenerate the epoch files."
-        )
-
-    epo_meta = epo_cop.metadata.reset_index(drop=True).copy()
-    epo_meta["trialsnum"] = pd.to_numeric(epo_meta["trialsnum"], errors="coerce")
-    if epo_meta["trialsnum"].isna().any():
-        raise RuntimeError(f"{pa}: epoch metadata contains non-numeric trialsnum values")
-
-    epo_trials = epo_meta["trialsnum"].astype(int)
-    if epo_trials.duplicated().any():
-        dupes = sorted(epo_trials[epo_trials.duplicated()].unique())
-        raise RuntimeError(f"{pa}: duplicate epoch trialsnum values: {dupes}")
-
-    trial_to_epoch_idx = {trial: idx for idx, trial in enumerate(epo_trials)}
-    requested_trials = mod2["trialsnum"].astype(int).to_numpy()
-    missing_trials = [trial for trial in requested_trials if trial not in trial_to_epoch_idx]
-    if missing_trials:
-        raise RuntimeError(
-            f"{pa}: {len(missing_trials)} HDDM trials are missing from decision cue epochs: "
-            f"{missing_trials[:20]}"
-        )
-
-    epoch_order = [trial_to_epoch_idx[trial] for trial in requested_trials]
-    epo_filt = epo_cop[epoch_order]
-
-    if len(epo_filt) != len(mod2):
-        raise RuntimeError(
-            f"{pa}: selected epoch count ({len(epo_filt)}) does not match "
-            f"HDDM row count ({len(mod2)}) before filtering."
-        )
-
-    if epo_filt.info["sfreq"] != param["testresampfreq"]:
-        epo_filt = epo_filt.resample(param["testresampfreq"])
-
-    if "badtrial" in epo_filt.metadata.columns:
-        good_mask = epo_filt.metadata["badtrial"].fillna(0).astype(int).to_numpy() == 0
-    else:
-        good_mask = np.ones(len(epo_filt), dtype=bool)
-
-    mod2 = mod2.loc[good_mask].reset_index(drop=True)
-    epo_filt = epo_filt[good_mask]
-
-    if len(epo_filt) < 5:
-        print("  Skipping: too few trials")
+    epo_path = (
+        basepath / "derivatives" / pa / "eeg" / "erps_decisionresp"
+        / f"{pa}_decision_resp_singletrials-epo.fif"
+    )
+    if not epo_path.exists():
+        print(f"  Skipping: epoch file not found ({epo_path})")
         skipped_subjects.append(pa)
         continue
 
-    vals_pain = mod2["painlevel"].to_numpy(dtype=float)
-    vals_money = mod2["moneylevel"].to_numpy(dtype=float)
-    vals_rt = mod2["rt"].to_numpy(dtype=float)
+    epo = mne.read_epochs(str(epo_path), preload=True)
 
-    keep = np.where(np.isfinite(vals_pain) & np.isfinite(vals_money) & np.isfinite(vals_rt))[0]
+    if len(epo) != len(df_beh):
+        raise RuntimeError(
+            f"{pa}: epoch count ({len(epo)}) != behavioral trial count ({len(df_beh)}). "
+            "Cannot positionally match trials — check whether all response events were saved."
+        )
+
+    if epo.info["sfreq"] != param["testresampfreq"]:
+        epo = epo.resample(param["testresampfreq"])
+
+    # Positional match: both sorted by trial order (epochs by sample time, beh by block/trial)
+    if epo.metadata is None:
+        epo.metadata = pd.DataFrame(index=np.arange(len(epo)))
+    else:
+        epo.metadata = epo.metadata.reset_index(drop=True).copy()
+
+    epo.metadata["painlevel"] = df_beh["painlevel"].to_numpy(dtype=float)
+    epo.metadata["moneylevel"] = df_beh["moneylevel"].to_numpy(dtype=float)
+    epo.metadata["participant_id"] = pa
+
+    if "badtrial" in epo.metadata.columns:
+        good_mask = epo.metadata["badtrial"].fillna(0).astype(int).to_numpy() == 0
+    else:
+        good_mask = np.ones(len(epo), dtype=bool)
+
+    epo = epo.copy()[good_mask]
+
+    if len(epo) < 5:
+        print("  Skipping: too few trials after artifact rejection")
+        skipped_subjects.append(pa)
+        continue
+
+    vals_pain = epo.metadata["painlevel"].to_numpy(dtype=float)
+    vals_money = epo.metadata["moneylevel"].to_numpy(dtype=float)
+
+    keep = np.where(np.isfinite(vals_pain) & np.isfinite(vals_money))[0]
     if len(keep) < 5:
         print("  Skipping: too few valid trials after NaN removal")
         skipped_subjects.append(pa)
         continue
 
-    mod2k = mod2.iloc[keep].reset_index(drop=True)
-    epo_keep = epo_filt.copy()[keep]
-
-    if epo_keep.metadata is None:
-        epo_keep.metadata = pd.DataFrame(index=np.arange(len(epo_keep)))
-    else:
-        epo_keep.metadata = epo_keep.metadata.reset_index(drop=True).copy()
-
-    epo_keep.metadata["painlevel"] = mod2k["painlevel"].to_numpy(dtype=float)
-    epo_keep.metadata["moneylevel"] = mod2k["moneylevel"].to_numpy(dtype=float)
-    epo_keep.metadata["participant_id"] = pa
-    epo_keep.metadata["rt"] = mod2k["rt"].to_numpy(dtype=float)
-    if "response" in mod2k.columns:
-        epo_keep.metadata["accepted"] = mod2k["response"].to_numpy(dtype=float)
+    epo_keep = epo.copy()[keep]
+    epo_keep.metadata = epo_keep.metadata.reset_index(drop=True).copy()
 
     scale = Scaler(scalings="mean")
     epo_z = mne.EpochsArray(scale.fit_transform(epo_keep.get_data()), epo_keep.info)
 
-    df_reg = mod2k.copy()
+    df_reg = epo_keep.metadata.copy()
     df_reg["Intercept"] = 1.0
     df_reg["pain_z"] = stats.zscore(df_reg["painlevel"].to_numpy(dtype=float))
     df_reg["money_z"] = stats.zscore(df_reg["moneylevel"].to_numpy(dtype=float))
-    df_reg["RT_z"] = stats.zscore(df_reg["rt"].to_numpy(dtype=float))
 
-    names = ["Intercept", "pain_z", "money_z", "RT_z"]
+    names = ["Intercept", "pain_z", "money_z"]
     design = df_reg[names]
 
     if not np.all(np.isfinite(design.to_numpy())):
@@ -530,9 +515,10 @@ for pa in part:
     all_epos[0].append(epo_keep)
     all_epos[1].append(epo_keep)
     included_subjects.append(pa)
+    print(f"  Included (n_epochs={len(epo_keep)})")
 
 if len(allbetasnp) == 0:
-    raise RuntimeError("No subjects included in DECISION analysis.")
+    raise RuntimeError("No subjects included in RESPONSE-LOCKED analysis.")
 
 allbetas = np.stack(allbetasnp)                               # (n_subj, 2, n_ch, n_time)
 beta_gavg = [mne.grand_average(betas[i]) for i in range(len(regvars))]
@@ -540,6 +526,12 @@ all_epos_cat = [mne.concatenate_epochs(all_epos[i]) for i in range(len(regvars))
 
 print(f"\nIncluded: {included_subjects}")
 print(f"Skipped:  {skipped_subjects}")
+
+subj_df = pd.DataFrame({
+    "participant_id": included_subjects + skipped_subjects,
+    "included": [True] * len(included_subjects) + [False] * len(skipped_subjects),
+})
+subj_df.to_csv(outpath / "subject_inclusion_summary.csv", index=False)
 
 # ===========================================================
 # SECTION 2: SECOND-LEVEL INFERENCE
@@ -809,7 +801,7 @@ for ridx, regvar in enumerate(regvars):
 
         pick = beta_ev.ch_names.index(ch)
         ax.set_title(f"{ch} – binned by {regvarname}", fontsize=param["titlefontsize"])
-        ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
+        ax.set_xlabel("Time relative to response (ms)", fontsize=param["labelfontsize"])
         ax.set_ylabel("Amplitude (µV)", fontsize=param["labelfontsize"])
 
         for b in sorted(evokeds):
@@ -823,9 +815,8 @@ for ridx, regvar in enumerate(regvars):
 
         ax.axhline(0, linestyle="--", color="gray")
         ax.axvline(0, linestyle="--", color="gray")
-        ax.set_xticks(np.arange(-200, 1200, 200))
-        ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
-        ax.set_xlim(left=-200)
+        ax.set_xticks(np.arange(-800, 400, 200))
+        ax.set_xticklabels([str(i) for i in np.arange(-800, 400, 200)])
         ax.tick_params(labelsize=param["ticksfontsize"])
         ax.legend(fontsize=8, title="Level", title_fontsize=9,
                   frameon=False, loc="upper left", bbox_to_anchor=(0.02, 0.98),
@@ -849,7 +840,7 @@ for ridx, regvar in enumerate(regvars):
         sem = scipy.stats.sem(sub_avg, axis=0)
         mean = beta_ev.data[pick, :]
 
-        ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
+        ax.set_xlabel("Time relative to response (ms)", fontsize=param["labelfontsize"])
         ax.set_ylabel(f"β ({regvarname}, z)", fontsize=param["labelfontsize"])
         ax.plot(epo_cat.times * 1000, mean, linewidth=3)
         ax.fill_between(epo_cat.times * 1000, mean - sem, mean + sem, alpha=0.3)
@@ -865,9 +856,8 @@ for ridx, regvar in enumerate(regvars):
 
         ax.text(0.99, 0.02, significance_label(param["inference_method"]),
                 transform=ax.transAxes, ha="right", va="bottom", fontsize=8, alpha=0.8)
-        ax.set_xticks(np.arange(-200, 1200, 200))
-        ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
-        ax.set_xlim(left=-200)
+        ax.set_xticks(np.arange(-800, 400, 200))
+        ax.set_xticklabels([str(i) for i in np.arange(-800, 400, 200)])
         ax.tick_params(labelsize=param["ticksfontsize"])
 
         fig.tight_layout()
@@ -876,278 +866,6 @@ for ridx, regvar in enumerate(regvars):
             dpi=600, bbox_inches="tight",
         )
         plt.close(fig)
-
-# ---- Accepted vs Rejected ERP time-courses ----
-epo_all = all_epos_cat[0]
-if "accepted" in epo_all.metadata.columns:
-    for ch in chan_to_plot:
-        if ch not in epo_all.ch_names:
-            continue
-
-        pick = epo_all.ch_names.index(ch)
-        fig, ax = plt.subplots(figsize=(4, 2.5))
-
-        for label, val, color in [("Accepted", 1, "steelblue"), ("Rejected", 0, "tomato")]:
-            mask = epo_all.metadata["accepted"] == val
-            epo_sub = epo_all[mask]
-            if len(epo_sub) == 0:
-                continue
-
-            sub_evokeds = []
-            for p_id in epo_sub.metadata["participant_id"].unique():
-                sub = epo_sub[epo_sub.metadata["participant_id"] == p_id]
-                if len(sub) > 0:
-                    sub_evokeds.append(sub.average())
-
-            if sub_evokeds:
-                gavg = mne.grand_average(sub_evokeds)
-                sem_vals = scipy.stats.sem(
-                    np.stack([e.data[pick, :] for e in sub_evokeds]), axis=0
-                )
-                mean_vals = gavg.data[pick, :] * 1e6
-                sem_vals = sem_vals * 1e6
-                ax.plot(epo_all.times * 1000, mean_vals, linewidth=2,
-                        label=f"{label}", color=color)
-                ax.fill_between(epo_all.times * 1000,
-                                mean_vals - sem_vals, mean_vals + sem_vals,
-                                alpha=0.2, color=color)
-
-        ax.axhline(0, linestyle="--", color="gray")
-        ax.axvline(0, linestyle="--", color="gray")
-        ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
-        ax.set_ylabel("Amplitude (µV)", fontsize=param["labelfontsize"])
-        ax.set_title(f"{ch} – Accepted vs Rejected", fontsize=param["titlefontsize"])
-        ax.set_xticks(np.arange(-200, 1200, 200))
-        ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
-        ax.set_xlim(left=-200)
-        ax.tick_params(labelsize=param["ticksfontsize"])
-        ax.legend(fontsize=param["legendfontsize"], frameon=False,
-                  loc="upper left", bbox_to_anchor=(0.02, 0.98),
-                  borderaxespad=0.0, handlelength=1.6, labelspacing=0.3)
-        fig.tight_layout()
-        fig.savefig(
-            outfigpath / f"{fig_prefix}fig_erps_accepted_vs_rejected_{ch}.svg",
-            dpi=600, bbox_inches="tight",
-        )
-        plt.close(fig)
-
-# ---- Cluster permutation test: accepted − rejected ----
-_has_accepted = all(
-    "accepted" in all_epos[0][i].metadata.columns
-    for i in range(len(all_epos[0]))
-)
-if _has_accepted:
-    diff_acc_rej = []
-    subjects_acc_rej = []
-    for i, pa in enumerate(included_subjects):
-        epo_sub = all_epos[0][i]
-        meta = epo_sub.metadata.reset_index(drop=True)
-        acc_mask = (meta["accepted"] == 1).to_numpy()
-        rej_mask = (meta["accepted"] == 0).to_numpy()
-        if acc_mask.sum() == 0 or rej_mask.sum() == 0:
-            print(f"  {pa}: skipping accepted-vs-rejected (one condition empty)")
-            continue
-        evoked_acc = epo_sub[acc_mask].average()
-        evoked_rej = epo_sub[rej_mask].average()
-        diff_acc_rej.append(evoked_acc.data - evoked_rej.data)
-        subjects_acc_rej.append(pa)
-
-    if len(diff_acc_rej) >= 5:
-        diff_arr = np.stack(diff_acc_rej)   # (n_subj, n_ch, n_time)
-        connect, _ = mne.channels.find_ch_adjacency(beta_gavg[0].info, ch_type="eeg")
-        print(f"\nCluster permutation test: accepted − rejected  (N={len(diff_acc_rej)})")
-        res_acc_rej = run_massuni_test(diff_arr, connect, param)
-        res_acc_rej["name"] = "accepted_minus_rejected"
-
-        acc_rej_dir = outpath / "acc_rej_test"
-        ensure_dir(acc_rej_dir)
-        np.save(acc_rej_dir / "acc_rej_tval.npy", res_acc_rej["stat_map"])
-        np.save(acc_rej_dir / "acc_rej_pval_corr.npy", res_acc_rej["pmap_corrected"])
-        np.save(acc_rej_dir / "acc_rej_sigmask.npy", res_acc_rej["sig_mask"])
-        np.save(acc_rej_dir / "acc_rej_cluster_pvals.npy",
-                np.asarray(res_acc_rej["cluster_p_values"], dtype=float))
-
-        df_clust_acc_rej = make_cluster_df(
-            res_acc_rej["stat_map"], res_acc_rej["clusters"],
-            res_acc_rej["cluster_p_values"], ch_names, times_ms,
-        )
-        df_clust_acc_rej.to_csv(acc_rej_dir / "acc_rej_clusters.csv", index=False)
-
-        windows_acc_rej = summarize_time_windows(res_acc_rej["sig_mask"], times_ms)
-        print(f"  Significant windows ({significance_label(param['inference_method'])}):")
-        for w in windows_acc_rej:
-            print(f"    {w['start_ms']:.0f}–{w['end_ms']:.0f} ms")
-        if not windows_acc_rej:
-            print("    (none)")
-
-        # --- Topomaps ---
-        acc_rej_stat_map = res_acc_rej["stat_map"]
-        acc_rej_pmap = res_acc_rej["pmap_corrected"]
-        chankeep_ar = np.array([c not in ["M1", "M2"] for c in beta_gavg[0].ch_names])
-
-        for tidx, timepos in enumerate(times_pos):
-            fig, ax = plt.subplots(figsize=(1, 1))
-            mask = (acc_rej_pmap[timepos, :] < param["point_alpha"]) & chankeep_ar
-            im, _ = plot_topomap(
-                acc_rej_stat_map[timepos, :],
-                pos=beta_gavg[0].info,
-                mask=mask,
-                mask_params=dict(marker="o", markerfacecolor="w",
-                                 markeredgecolor="k", linewidth=0, markersize=2),
-                cmap="RdBu_r",
-                show=False,
-                ch_type="eeg",
-                outlines="head",
-                extrapolate="head",
-                axes=ax,
-                sensors=False,
-                contours=0,
-            )
-            ax.set_title(
-                f"{int(plot_times[tidx] * 1000)} ms\n({param['inference_method'].upper()})",
-                fontdict={"size": param["labelfontsize"] - 1},
-                pad=0.1,
-            )
-            if tidx + 1 == len(times_pos):
-                fig2, cax = plt.subplots(figsize=(0.2, 1))
-                cbar = fig2.colorbar(im, cax=cax, orientation="vertical", aspect=1)
-                cbar.set_label("t (acc − rej)", rotation=270, labelpad=12,
-                               fontdict={"fontsize": param["labelfontsize"] - 1})
-                cbar.ax.tick_params(labelsize=param["ticksfontsize"] - 2)
-                fig2.savefig(
-                    outfigpath / f"{fig_prefix}fig_topo_acc_minus_rej_cbar.svg",
-                    dpi=600, bbox_inches="tight",
-                )
-                plt.close(fig2)
-            fig.savefig(
-                outfigpath / f"{fig_prefix}fig_topo_acc_minus_rej_{tidx}.svg",
-                dpi=600, bbox_inches="tight",
-            )
-            plt.close(fig)
-
-        # --- Time-courses: accepted − rejected difference with significance shading ---
-        diff_gavg = np.mean(diff_arr, axis=0)    # (n_ch, n_time)
-        diff_sem = scipy.stats.sem(diff_arr, axis=0)
-        acc_rej_times = all_epos_cat[0].times
-
-        for ch in chan_to_plot:
-            if ch not in ch_names:
-                continue
-            pick = ch_names.index(ch)
-            mean_vals = diff_gavg[pick, :] * 1e6
-            sem_vals = diff_sem[pick, :] * 1e6
-
-            fig, ax = plt.subplots(figsize=(4, 2.5))
-            ax.plot(acc_rej_times * 1000, mean_vals, linewidth=2, color="steelblue")
-            ax.fill_between(acc_rej_times * 1000,
-                            mean_vals - sem_vals, mean_vals + sem_vals,
-                            alpha=0.3, color="steelblue")
-            ax.axhline(0, linestyle="--", color="gray")
-            ax.axvline(0, linestyle="--", color="gray")
-
-            ylims = ax.get_ylim()
-            sig_ymax = ylims[0] + 0.05 * (ylims[1] - ylims[0])
-            sig_ymin = ylims[0]
-            for ti, t_ms in enumerate(acc_rej_times * 1000):
-                if acc_rej_pmap[ti, pick] < param["point_alpha"]:
-                    ax.fill_between([t_ms, t_ms + timestep_ms],
-                                    sig_ymin, sig_ymax, alpha=0.3, facecolor="red")
-
-            ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
-            ax.set_ylabel("Amplitude (µV, acc − rej)", fontsize=param["labelfontsize"])
-            ax.set_title(f"{ch} – Accepted − Rejected", fontsize=param["titlefontsize"])
-            ax.set_xticks(np.arange(-200, 1200, 200))
-            ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
-            ax.set_xlim(left=-200)
-            ax.tick_params(labelsize=param["ticksfontsize"])
-            ax.text(0.99, 0.02, significance_label(param["inference_method"]),
-                    transform=ax.transAxes, ha="right", va="bottom", fontsize=8, alpha=0.8)
-            fig.tight_layout()
-            fig.savefig(
-                outfigpath / f"{fig_prefix}fig_erps_acc_minus_rej_{ch}.svg",
-                dpi=600, bbox_inches="tight",
-            )
-            plt.close(fig)
-    else:
-        print("Not enough subjects with both accepted and rejected trials for cluster test.")
-else:
-    print("'accepted' column missing from epoch metadata; skipping cluster test.")
-
-# ---- Binned ERP time-courses by level, split by accepted/rejected ----
-epo_all_for_split = all_epos_cat[0]
-if "accepted" in epo_all_for_split.metadata.columns:
-    for ridx, regvar in enumerate(regvars):
-        regvarname = regvarsnames[ridx]
-        cmap = "Reds" if regvar == "painlevel" else "Blues"
-        epo_cat_split = all_epos_cat[ridx]
-        epo_cat_split.metadata = epo_cat_split.metadata.reset_index(drop=True)
-        beta_ev_split = beta_gavg[ridx].copy()
-
-        level_vals = pd.to_numeric(epo_cat_split.metadata[regvar], errors="coerce")
-        unique_levels = np.sort(level_vals.dropna().unique())
-        unique_levels = unique_levels[unique_levels > 0]
-        level_to_bin = {lev: i for i, lev in enumerate(unique_levels)}
-        epo_cat_split.metadata["_bin_split"] = level_vals.map(level_to_bin)
-        nbins_eff = len(unique_levels)
-        bin_colors = get_bin_colors(cmap, nbins_eff)
-
-        for ch in chan_to_plot:
-            if ch not in beta_ev_split.ch_names:
-                continue
-            pick = beta_ev_split.ch_names.index(ch)
-
-            for dec_label, dec_val, dec_key in [("Accepted", 1, "accepted"), ("Rejected", 0, "rejected")]:
-                dec_mask = epo_cat_split.metadata["accepted"] == dec_val
-                epo_dec = epo_cat_split[dec_mask.to_numpy()]
-                if len(epo_dec) == 0:
-                    continue
-
-                fig, ax = plt.subplots(figsize=(4, 2.5))
-
-                sub_evokeds = []
-                for p_id in epo_dec.metadata["participant_id"].unique():
-                    sub = epo_dec[epo_dec.metadata["participant_id"] == p_id]
-                    sub_evoked = {
-                        b: sub[sub.metadata["_bin_split"] == b].average()
-                        if (sub.metadata["_bin_split"] == b).sum() > 0 else 0
-                        for b in range(nbins_eff)
-                    }
-                    sub_evokeds.append(sub_evoked)
-
-                evokeds = {}
-                for b in range(nbins_eff):
-                    evoked_list = [sd[b] for sd in sub_evokeds if sd[b] != 0]
-                    if evoked_list:
-                        evokeds[b] = mne.grand_average(evoked_list)
-
-                ax.set_title(f"{ch} – {regvarname} ({dec_label})", fontsize=param["titlefontsize"])
-                ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
-                ax.set_ylabel("Amplitude (µV)", fontsize=param["labelfontsize"])
-
-                for b in sorted(evokeds):
-                    ax.plot(
-                        epo_cat_split.times * 1000,
-                        evokeds[b].data[pick, :] * 1e6,
-                        linewidth=2,
-                        label=str(int(unique_levels[b])),
-                        color=bin_colors[b],
-                    )
-
-                ax.axhline(0, linestyle="--", color="gray")
-                ax.axvline(0, linestyle="--", color="gray")
-                ax.set_xticks(np.arange(-200, 1200, 200))
-                ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
-                ax.set_xlim(left=-200)
-                ax.tick_params(labelsize=param["ticksfontsize"])
-                ax.legend(fontsize=8, title="Level", title_fontsize=9,
-                          frameon=False, loc="upper left", bbox_to_anchor=(0.02, 0.98),
-                          borderaxespad=0.0, handlelength=1.6, labelspacing=0.3)
-                fig.tight_layout()
-                fig.savefig(
-                    outfigpath / f"{fig_prefix}fig_ols_erps_amp_bins_{regvar}_{dec_key}_{ch}.svg",
-                    dpi=600, bbox_inches="tight",
-                )
-                plt.close(fig)
 
 # ---- Difference maps (pain − money) ----
 diff_res = results_by_name["diff_pain_minus_money"]
@@ -1220,17 +938,20 @@ for map_name in all_maps:
         t_idx = c_idx[0]
         ch_idx = c_idx[1]
 
+        # Time and channel ranges spanned by this cluster
         t_min_i, t_max_i = int(t_idx.min()), int(t_idx.max())
         ch_min_i, ch_max_i = int(ch_idx.min()), int(ch_idx.max())
 
         t_slice = slice(t_min_i, t_max_i + 1)
         ch_slice = slice(ch_min_i, ch_max_i + 1)
 
+        # Build masked t-value matrix (channels × time) for the cluster bounding box
         tval_box = stat_map[t_slice, ch_slice].T.copy()   # (n_ch_box, n_time_box)
 
+        # Mask points outside the cluster
         in_cluster = np.zeros(stat_map.shape, dtype=bool)
         in_cluster[t_idx, ch_idx] = True
-        mask_box = in_cluster[t_slice, ch_slice].T
+        mask_box = in_cluster[t_slice, ch_slice].T         # (n_ch_box, n_time_box)
         tval_masked = np.where(mask_box, tval_box, np.nan)
 
         times_box = times_ms[t_slice]
@@ -1257,7 +978,7 @@ for map_name in all_maps:
 
         ax.set_yticks(range(n_ch_box))
         ax.set_yticklabels(ch_names_box, fontsize=max(4, min(8, 120 // n_ch_box)))
-        ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
+        ax.set_xlabel("Time relative to response (ms)", fontsize=param["labelfontsize"])
         ax.set_ylabel("Channel", fontsize=param["labelfontsize"])
         ax.set_title(
             f"{map_name} — cluster {c_id}  (p = {c_pval:.4f})",

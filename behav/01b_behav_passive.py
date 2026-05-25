@@ -79,8 +79,8 @@ for participant in preprocessed_data['participant'].unique():
 
 level_rate_correlation = pd.DataFrame(level_rate_correlation)
 
-level_rate_correlation.to_csv(opj(outpath, "pain_level_rating_correlation.csv"), index=False)
-level_rate_correlation.describe().to_csv(opj(outpath, "pain_level_rating_correlation_summary.csv"), index=False)
+level_rate_correlation.to_csv(opj(outpath, "catch_pain_level_rating_correlation.csv"), index=False)
+level_rate_correlation.describe().to_csv(opj(outpath, "catch_pain_level_rating_correlation_summary.csv"), index=True)
 
 # Same with catch money
 data_catch_money = preprocessed_data[~preprocessed_data['catch_money'].isna()]
@@ -104,7 +104,7 @@ for participant in preprocessed_data['participant'].unique():
 money_rate_correlation = pd.DataFrame(money_rate_correlation)
 
 money_rate_correlation.to_csv(opj(outpath, "catch_money_accuracy.csv"), index=False)
-money_rate_correlation.describe().to_csv(opj(outpath, "catch_money_accuracy_summary.csv"), index=False)
+money_rate_correlation.describe().to_csv(opj(outpath, "catch_money_accuracy_summary.csv"), index=True)
 
 # Combined figure: passive-phase catch-trial quality checks
 fig, axes = plt.subplots(1, 3, figsize=(9, 3))

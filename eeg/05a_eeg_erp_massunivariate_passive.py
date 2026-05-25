@@ -18,8 +18,12 @@ import mne
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+from matplotlib.collections import LineCollection
+from matplotlib.lines import Line2D
 import scipy.stats
 from mne.decoding import Scaler
+from functools import partial
 from mne.stats import spatio_temporal_cluster_1samp_test as st_clust_1s_ttest
 from mne.viz import plot_topomap
 from scipy import stats
@@ -55,7 +59,7 @@ param = {
     "testresampfreq": 250,
 
     # Inference mode: "tfce" or "cluster"
-    "inference_method": "tfce",
+    "inference_method": "cluster",
 
     # Classic cluster only: cluster-forming p-threshold (two-sided → t-threshold)
     "cluster_forming_p": 0.01,
@@ -66,7 +70,7 @@ param = {
 
     # Across-map correction
     "map_alpha": 0.05,
-    "map_correction": "holm",   # "holm", "bonferroni", or "none"
+    "map_correction": "none",   # "holm", "bonferroni", or "none"
     "point_alpha": 0.05,
 
     # --- figures ---
@@ -90,8 +94,14 @@ regvarsnames = ["Painlevel", "Moneylevel"]
 plot_times = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.3, 1.4]
 chan_to_plot = ["Fz", "POz", "Cz", "CPz", "Pz", "Oz"]
 
+cmap_topo = "viridis"
+cmap_erp_pain = "Reds"
+cmap_erp_money = "Blues"
+cmap_diff = "viridis"
+
 plt.rc("axes.spines", top=False, right=False)
 plt.rcParams["font.family"] = "DejaVu Sans"
+plt.rcParams["savefig.transparent"] = True
 
 # ===========================================================
 # Participants
@@ -117,6 +127,7 @@ def run_massuni_test(data_3d, connect, param):
     """data_3d: (n_subj, n_ch, n_time) → returns result dict."""
     testdata = np.swapaxes(data_3d, 2, 1)  # (n_subj, n_time, n_ch)
     threshold = compute_threshold(testdata.shape[0], param)
+    stat_fun = partial(mne.stats.ttest_1samp_no_p, sigma=1e-3)
 
     stat_map, clusters, cluster_p_values, _ = st_clust_1s_ttest(
         testdata,
@@ -127,6 +138,7 @@ def run_massuni_test(data_3d, connect, param):
         buffer_size=None,
         seed=param["random_state"],
         tail=0,
+        stat_fun=stat_fun,
     )
 
     cluster_p_values = np.asarray(cluster_p_values, dtype=float)
@@ -317,6 +329,37 @@ def summarize_difference_direction(diff_tvals, diff_mask, times_ms, ch_names):
         "mean_diff_stat": float(np.nanmean(masked)),
         "median_diff_stat": float(np.nanmedian(masked)),
     }
+
+
+def make_cluster_df(stat_map, clusters, cluster_p_values, ch_names, times_ms):
+    """Return a DataFrame with one row per cluster.
+
+    stat_map   : (n_time, n_ch)
+    clusters   : list of (time_idx_array, chan_idx_array) tuples
+    times_ms   : 1-D array of time points in ms
+    ch_names   : list of channel name strings
+    """
+    rows = []
+    for c_id, (c_idx, c_pval) in enumerate(zip(clusters, cluster_p_values)):
+        t_idx = c_idx[0]
+        ch_idx = c_idx[1]
+        tvals = stat_map[t_idx, ch_idx]
+        peak_pos = np.argmax(np.abs(tvals))
+        rows.append({
+            "cluster_id": c_id,
+            "p_value": float(c_pval),
+            "extent": len(t_idx),
+            "n_timepoints": len(set(t_idx.tolist())),
+            "n_channels": len(set(ch_idx.tolist())),
+            "times_ms": sorted(set(float(times_ms[t]) for t in t_idx)),
+            "channels": sorted(set(ch_names[c] for c in ch_idx)),
+            "mean_t": float(np.mean(tvals)),
+            "max_abs_t": float(np.max(np.abs(tvals))),
+            "peak_t": float(tvals[peak_pos]),
+            "peak_time_ms": float(times_ms[t_idx[peak_pos]]),
+            "peak_channel": ch_names[ch_idx[peak_pos]],
+        })
+    return pd.DataFrame(rows)
 
 
 # ===========================================================
@@ -652,10 +695,27 @@ windows_df = pd.DataFrame(window_rows)
 results_df.to_csv(z_dir / "massuni_summary_maps.csv", index=False)
 windows_df.to_csv(z_dir / "massuni_summary_windows.csv", index=False)
 
+# Cluster-level summary (one row per cluster, all maps combined)
+all_cluster_dfs = []
+for map_name in all_maps:
+    res = results_by_name[map_name]
+    df_clust = make_cluster_df(
+        res["stat_map"], res["clusters"], res["cluster_p_values"],
+        ch_names, times_ms,
+    )
+    if not df_clust.empty:
+        df_clust.insert(0, "map", map_name)
+        all_cluster_dfs.append(df_clust)
+
+clusters_df = pd.concat(all_cluster_dfs, ignore_index=True) if all_cluster_dfs else pd.DataFrame()
+clusters_df.to_csv(z_dir / "massuni_clusters.csv", index=False)
+
 print("\n===== MAP-LEVEL SUMMARY =====")
 print(results_df.to_string())
 print("\n===== WINDOW-LEVEL SUMMARY =====")
 print(windows_df.to_string())
+print("\n===== CLUSTER-LEVEL SUMMARY =====")
+print(clusters_df.to_string())
 
 # ===========================================================
 # SECTION 4: FIGURES
@@ -668,7 +728,7 @@ timestep_ms = 1000.0 / param["testresampfreq"]
 
 for ridx, regvar in enumerate(regvars):
     regvarname = regvarsnames[ridx]
-    cmap = "Reds" if regvar == "painlevel" else "Blues"
+    cmap_erp = cmap_erp_pain if regvar == "painlevel" else cmap_erp_money
 
     beta_ev = beta_gavg[ridx].copy()
     epo_cat = all_epos_cat[ridx]
@@ -687,7 +747,7 @@ for ridx, regvar in enumerate(regvars):
             mask=mask,
             mask_params=dict(marker="o", markerfacecolor="w",
                              markeredgecolor="k", linewidth=0, markersize=2),
-            cmap=cmap,
+            cmap=cmap_topo,
             show=False,
             ch_type="eeg",
             outlines="head",
@@ -698,7 +758,7 @@ for ridx, regvar in enumerate(regvars):
             contours=0,
         )
         ax.set_title(
-            f"{int(plot_times[tidx] * 1000)} ms\n({param['inference_method'].upper()})",
+            f"{int(plot_times[tidx] * 1000)} ms",
             fontdict={"size": param["labelfontsize"] - 1},
             pad=0.1,
         )
@@ -734,7 +794,7 @@ for ridx, regvar in enumerate(regvars):
         level_to_bin = {lev: i for i, lev in enumerate(unique_levels)}
         epo_cat.metadata["_bin"] = level_vals.map(level_to_bin)
         nbins_eff = len(unique_levels)
-        bin_colors = get_bin_colors(cmap, nbins_eff)
+        bin_colors = get_bin_colors(cmap_erp, nbins_eff)
 
         sub_evokeds = []
         for p_id in epo_cat.metadata["participant_id"].unique():
@@ -766,10 +826,11 @@ for ridx, regvar in enumerate(regvars):
                 color=bin_colors[b],
             )
 
-        ax.axhline(0, linestyle="--", color="gray")
-        ax.axvline(0, linestyle="--", color="gray")
-        ax.set_xticks(np.arange(-200, 1400, 200))
-        ax.set_xticklabels([str(i) for i in np.arange(-200, 1400, 200)])
+        ax.axhline(0, linestyle="--", color="gray", alpha=0.2)
+        ax.axvline(0, linestyle="--", color="gray", alpha=0.2)
+        ax.set_xlim(-200, 1000)
+        ax.set_xticks(np.arange(-200, 1200, 200))
+        ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
         ax.tick_params(labelsize=param["ticksfontsize"])
         ax.legend(fontsize=8, title="Level", title_fontsize=9,
                   frameon=False, loc="upper left", bbox_to_anchor=(0.02, 0.98),
@@ -798,8 +859,8 @@ for ridx, regvar in enumerate(regvars):
         ax.plot(epo_cat.times * 1000, mean, linewidth=3)
         ax.fill_between(epo_cat.times * 1000, mean - sem, mean + sem, alpha=0.3)
         ax.set_ylim((-0.25, 0.25))
-        ax.axhline(0, linestyle="--", color="gray")
-        ax.axvline(0, linestyle="--", color="gray")
+        ax.axhline(0, linestyle="--", color="gray", alpha=0.2)
+        ax.axvline(0, linestyle="--", color="gray", alpha=0.2)
 
         sig_ymin, sig_ymax = -0.02, -0.005
         for ti, t_ms in enumerate(epo_cat.times * 1000):
@@ -809,8 +870,9 @@ for ridx, regvar in enumerate(regvars):
 
         ax.text(0.99, 0.02, significance_label(param["inference_method"]),
                 transform=ax.transAxes, ha="right", va="bottom", fontsize=8, alpha=0.8)
-        ax.set_xticks(np.arange(-200, 1400, 200))
-        ax.set_xticklabels([str(i) for i in np.arange(-200, 1400, 200)])
+        ax.set_xlim(-200, 1000)
+        ax.set_xticks(np.arange(-200, 1200, 200))
+        ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
         ax.tick_params(labelsize=param["ticksfontsize"])
 
         fig.tight_layout()
@@ -819,6 +881,74 @@ for ridx, regvar in enumerate(regvars):
             dpi=600, bbox_inches="tight",
         )
         plt.close(fig)
+
+# ---- Combined pain + money + difference betas: significance shown by opacity ----
+_reg_colors = {"painlevel": "#d62728", "moneylevel": "#1f77b4"}
+_reg_labels = {"painlevel": "Pain", "moneylevel": "Money"}
+_times_ms = beta_gavg[0].times * 1000
+_diff_pvals = results_by_name["diff_pain_minus_money"]["pmap_corrected"]  # (n_time, n_ch)
+
+for ch in chan_to_plot:
+    if ch not in beta_gavg[0].ch_names:
+        continue
+
+    fig, ax = plt.subplots(figsize=(4, 2.5))
+    pick = beta_gavg[0].ch_names.index(ch)
+
+    for ridx, regvar in enumerate(regvars):
+        mean = beta_gavg[ridx].data[pick, :]
+        sub_avg = np.stack([allbetas[s, ridx, pick, :] for s in range(allbetas.shape[0])])
+        sem = scipy.stats.sem(sub_avg, axis=0)
+        sig = pvals_stack[ridx][:, pick] < param["point_alpha"]
+
+        color = _reg_colors[regvar]
+
+        ax.plot(_times_ms, mean, color=color, linewidth=1.5, alpha=0.2)
+        ax.plot(_times_ms, np.where(sig, mean, np.nan), color=color, linewidth=1.5, alpha=1.0)
+        ax.fill_between(_times_ms, mean - sem, mean + sem,
+                        where=sig, color=color, alpha=0.3)
+        ax.fill_between(_times_ms, mean - sem, mean + sem,
+                        where=~sig, color=color, alpha=0.06)
+
+    # Difference (pain − money)
+    mean_diff = beta_gavg[0].data[pick, :] - beta_gavg[1].data[pick, :]
+    sub_diff = allbetas[:, 0, pick, :] - allbetas[:, 1, pick, :]
+    sem_diff = scipy.stats.sem(sub_diff, axis=0)
+    sig_diff = _diff_pvals[:, pick] < param["point_alpha"]
+
+    ax.plot(_times_ms, mean_diff, color="#9467bd", linewidth=1.5, alpha=0.2)
+    ax.plot(_times_ms, np.where(sig_diff, mean_diff, np.nan), color="#9467bd", linewidth=1.5, alpha=1.0)
+    ax.fill_between(_times_ms, mean_diff - sem_diff, mean_diff + sem_diff,
+                    where=sig_diff, color="#9467bd", alpha=0.3)
+    ax.fill_between(_times_ms, mean_diff - sem_diff, mean_diff + sem_diff,
+                    where=~sig_diff, color="#9467bd", alpha=0.06)
+
+    ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
+    ax.set_ylabel("β (z)", fontsize=param["labelfontsize"])
+    ax.set_xlim(-200, 1000)
+    ax.set_ylim((-0.25, 0.25))
+    ax.axhline(0, linestyle="--", color="gray", alpha=0.2)
+    ax.axvline(0, linestyle="--", color="gray", alpha=0.2)
+    ax.set_xticks(np.arange(-200, 1200, 200))
+    ax.set_xticklabels([str(i) for i in np.arange(-200, 1200, 200)])
+    ax.tick_params(labelsize=param["ticksfontsize"])
+
+    legend_elements = [
+        Line2D([0], [0], color=_reg_colors[rv], linewidth=1.5, label=_reg_labels[rv])
+        for rv in regvars
+    ] + [Line2D([0], [0], color="#9467bd", linewidth=1.5, label="Difference")]
+    ax.legend(handles=legend_elements, fontsize=8, frameon=False,
+              loc="upper left", bbox_to_anchor=(0.02, 0.98),
+              borderaxespad=0.0, handlelength=1.6, labelspacing=0.3)
+    ax.text(0.99, 0.02, significance_label(param["inference_method"]),
+            transform=ax.transAxes, ha="right", va="bottom", fontsize=8, alpha=0.8)
+
+    fig.tight_layout()
+    fig.savefig(
+        outfigpath / f"{fig_prefix}fig_ols_erps_betas_combined_{ch}.svg",
+        dpi=600, bbox_inches="tight",
+    )
+    plt.close(fig)
 
 # ---- Difference maps (pain − money) ----
 diff_res = results_by_name["diff_pain_minus_money"]
@@ -833,14 +963,14 @@ for tidx, time_idx in enumerate(diff_times_pos):
     t_ms = int(plot_times[tidx] * 1000)
     mask = (pdiff[time_idx, :] < param["point_alpha"]) & chankeep
 
-    fig, ax = plt.subplots(figsize=(2, 2))
+    fig, ax = plt.subplots(figsize=(1, 1))
     im, _ = plot_topomap(
         tdiff[time_idx, :],
         pos=info,
         mask=mask,
         mask_params=dict(marker="o", markerfacecolor="w",
-                         markeredgecolor="k", linewidth=0, markersize=3),
-        cmap="RdBu_r",
+                         markeredgecolor="k", linewidth=0, markersize=2),
+        cmap=cmap_diff,
         show=False,
         ch_type="eeg",
         outlines="head",
@@ -850,7 +980,7 @@ for tidx, time_idx in enumerate(diff_times_pos):
         contours=0,
     )
     ax.set_title(
-        f"pain − money, {t_ms} ms\n({param['inference_method'].upper()})",
+        f"{t_ms} ms",
         fontdict={"size": param["labelfontsize"] - 1},
         pad=0.1,
     )
@@ -871,6 +1001,81 @@ for tidx, time_idx in enumerate(diff_times_pos):
     )
     plt.close(fig)
     plt.close(fig2)
+
+# ---- Cluster image plots (t-values, channels × time) ----
+for map_name in all_maps:
+    res = results_by_name[map_name]
+    stat_map = res["stat_map"]          # (n_time, n_ch)
+    clusters = res["clusters"]
+    cluster_p_values = res["cluster_p_values"]
+
+    sig_clusters = [
+        (c_idx, c_pval)
+        for c_idx, c_pval in zip(clusters, cluster_p_values)
+        if c_pval < param["point_alpha"]
+    ]
+    if not sig_clusters:
+        continue
+
+    for c_id, (c_idx, c_pval) in enumerate(sig_clusters):
+        t_idx = c_idx[0]
+        ch_idx = c_idx[1]
+
+        t_min_i, t_max_i = int(t_idx.min()), int(t_idx.max())
+        ch_min_i, ch_max_i = int(ch_idx.min()), int(ch_idx.max())
+
+        t_slice = slice(t_min_i, t_max_i + 1)
+        ch_slice = slice(ch_min_i, ch_max_i + 1)
+
+        tval_box = stat_map[t_slice, ch_slice].T.copy()   # (n_ch_box, n_time_box)
+
+        in_cluster = np.zeros(stat_map.shape, dtype=bool)
+        in_cluster[t_idx, ch_idx] = True
+        mask_box = in_cluster[t_slice, ch_slice].T
+        tval_masked = np.where(mask_box, tval_box, np.nan)
+
+        times_box = times_ms[t_slice]
+        ch_names_box = [ch_names[i] for i in range(ch_min_i, ch_max_i + 1)]
+
+        n_ch_box = len(ch_names_box)
+        n_t_box = len(times_box)
+
+        fig_h = max(2.5, n_ch_box * 0.18)
+        fig_w = max(4.0, n_t_box * 0.025)
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+        vlim = np.nanmax(np.abs(tval_masked))
+        im = ax.imshow(
+            tval_masked,
+            aspect="auto",
+            origin="lower",
+            cmap=cmap_diff,
+            vmin=-vlim,
+            vmax=vlim,
+            extent=[times_box[0], times_box[-1], -0.5, n_ch_box - 0.5],
+            interpolation="nearest",
+        )
+
+        ax.set_yticks(range(n_ch_box))
+        ax.set_yticklabels(ch_names_box, fontsize=max(4, min(8, 120 // n_ch_box)))
+        ax.set_xlabel("Time (ms)", fontsize=param["labelfontsize"])
+        ax.set_ylabel("Channel", fontsize=param["labelfontsize"])
+        ax.set_title(
+            f"{map_name} — cluster {c_id}  (p = {c_pval:.4f})",
+            fontsize=param["titlefontsize"],
+        )
+        ax.axvline(0, color="k", linewidth=0.8, linestyle="--", alpha=0.2)
+
+        cbar = fig.colorbar(im, ax=ax, pad=0.02)
+        cbar.set_label("t-value", fontsize=param["labelfontsize"] - 1)
+        cbar.ax.tick_params(labelsize=param["ticksfontsize"] - 2)
+
+        fig.tight_layout()
+        fig.savefig(
+            outfigpath / f"{fig_prefix}cluster_image_{map_name}_c{c_id}.svg",
+            dpi=600, bbox_inches="tight",
+        )
+        plt.close(fig)
 
 print("\nAll done.")
 print("Stats outputs:", z_dir)

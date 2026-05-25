@@ -13,6 +13,7 @@ from os.path import join as opj
 import scipy.stats as stats
 from statsmodels.formula.api import mixedlm
 
+
 # Paths
 basepath = str(os.getenv("basepath", Path(__file__).parent.parent.parent))
 outpath = opj(basepath, "derivatives", "behav")
@@ -84,7 +85,7 @@ for col in ['moneylevel', 'painlevel', 'accepted', 'choice_resp.rt']:
 # Threshold: 95% of 125 trials
 participant_ids_clean = [f"sub-{i:03d}" for i in range(1, 51) if i != 3]
 
-def drop_participants(data, participant_ids, threshold=125*0.95):
+def drop_participants(data, participant_ids, threshold=120):
     return [
         p for p in participant_ids
         if data[data['participant'] == p]['accepted'].sum() < threshold and data[data['participant'] == p]['accepted'].sum() > 125-threshold
@@ -114,15 +115,18 @@ agg_rt = (
     .rename(columns={'mean': 'rt_mean', 'std': 'rt_sd'})
 )
 
+rt_pivot = agg_rt.pivot(index='painlevel', columns='moneylevel', values='rt_mean')
+rt_pivot.index = rt_pivot.index.astype(int)
+
 plt.figure(figsize=(4, 3))
 ax = sns.heatmap(
-    agg_rt.pivot(index='painlevel', columns='moneylevel', values='rt_mean'),
-    cmap='plasma', cbar_kws={'label': 'Mean RT (s)'}
+    rt_pivot,
+    cmap='viridis', cbar_kws={'label': 'Mean RT (s)'}
 )
 ax.set_xlabel('Money Level', fontsize=12)
 ax.set_ylabel('Pain Level', fontsize=12)
-ax.tick_params(labelsize=8)
-ax.collections[0].colorbar.ax.tick_params(labelsize=8, pad=8)
+ax.tick_params(labelsize=9)
+ax.collections[0].colorbar.ax.tick_params(labelsize=9, pad=8)
 ax.collections[0].colorbar.set_label('Response time (s)', fontsize=12, labelpad=15)
 
 plt.tight_layout()
@@ -141,16 +145,19 @@ agg_acc = (
     .mean()
 )
 
+acc_pivot = agg_acc.pivot(index='painlevel', columns='moneylevel', values='accepted')
+acc_pivot.index = acc_pivot.index.astype(int)
+
 plt.figure(figsize=(4, 3))
 ax = sns.heatmap(
-    agg_acc.pivot(index='painlevel', columns='moneylevel', values='accepted'),
+    acc_pivot,
     cmap='cividis', cbar_kws={'label': 'Proportion accepted'}, vmin=0, vmax=1
 )
 ax.set_xlabel('Money Level', fontsize=12)
 ax.set_ylabel('Pain Level', fontsize=12)
 # Set label size for colorbar label
-ax.tick_params(labelsize=8)
-ax.collections[0].colorbar.ax.tick_params(labelsize=12, pad=8)
+ax.tick_params(labelsize=9)
+ax.collections[0].colorbar.ax.tick_params(labelsize=9, pad=8)
 ax.collections[0].colorbar.set_label('Acceptance rate', fontsize=12, labelpad=15)
 plt.tight_layout()
 
@@ -165,25 +172,25 @@ print(f"Acceptance range across subjects: {subject_acc.min()*100:.1f}% - {subjec
 fig, axes = plt.subplots(1, 2, figsize=(8, 3))
 
 sns.heatmap(
-    agg_rt.pivot(index='painlevel', columns='moneylevel', values='rt_mean'),
+    rt_pivot,
     cmap='plasma', ax=axes[0], cbar_kws={'label': 'Response time (s)'},
 )
 axes[0].set_xlabel('Money Level', fontsize=12)
 axes[0].set_ylabel('Pain Level', fontsize=12)
-axes[0].tick_params(labelsize=8)
+axes[0].tick_params(labelsize=9)
 # axes[0].set_title('Response Time', fontsize=14)
-axes[0].collections[0].colorbar.ax.tick_params(labelsize=8, pad=8)
+axes[0].collections[0].colorbar.ax.tick_params(labelsize=9, pad=8)
 axes[0].collections[0].colorbar.set_label('Response time (s)', fontsize=12, labelpad=4)
 
 sns.heatmap(
-    agg_acc.pivot(index='painlevel', columns='moneylevel', values='accepted'),
+    acc_pivot,
     cmap='cividis', ax=axes[1], cbar_kws={'label': 'Acceptance rate'}, vmin=0, vmax=1,
 )
 axes[1].set_xlabel('Money Level', fontsize=12)
 axes[1].set_ylabel('Pain Level', fontsize=12)
-axes[1].tick_params(labelsize=8)
+axes[1].tick_params(labelsize=9)
 # axes[1].set_title('Acceptance Rate', fontsize=14)
-axes[1].collections[0].colorbar.ax.tick_params(labelsize=8, pad=8)
+axes[1].collections[0].colorbar.ax.tick_params(labelsize=9, pad=8)
 axes[1].collections[0].colorbar.set_label('Acceptance rate', fontsize=12, labelpad=4)
 
 plt.tight_layout()
@@ -199,9 +206,12 @@ plt.close('all')
 # Random effects: random intercept + random slopes for painlevel and moneylevel by participant
 
 # Z-score continuous predictors for interpretable fixed effects
+# (main effects become effect at mean of other predictor, not at zero)
 preprocessed_data = preprocessed_data.copy()
+preprocessed_data['painlevel_z']  = (preprocessed_data['painlevel']  - preprocessed_data['painlevel'].mean())  / preprocessed_data['painlevel'].std()
+preprocessed_data['moneylevel_z'] = (preprocessed_data['moneylevel'] - preprocessed_data['moneylevel'].mean()) / preprocessed_data['moneylevel'].std()
 
-rt_data = preprocessed_data.dropna(subset=['choice_resp.rt', 'painlevel', 'moneylevel'])
+rt_data = preprocessed_data.dropna(subset=['choice_resp.rt', 'painlevel_z', 'moneylevel_z'])
 
 rt_data.rename(columns={'choice_resp.rt': 'rt'}, inplace=True)
 
@@ -228,10 +238,10 @@ def extract_lmm_table(result, model_name):
 
 # Model 1: RT ~ painlevel_z * moneylevel_z + (1 + painlevel_z + moneylevel_z | participant)
 lmm_rt = mixedlm(
-    "rt ~ painlevel * moneylevel",
+    "rt ~ painlevel_z * moneylevel_z",
     data=rt_data,
     groups=rt_data["participant"],
-    re_formula="~painlevel + moneylevel",
+    re_formula="~painlevel_z + moneylevel_z",
 ).fit(reml=True)
 print(lmm_rt.summary())
 with open(opj(outpath, 'lmm_rt_summary.txt'), 'w') as f:
@@ -239,10 +249,10 @@ with open(opj(outpath, 'lmm_rt_summary.txt'), 'w') as f:
 
 # Model 2: accepted ~ painlevel_z * moneylevel_z + (1 + painlevel_z + moneylevel_z | participant)
 lmm_acc = mixedlm(
-    "accepted ~ painlevel * moneylevel",
+    "accepted ~ painlevel_z * moneylevel_z",
     data=preprocessed_data,
     groups=preprocessed_data["participant"],
-    re_formula="~painlevel + moneylevel",
+    re_formula="~painlevel_z + moneylevel_z",
 ).fit(reml=True)
 print(lmm_acc.summary())
 with open(opj(outpath, 'lmm_acc_summary.txt'), 'w') as f:
@@ -272,7 +282,7 @@ money_levels = sorted(preprocessed_data['moneylevel'].dropna().unique().astype(i
 pain_levels  = sorted(preprocessed_data['painlevel'].dropna().unique().astype(int))
 
 def simple_slopes(result, focal, moderator, mod_levels, mod_mean, mod_sd, vcov, label):
-    """Simple slope of `focal` at each raw level of `moderator`."""
+    """Simple slope of `focal` at each raw level of `moderator` (moderator expressed in raw units)."""
     rows = []
     b_focal   = result.fe_params[focal]
     inter_key = (f'{focal}:{moderator}' if f'{focal}:{moderator}' in result.fe_params.index
@@ -282,6 +292,7 @@ def simple_slopes(result, focal, moderator, mod_levels, mod_mean, mod_sd, vcov, 
     var_inter = vcov.loc[inter_key, inter_key]
     cov_fi    = vcov.loc[focal, inter_key]
     for lv in mod_levels:
+        # moderator is already z-scored in the model; express each raw level as z-score
         mod_z = (lv - mod_mean) / mod_sd
         slope = b_focal + b_inter * mod_z
         se    = (var_focal + mod_z**2 * var_inter + 2 * mod_z * cov_fi) ** 0.5
@@ -300,12 +311,12 @@ def simple_slopes(result, focal, moderator, mod_levels, mod_mean, mod_sd, vcov, 
     return pd.DataFrame(rows)
 
 ss_pain_by_money = simple_slopes(
-    lmm_acc, 'painlevel', 'moneylevel',
+    lmm_acc, 'painlevel_z', 'moneylevel_z',
     money_levels, money_mean, money_sd, vcov,
     label='pain at each money level',
 )
 ss_money_by_pain = simple_slopes(
-    lmm_acc, 'moneylevel', 'painlevel',
+    lmm_acc, 'moneylevel_z', 'painlevel_z',
     pain_levels, pain_mean, pain_sd, vcov,
     label='money at each pain level',
 )

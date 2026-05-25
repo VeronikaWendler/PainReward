@@ -1,31 +1,15 @@
 
 Git/
-Hddm_Docker_August_24/derivatives/figures.zip
-Quest_Code/Quest_Data/
-subjective_value_estimation/data/
-EEG/PainReward_sub-001-050/painrewardeegdata/
-Hddm_Docker_August_24/models_dir/
-EEG/EEG_models_dir/
-Hddm_Docker_August_24/derivatives/
-EEG/eeg_mvpa_decode_timecourse.py
-EEG/correlation.py
-EEG/eeg_erp_massunivariate_resp_locked.py
-EEG/eeg_erp_massunivariate_cue.py
-EEG/eeg_erp_groupplots_resp_locked.py
-EEG/eeg_erp_groupplots_cue.py
-osf/
-EEG/old/
-EEG/mvpa_old_code
-rp_bayesflow_workflow/out
-._*
-__pycache__/
-.ipynb_checkpoints/
-Mps_notes.md
-.vscode/*
+
 
 # Temporary
 
-old/*
+
+old
 CLAUDE.md
 drafts/*
-docs/*
+docs
+._*
+__pycache__
+work
+.*

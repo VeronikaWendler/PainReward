@@ -23,16 +23,24 @@ import shutil
 import tempfile
 import seaborn as sns
 import scipy.stats as stats
-import kabuki
-import hddm
+
+try:
+    import kabuki
+    import hddm
+except ModuleNotFoundError:
+    kabuki = None
+    hddm = None
 
 from model_specs import REQUIRED_COLS, get_formula_terms
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
-import numba
-numba.config.CACHE_ENABLE = False
+try:
+    import numba
+    numba.config.CACHE_ENABLE = False
+except ModuleNotFoundError:
+    numba = None
 
 PROJECT_DIR    = Path(os.getenv("PROJECT_DIR", str(Path(__file__).resolve().parent.parent.parent))).resolve()
 BASE_MODEL_DIR = Path(os.getenv("MODEL_DIR",
@@ -54,6 +62,7 @@ CONTRIBUTION_CSV = {
     18: "a_pain_money_rp.csv",
     19: "v_a_pain_money.csv",
     20: "v_a_pain_money_rp.csv",
+    21: "v_pain_money_z_interaction.csv",
 }
 
 # Derived posterior ratios to append to the MAP table: (label, numerator_node, denominator_node).
@@ -75,6 +84,101 @@ MODEL_LABELS = {
     18: "a ~ pain+money\n+rp+interactions",
     19: "v+a ~ pain\n+ money",
     20: "v+a ~ pain+money\n+rp+interactions",
+    21: "v ~ z-pain\n× z-money",
+}
+
+MODEL_TABLE_SPECS = {
+    0: {
+        "equation": "a, v, t, z",
+        "description": "Null/intercept-only HDDM with threshold, drift, non-decision time, and bias estimated.",
+        "n_parameters": 4,
+        "n_free_parameters": 4,
+        "n_fixed_parameters": 0,
+    },
+    1: {
+        "equation": "v = beta0 + beta1 * sv_pain_para; a, t estimated; z fixed",
+        "description": "Drift rate varies with subjective pain value, with an intercept.",
+        "n_parameters": 5,
+        "n_free_parameters": 4,
+        "n_fixed_parameters": 1,
+    },
+    2: {
+        "equation": "v = beta1 * sv_pain_para; a, t estimated; z fixed",
+        "description": "Drift rate varies with subjective pain value, without an intercept.",
+        "n_parameters": 4,
+        "n_free_parameters": 3,
+        "n_fixed_parameters": 1,
+    },
+    3: {
+        "equation": "a = beta0 + beta1 * sv_pain_para; v, t estimated; z fixed",
+        "description": "Decision threshold varies with subjective pain value.",
+        "n_parameters": 5,
+        "n_free_parameters": 4,
+        "n_fixed_parameters": 1,
+    },
+    9: {
+        "equation": "v = beta0 + beta1 * painlevel + beta2 * moneylevel; a, t estimated; z fixed",
+        "description": "Drift rate varies additively with objective pain and money levels.",
+        "n_parameters": 6,
+        "n_free_parameters": 5,
+        "n_fixed_parameters": 1,
+    },
+    10: {
+        "equation": "a = beta0 + beta1 * painlevel + beta2 * moneylevel; v, t estimated; z fixed",
+        "description": "Decision threshold varies additively with objective pain and money levels.",
+        "n_parameters": 6,
+        "n_free_parameters": 5,
+        "n_fixed_parameters": 1,
+    },
+    11: {
+        "equation": "t = beta0 + beta1 * painlevel + beta2 * moneylevel; a, v estimated; z fixed",
+        "description": "Non-decision time varies additively with objective pain and money levels.",
+        "n_parameters": 6,
+        "n_free_parameters": 5,
+        "n_fixed_parameters": 1,
+    },
+    12: {
+        "equation": "v = beta0 + beta1 * painlevel + beta2 * moneylevel + beta3 * painlevel:moneylevel; a, t estimated; z fixed",
+        "description": "Drift rate varies with pain, money, and their interaction.",
+        "n_parameters": 7,
+        "n_free_parameters": 6,
+        "n_fixed_parameters": 1,
+    },
+    17: {
+        "equation": "v = beta0 + beta1 * pain_z + beta2 * money_z + beta3 * rp_z + beta4 * pain_z:rp_z + beta5 * money_z:rp_z; a, t estimated; z fixed",
+        "description": "Drift rate varies with standardized pain, money, response-locked potential, and pain/money by RP interactions.",
+        "n_parameters": 9,
+        "n_free_parameters": 8,
+        "n_fixed_parameters": 1,
+    },
+    18: {
+        "equation": "a = beta0 + beta1 * pain_z + beta2 * money_z + beta3 * rp_z + beta4 * pain_z:rp_z + beta5 * money_z:rp_z; v, t estimated; z fixed",
+        "description": "Decision threshold varies with standardized pain, money, response-locked potential, and pain/money by RP interactions.",
+        "n_parameters": 9,
+        "n_free_parameters": 8,
+        "n_fixed_parameters": 1,
+    },
+    19: {
+        "equation": "v = beta0 + beta1 * pain_z + beta2 * money_z; a = gamma0 + gamma1 * pain_z + gamma2 * money_z; t estimated; z fixed",
+        "description": "Drift rate and threshold both vary additively with standardized pain and money.",
+        "n_parameters": 8,
+        "n_free_parameters": 7,
+        "n_fixed_parameters": 1,
+    },
+    20: {
+        "equation": "v = beta0 + beta1 * pain_z + beta2 * money_z + beta3 * rp_z + beta4 * pain_z:rp_z + beta5 * money_z:rp_z; a = gamma0 + gamma1 * pain_z + gamma2 * money_z + gamma3 * rp_z + gamma4 * pain_z:rp_z + gamma5 * money_z:rp_z; t estimated; z fixed",
+        "description": "Drift rate and threshold both vary with standardized pain, money, response-locked potential, and pain/money by RP interactions.",
+        "n_parameters": 14,
+        "n_free_parameters": 13,
+        "n_fixed_parameters": 1,
+    },
+    21: {
+        "equation": "v = beta0 + beta1 * pain_z + beta2 * money_z + beta3 * pain_z:money_z; a, t estimated; z fixed",
+        "description": "Model 12 variant: drift rate varies with within-subject z-scored pain, z-scored money, and their interaction.",
+        "n_parameters": 7,
+        "n_free_parameters": 6,
+        "n_fixed_parameters": 1,
+    },
 }
 
 VERSION_PARAMS = {
@@ -95,6 +199,7 @@ VERSION_PARAMS = {
     20: ["t",
          "v_Intercept", "v_pain_z", "v_money_z", "v_rp_z", "v_pain_z:rp_z", "v_money_z:rp_z",
          "a_Intercept", "a_pain_z", "a_money_z", "a_rp_z", "a_pain_z:rp_z", "a_money_z:rp_z"],
+    21: ["a", "t", "v_Intercept", "v_pain_z", "v_money_z", "v_pain_z:money_z"],
 }
 
 
@@ -289,6 +394,9 @@ def _load_and_clean_data(version: int) -> pd.DataFrame:
 
 
 def run_version(version: int, model_dir: Path, fig_dir: Path) -> None:
+    if kabuki is None or hddm is None:
+        raise ModuleNotFoundError("Processing a fitted HDDM version requires kabuki and hddm.")
+
     print(f"\n=== Version {version} ===")
     models   = load_chains(version, model_dir)
     combined = kabuki.utils.concat_models(models)
@@ -328,7 +436,20 @@ def plot_model_comparison(fig_dir: Path) -> None:
             continue
         text = dic_path.read_text().strip()
         dic_val = float(text.split(":")[1].strip())
-        records.append({"version": version, "label": label, "DIC": dic_val})
+        table_spec = MODEL_TABLE_SPECS[version]
+        records.append({
+            "version": version,
+            "model_name": f"Model {version}",
+            "label": label,
+            "equation": table_spec["equation"],
+            "description": table_spec["description"],
+            "n_parameters": table_spec["n_parameters"],
+            "n_free_parameters": table_spec["n_free_parameters"],
+            "n_fixed_parameters": table_spec["n_fixed_parameters"],
+            "DIC": dic_val,
+            "fit_statistic": dic_val,
+            "fit_statistic_name": "DIC",
+        })
 
     if not records:
         print("No DIC files found — run individual versions first.")
@@ -364,8 +485,28 @@ def plot_model_comparison(fig_dir: Path) -> None:
     print(f"Model comparison figure saved → {out}")
 
     csv_out = fig_dir / "model_comparison_DIC.csv"
-    df.to_csv(csv_out, index=False)
+    df[["version", "label", "fit_statistic"]].rename(
+        columns={"fit_statistic": "DIC"}
+    ).to_csv(csv_out, index=False)
     print(f"Model comparison table saved  → {csv_out}")
+
+    table = df[[
+        "model_name",
+        "equation",
+        "description",
+        "n_parameters",
+        "n_free_parameters",
+        "n_fixed_parameters",
+        "fit_statistic",
+        "fit_statistic_name",
+    ]].copy()
+    table.insert(0, "dic_rank", table["fit_statistic"].rank(method="min").astype(int))
+    table = table.sort_values("dic_rank")
+    table.insert(0, "winning_model", table["fit_statistic"] == table["fit_statistic"].min())
+
+    table_out = fig_dir / "model_comparison_table.csv"
+    table.to_csv(table_out, index=False)
+    print(f"Full model comparison table saved → {table_out}")
 
 
 if __name__ == "__main__":

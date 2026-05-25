@@ -3,7 +3,7 @@
 # Input:  derivatives/behav/hddm_ready.csv  (output of hddm_prep.py)
 # Output: MODEL_DIR/<model_name>_{0..n_chains-1}.pkl  and  .nc  and  .hddm
 #
-# Run: python hddm_fit.py [--start-version N] [--n-chains 4] [--samples 12000]
+# Run: python hddm_fit.py [--start-version N] [--n-chains 4] [--samples 50000] [--burn 10000]
 # Env vars: PROJECT_DIR, MODEL_DIR, FIG_DIR
 
 import os
@@ -99,7 +99,7 @@ def clean_data(data: pd.DataFrame, version: int) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def run_chain(trace_id: int, data: pd.DataFrame, model_dir: Path,
-              model_name: str, version: int, samples: int) -> tuple:
+              model_name: str, version: int, samples: int, burn: int) -> tuple:
     import os
     import hddm
     from pathlib import Path
@@ -117,7 +117,7 @@ def run_chain(trace_id: int, data: pd.DataFrame, model_dir: Path,
                                       keep_regressor_trace=True)
     m.find_starting_values()
     infdata = m.sample(
-        samples, burn=2000,
+        samples, burn=burn,
         dbname=str(model_dir / f"{model_name}_db{trace_id}"),
         db="pickle",
         return_infdata=True, loglike=True, ppc=True,
@@ -126,11 +126,11 @@ def run_chain(trace_id: int, data: pd.DataFrame, model_dir: Path,
 
 
 def fit_model(data: pd.DataFrame, version: int, model_name: str,
-              model_dir: Path, n_chains: int, samples: int) -> None:
+              model_dir: Path, n_chains: int, samples: int, burn: int) -> None:
     ensure_dir(model_dir)
     t0 = time.time()
     results = Parallel(n_jobs=n_chains)(
-        delayed(run_chain)(i, data, model_dir, model_name, version, samples)
+        delayed(run_chain)(i, data, model_dir, model_name, version, samples, burn)
         for i in range(n_chains)
     )
     print(f"Sampling done in {time.time() - t0:.0f}s")
@@ -152,7 +152,8 @@ if __name__ == "__main__":
     parser.add_argument("--start-version", type=int, default=0,
                         help="Skip versions before this number (for resuming)")
     parser.add_argument("--n-chains",  type=int, default=4)
-    parser.add_argument("--samples",   type=int, default=12000)
+    parser.add_argument("--samples",   type=int, default=50000)
+    parser.add_argument("--burn",      type=int, default=10000)
     parser.add_argument("--model-dir", type=Path, default=BASE_MODEL_DIR)
     args = parser.parse_args()
 
@@ -179,4 +180,4 @@ if __name__ == "__main__":
 
         quick_report(data_clean, version, model_name)
         fit_model(data_clean, version, model_name, args.model_dir,
-                  args.n_chains, args.samples)
+                  args.n_chains, args.samples, args.burn)

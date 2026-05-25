@@ -71,7 +71,7 @@ MODE_CONFIGS = {
         "cue_events":    ["off+"],
         "lock":          "cue",
         "tmin":          -0.2,
-        "tmax":          1.0,
+        "tmax":          1.5,
         "baseline":      (-0.2, 0),
         "outdir_name":   "erps_decision",
         "epo_fname_tpl": "{p}_decision_cues_singletrials-epo.fif",
@@ -116,7 +116,7 @@ MODE_CONFIGS = {
         "report_tpl":    "{p}_decision_resp_erps_report.html",
         "reject_csv":    "erps/decision_resp_erps_rejectionstats.csv",
         "meta_csv":      "erps/decision_resp_erpsmeta.csv",
-        "amp_lat":       [[-0.5, 0.1]],
+        "amp_lat":       [[-0.5, -0.1]],
         "report_section": "ERPs for responses",
     },
 }

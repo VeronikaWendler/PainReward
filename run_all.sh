@@ -4,8 +4,11 @@ set -Eeuo pipefail
 
 trap 'echo "[run_all.sh] ERROR at line $LINENO: command failed: $BASH_COMMAND" >&2' ERR
 
-
+# Root project directory (where data is located)
 PROJECT_DIR="/media/labmp/eSSD-004"
+
+# SETUP
+pyton behav/00_questionnaires_score.py # Adds questionnaire scores to participants.tsv. We could just share the updated participants.tsv, but this is a quick script to run and ensures that the same code is used for scoring across all analyses.
 
 # BEHAVIOUR
 python behav/01a_behav_decision.py # Decision behaviour and stats/figures
@@ -21,22 +24,22 @@ python hddm/05_hddm_prep.py # Prepare data for HDDM modelling
 
 # Run all models
 docker run --rm \
-  -v PROJECT_DIR:/project \
+    -v /media/labmp/eSSD-004:/project \
   -e PROJECT_DIR=/project \
   hcp4715/hddm \
   python /project/code/hddm/06_hddm_fit.py
 
 # PPC — posterior predictive checks for key models
-for version in 9 10 19; do
+for version in 9 10 18 19; do
   docker run --rm \
-    -v PROJECT_DIR:/project \
+    -v /media/labmp/eSSD-004:/project \
     -e PROJECT_DIR=/project \
     hcp4715/hddm \
     python /project/code/hddm/Simulations/ppc.py --version $version
 done
 
 # Parameter recovery — group and individual level
-for version in 9 10 19; do
+for version in 9 10 18 19; do
   docker run --rm \
     -v /media/labmp/eSSD-004:/project \
     -e PROJECT_DIR=/project \
@@ -69,7 +72,15 @@ docker run --rm \
   hcp4715/hddm \
   python /project/code/hddm/07_hddm_results.py --compare
 
+# DDM schematic / publication figure (reads MAP estimates written above, no HDDM dependency)
+python hddm/08_hddm_plot.py
 
 # EEG - needs to be run after HDDM results are in, to plot ERPs by HDDM parameters
 python eeg/05a_eeg_erp_massunivariate_passive.py # Mass univariate ERP analyses
 python eeg/05b_eeg_erp_massunivariate_decision.py # Mass univariate ERP analyses
+python eeg/05c_eeg_erp_massunivariate_responselocked.py # Mass univariate ERP analyses
+
+python eeg/06_eeg_rp_ddm_regression.py # HDDM parameter regression analyses for RP amplitude
+
+python eeg/07a_eeg_decoding_passive.py # Decoding analyses for passive task
+# TODO cross decoding

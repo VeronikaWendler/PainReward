@@ -27,6 +27,7 @@ MODEL_SPECS = {
         {"model": "v ~ 1 + pain_z + money_z + rp_z + pain_z * rp_z + money_z * rp_z", "link_func": _lf},
         {"model": "a ~ 1 + pain_z + money_z + rp_z + pain_z * rp_z + money_z * rp_z", "link_func": _lf},
     ]},
+    21: {"class": "HDDMRegressor", "regs": [{"model": "v ~ 1 + pain_z + money_z + pain_z * money_z", "link_func": _lf}]},
 }
 
 REQUIRED_COLS = {
@@ -42,9 +43,10 @@ REQUIRED_COLS = {
     18: ["rt", "response", "pain_z", "money_z", "rp_z"],
     19: ["rt", "response", "pain_z", "money_z"],
     20: ["rt", "response", "pain_z", "money_z", "rp_z"],
+    21: ["rt", "response", "pain_z", "money_z"],
 }
 
-MODEL_RUN_ORDER = [0, 1, 2, 3, 9, 10, 11, 12, 17, 18, 19, 20]
+MODEL_RUN_ORDER = [0, 1, 2, 3, 9, 10, 11, 12, 21, 17, 18, 19, 20]
 MODEL_BASE_NAME = "painreward_behavioural_data_"
 
 

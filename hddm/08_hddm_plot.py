@@ -1,9 +1,11 @@
 # # code from: https://github.com/nmarinsek/data-visualization-notebooks/blob/master/drift-diffusion-plot.ipynb
 # this code creates a DDM figure for publications
 
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 # -----------------------------
 # Global styling
@@ -120,5 +122,9 @@ ax.spines['left'].set_visible(False)
 ax.spines['right'].set_visible(False)
 ax.spines['top'].set_visible(False)
 
+fig_dir = Path(os.getenv("FIG_DIR", str(Path(__file__).resolve().parent.parent.parent / "derivatives" / "hddm" / "figures")))
+fig_dir.mkdir(parents=True, exist_ok=True)
+
 plt.tight_layout()
+fig.savefig(fig_dir / "ddm_illustration.svg", format="svg", bbox_inches="tight")
 plt.show()
