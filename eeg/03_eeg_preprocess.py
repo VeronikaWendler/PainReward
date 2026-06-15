@@ -129,6 +129,17 @@ for p in part:
     del raw_for_pyprep
     stats_frame.loc[p, "n_bad_chans_passive"] = len(passive_raw.info["bads"])
 
+    # Recover the online reference (FCz) and apply a common average reference
+    # ONCE, here, so that ICA is fit, labelled by ICLabel, and applied all under
+    # the same reference. ICLabel requires an average reference, and applying an
+    # unmixing matrix under a different reference than it was learned on is
+    # incorrect. FCz is added back (as zeros) before averaging so it is
+    # reconstructed by the average-reference operation.
+    passive_raw.load_data()
+    mne.add_reference_channels(passive_raw, "FCz", copy=False)
+    passive_raw.set_montage("easycap-M1", on_missing="warn")
+    passive_raw.set_eeg_reference("average", projection=False)
+
     # Plot channels
     fig = passive_raw.plot_sensors(show_names=True, show=False)
     report.add_figure(fig, "Sensor positions (bad in red) passive")
@@ -277,7 +288,6 @@ for p in part:
             events=events,
         )
         .drop_bad(reject=dict(eeg=500e-6))
-        .set_eeg_reference("average", projection=False)
     )
 
     # Use ICA to remove eog artifacts (with decimation)
@@ -297,7 +307,6 @@ for p in part:
                 "line noise",
                 "heart beat",
                 "eye movement",
-                "other",
             ]
             and prob > 0.70
             else 0
@@ -320,11 +329,8 @@ for p in part:
     # Filter
     passive_raw.load_data().filter(0.1, 100)
 
-    # Set average reference
-    mne.add_reference_channels(passive_raw, "FCz", copy=False) # Add FCz before setting average reference
-    passive_raw = passive_raw.set_eeg_reference("average", projection=False)
-    passive_raw.set_montage("easycap-M1", on_missing="warn") # Set montage again after interpolation to update channel locations
-    # Interpolate bad channels
+    # Interpolate bad channels (FCz recovery, average reference and montage were
+    # already set before ICA so the reference is consistent throughout)
     passive_raw = passive_raw.interpolate_bads()
 
     # Save cleaned data
@@ -421,6 +427,14 @@ for p in part:
     decision_raw.info["bads"] = all_bads
     del raw_for_pyprep
     stats_frame.loc[p, "n_bad_chans_decision"] = len(decision_raw.info["bads"])
+
+    # Recover the online reference (FCz) and apply a common average reference
+    # ONCE (see passive task above for the rationale): ICA fit, ICLabel, and
+    # apply all happen under the same average reference.
+    decision_raw.load_data()
+    mne.add_reference_channels(decision_raw, "FCz", copy=False)
+    decision_raw.set_montage("easycap-M1", on_missing="warn")
+    decision_raw.set_eeg_reference("average", projection=False)
 
     # Plot channels
     fig = decision_raw.plot_sensors(show_names=True)
@@ -537,7 +551,6 @@ for p in part:
             events=events,
         )
         .drop_bad(reject=dict(eeg=500e-6))
-        .set_eeg_reference("average")
     )
 
     # Use ICA to remove eog artifacts
@@ -577,12 +590,8 @@ for p in part:
     # Filter
     decision_raw.load_data().filter(0.1, 100)
 
-    # Set average reference
-    mne.add_reference_channels(decision_raw,"FCz", copy=False) # Add FCz before setting average reference
-    decision_raw = decision_raw.set_eeg_reference("average", projection=False)
-
-    # Interpolate bad channels
-    decision_raw.set_montage("easycap-M1", on_missing="warn") # Set montage again after adding fcz to update channel locations
+    # Interpolate bad channels (FCz recovery, average reference and montage were
+    # already set before ICA so the reference is consistent throughout)
     decision_raw = decision_raw.interpolate_bads()
 
     # Save cleaned data

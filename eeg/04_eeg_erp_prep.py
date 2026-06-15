@@ -49,6 +49,14 @@ LP_FILTER = 30          # Hz
 HP_FILTER = None        # Hz (no high-pass for ERPs)
 FILTER_METHOD = "fir"
 
+# Decision-task design: a fixed sequence of 5 blocks x 25 trials = 125 trials.
+# Used to reconstruct each trial's TRUE original position so the (complete) EEG
+# response sequence and the (possibly trial-excluded) behaviour align on real
+# trial identity rather than on a recomputed running count.
+N_BLOCKS = 5
+TRIALS_PER_BLOCK = 25
+N_DECISION_TRIALS = N_BLOCKS * TRIALS_PER_BLOCK  # 125
+
 # Channels to drop from raw before epoching
 CHANS_TO_DROP = ["HEOGL", "HEOGR", "VEOGL", "STI 014", "Status"]
 
@@ -190,6 +198,16 @@ def extract_rp_amplitude(epo_path: Path, participant: str) -> pd.DataFrame:
     """
     epochs = mne.read_epochs(str(epo_path), preload=True, verbose="ERROR")
 
+    # The chronological epoch order is only a valid ORIGINAL trial index if the
+    # EEG response set is complete. Bail out loudly otherwise — silently using a
+    # short/long sequence would mis-map RP amplitudes to behavioural trials.
+    if len(epochs) != N_DECISION_TRIALS:
+        raise ValueError(
+            f"{participant}: {len(epochs)} response-locked epochs, expected "
+            f"{N_DECISION_TRIALS}. EEG is not the complete trial set, so its "
+            f"chronological order cannot be used as the original trial index."
+        )
+
     missing = [c for c in RP_CHANNELS if c not in epochs.ch_names]
     if missing:
         raise ValueError(f"{participant}: RP channels missing: {missing}")
@@ -214,6 +232,9 @@ def extract_rp_amplitude(epo_path: Path, participant: str) -> pd.DataFrame:
     if "sample" in meta.columns:
         meta = meta.sort_values("sample").reset_index(drop=True)
 
+    # Chronological position == original trial index (1..N_DECISION_TRIALS),
+    # which holds because completeness was asserted above. This is what the
+    # behaviour side is aligned against in merge_rp_into_behav.
     meta["trial_seq"] = np.arange(1, len(meta) + 1)
 
     if "badtrial" not in meta.columns:
@@ -223,13 +244,26 @@ def extract_rp_amplitude(epo_path: Path, participant: str) -> pd.DataFrame:
     return meta
 
 
-def zscore_within_subject(df: pd.DataFrame, value_col: str, subj_col: str, out_col: str) -> pd.DataFrame:
-    """Add a within-subject z-score column to df."""
-    def _z(x):
-        sd = x.std(ddof=0)
-        return pd.Series(np.nan, index=x.index) if (pd.isna(sd) or sd == 0) else (x - x.mean()) / sd
+def zscore_within_subject(df: pd.DataFrame, value_col: str, subj_col: str, out_col: str,
+                          exclude_col: str = None) -> pd.DataFrame:
+    """Add a within-subject z-score column to df.
 
-    df[out_col] = df.groupby(subj_col)[value_col].transform(_z)
+    If `exclude_col` is given, rows where that column == 1 (e.g. artifact-flagged
+    trials) are excluded when estimating the per-subject mean/SD, so they do not
+    contaminate the normalisation. Those rows receive NaN in `out_col` (every
+    downstream consumer drops badtrial==1 anyway).
+    """
+    df = df.copy()
+    df[out_col] = np.nan
+    for subj in df[subj_col].unique():
+        rows = df[subj_col] == subj
+        if exclude_col is not None:
+            rows = rows & (pd.to_numeric(df[exclude_col], errors="coerce").fillna(0) != 1)
+        vals = df.loc[rows, value_col]
+        sd = vals.std(ddof=0)
+        if pd.isna(sd) or sd == 0:
+            continue
+        df.loc[rows, out_col] = (vals - vals.mean()) / sd
     return df
 
 
@@ -245,14 +279,32 @@ def merge_rp_into_behav(behav: pd.DataFrame, rp_table: pd.DataFrame):
     merged : pd.DataFrame  — behav extended with rp_raw, rp_z, badtrial
     diag   : pd.DataFrame  — per-participant merge diagnostics
     """
-    sort_cols = ["participant"]
-    if "blocks.thisRepN" in behav.columns:
-        sort_cols.append("blocks.thisRepN")
-    if "trials.thisN" in behav.columns:
-        sort_cols.append("trials.thisN")
+    required = ["blocks.thisRepN", "trials.thisN"]
+    missing = [c for c in required if c not in behav.columns]
+    if missing:
+        raise KeyError(
+            f"merge_rp_into_behav: behaviour missing columns needed to compute "
+            f"the original trial index: {missing}"
+        )
 
-    behav = behav.sort_values(sort_cols).copy()
-    behav["trial_seq"] = behav.groupby("participant").cumcount() + 1
+    behav = behav.sort_values(["participant", "blocks.thisRepN", "trials.thisN"]).copy()
+
+    # TRUE original trial index (1-based) in the fixed N_BLOCKS x TRIALS_PER_BLOCK
+    # sequence. This is the trial's real position in the experiment, so it aligns
+    # with the *complete* EEG response sequence even when behavioural exclusion
+    # has removed trials. A running cumcount (the previous approach) silently
+    # shifts every trial after a gap and mis-maps RP amplitudes.
+    behav["trial_seq"] = (
+        behav["blocks.thisRepN"].astype(int) * TRIALS_PER_BLOCK
+        + behav["trials.thisN"].astype(int)
+        + 1
+    )
+    dup = behav.groupby("participant")["trial_seq"].apply(lambda s: s.duplicated().any())
+    if dup.any():
+        raise ValueError(
+            f"merge_rp_into_behav: non-unique original trial index within "
+            f"participant(s): {dup.index[dup].tolist()}"
+        )
 
     merged = behav.merge(
         rp_table[["participant", "trial_seq", "rp_raw", "rp_z", "badtrial"]],
@@ -260,6 +312,19 @@ def merge_rp_into_behav(behav: pd.DataFrame, rp_table: pd.DataFrame):
         how="left",
         validate="one_to_one",
     )
+
+    # Every surviving behavioural trial must find its EEG match. If not, the
+    # alignment is broken and we must not write a silently-wrong file.
+    n_unmatched = int(merged["badtrial"].isna().sum())
+    if n_unmatched:
+        bad_parts = (
+            merged.loc[merged["badtrial"].isna()]
+            .groupby("participant").size().to_dict()
+        )
+        raise ValueError(
+            f"merge_rp_into_behav: {n_unmatched} behavioural trial(s) had no EEG "
+            f"match after alignment (per participant: {bad_parts})."
+        )
 
     diag = (
         merged.groupby("participant")
@@ -291,15 +356,24 @@ def average_time_win_strials(strials, chans_to_average, amp_lat):
     -------
     strials : mne.Epochs  — metadata updated in-place
     """
+    # Exclude artifact-flagged trials from the z-score normalisation so they do
+    # not bias the mean/SD; flagged trials receive NaN (dropped downstream).
+    if "badtrial" in strials.metadata.columns:
+        good = pd.to_numeric(strials.metadata["badtrial"], errors="coerce").fillna(0).to_numpy() == 0
+    else:
+        good = np.ones(len(strials), dtype=bool)
+
     for c in chans_to_average:
         for a in amp_lat:
             amp_epo = strials.copy().crop(tmin=a[0], tmax=a[1])
-            amp_epo.pick_channels(c)
-            all_amps = [np.mean(data) for data in amp_epo.get_data()]
-            all_amps = np.array(all_amps)
-            all_amps = (all_amps - all_amps.mean()) / all_amps.std()
+            amp_epo.pick(c)
+            all_amps = np.array([np.mean(data) for data in amp_epo.get_data()])
+            z = np.full(all_amps.shape, np.nan)
+            sd = all_amps[good].std()
+            if not (pd.isna(sd) or sd == 0):
+                z[good] = (all_amps[good] - all_amps[good].mean()) / sd
             col = "amp_" + "_".join(c) + "_" + str(a[0]) + "-" + str(a[1])
-            strials.metadata[col] = all_amps
+            strials.metadata[col] = z
     return strials
 
 
@@ -519,9 +593,10 @@ for mode_name, cfg in MODE_CONFIGS.items():
 # Skipped gracefully if the behavioural file doesn't exist yet.
 # ──────────────────────────────────────────────────────────────────────────────
 if not BEHAV_FILE.exists():
-    print(f"\nSkipping Section 3: behavioural file not found ({BEHAV_FILE})")
-    print("  Run behav/02_sv_modelling.py first to generate it.")
-    raise FileNotFoundError(f"Behavioural file not found: {BEHAV_FILE}")
+    raise FileNotFoundError(
+        f"Behavioural file not found: {BEHAV_FILE}. "
+        f"Run behav/02_sv_modelling.py first to generate it."
+    )
 else:
     print(f"\n{'='*60}")
     print("SECTION 3 — RP amplitude → HDDM merge")
@@ -536,27 +611,25 @@ else:
             / resp_cfg["epo_fname_tpl"].format(p=p)
         )
         if not epo_path.exists():
-            print(f"  {p}: epoch file missing — skipping")
-            continue
-        try:
-            rp_tables.append(extract_rp_amplitude(epo_path, p))
-            print(f"  {p}: loaded")
-        except Exception as exc:
-            print(f"  {p}: ERROR — {exc}")
+            raise FileNotFoundError(
+                f"{p}: response-locked epoch file missing: {epo_path}. "
+                f"Run Section 1 (decision_resp mode) first."
+            )
+        rp_tables.append(extract_rp_amplitude(epo_path, p))
+        print(f"  {p}: loaded")
 
-    if not rp_tables:
-        print("  No RP data found — skipping HDDM merge.")
-    else:
-        rp_table = pd.concat(rp_tables, ignore_index=True)
-        rp_table = zscore_within_subject(rp_table, "rp_raw", "participant", "rp_z")
+    rp_table = pd.concat(rp_tables, ignore_index=True)
+    rp_table = zscore_within_subject(
+        rp_table, "rp_raw", "participant", "rp_z", exclude_col="badtrial"
+    )
 
-        behav = pd.read_csv(BEHAV_FILE)
-        final_df, diag = merge_rp_into_behav(behav, rp_table)
+    behav = pd.read_csv(BEHAV_FILE)
+    final_df, diag = merge_rp_into_behav(behav, rp_table)
 
-        out_behav_dir = BEHAV_FILE.parent
-        rp_table.to_csv(out_behav_dir / "rp_trial_table.csv", index=False)
-        final_df.to_csv(out_behav_dir / "behav_with_exclusion_sv_modeling_with_rp.csv", index=False)
-        diag.to_csv(out_behav_dir / "rp_merge_diagnostics.csv", index=False)
+    out_behav_dir = BEHAV_FILE.parent
+    rp_table.to_csv(out_behav_dir / "rp_trial_table.csv", index=False)
+    final_df.to_csv(out_behav_dir / "behav_with_exclusion_sv_modeling_with_rp.csv", index=False)
+    diag.to_csv(out_behav_dir / "rp_merge_diagnostics.csv", index=False)
 
-        print(f"\n  Saved to {out_behav_dir}")
-        print(diag.to_string(index=False))
+    print(f"\n  Saved to {out_behav_dir}")
+    print(diag.to_string(index=False))

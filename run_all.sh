@@ -8,7 +8,7 @@ trap 'echo "[run_all.sh] ERROR at line $LINENO: command failed: $BASH_COMMAND" >
 PROJECT_DIR="/media/labmp/eSSD-004"
 
 # SETUP
-pyton behav/00_questionnaires_score.py # Adds questionnaire scores to participants.tsv. We could just share the updated participants.tsv, but this is a quick script to run and ensures that the same code is used for scoring across all analyses.
+python behav/00_questionnaires_score.py # Adds questionnaire scores to participants.tsv. We could just share the updated participants.tsv, but this is a quick script to run and ensures that the same code is used for scoring across all analyses.
 
 # BEHAVIOUR
 python behav/01a_behav_decision.py # Decision behaviour and stats/figures
@@ -82,5 +82,6 @@ python eeg/05c_eeg_erp_massunivariate_responselocked.py # Mass univariate ERP an
 
 python eeg/06_eeg_rp_ddm_regression.py # HDDM parameter regression analyses for RP amplitude
 
-python eeg/07a_eeg_decoding_passive.py # Decoding analyses for passive task
-# TODO cross decoding
+python eeg/07a_eeg_decoding_passive.py # Within-passive decoding: pain-vs-money + pain/money level
+python eeg/07b1_eeg_decoding_pain_money_regression.py # Passive->decision pain/money magnitude regression decoding (stimulus-controlled)
+python eeg/07b2_eeg_decoding_pain_vs_money_category.py # Passive->decision pain-vs-money category decoding (stimulus-controlled)
