@@ -15,17 +15,17 @@ plt.rcParams.update({
     'ytick.labelsize': 20
 })
 
-customPalette = ["#7C1313", "#095C98", '#D3500C', '#FFB139']
+customPalette = ["#188767", "#7C2180", '#D3500C', '#FFB139']
 plt.rcParams['axes.prop_cycle'] = plt.cycler(color=customPalette)
 
 # -----------------------------
 # Timing parameters in ms
 # -----------------------------
-total_ms = 1500          # full x-axis extent
+total_ms = 1200          # full x-axis extent
 dt_ms = 10               # resolution of simulation
-ndt_ms = 420             # non-decision time
+ndt_ms = 250             # non-decision time
 accum_ms = total_ms - ndt_ms
-bias = 0.09  #bias in random walk
+bias = 0.11  #bias in random walk
 
 n_total = total_ms // dt_ms
 n_ndt = ndt_ms // dt_ms
@@ -37,7 +37,7 @@ time_post = np.arange(ndt_ms, total_ms, dt_ms)
 # -----------------------------
 # Diffusion parameters
 # -----------------------------
-n = 10
+n = 12
 upperbound = 100
 lowerbound = -100
 
@@ -62,7 +62,7 @@ np.random.seed(7)
 
 # positive drift: reward-dominant
 data1 = pd.DataFrame({
-    i: simulate_ddm_path(n_accum, bias=+2.5, noise=6.0)
+    i: simulate_ddm_path(n_accum, bias=+2.6, noise=6.0)
     for i in range(n)
 })
 
@@ -113,7 +113,7 @@ ax.set_xlim(0, total_ms)
 ax.set_ylim(lowerbound, upperbound)
 ax.set_xlabel('time (ms)')
 ax.set_yticks([lowerbound, upperbound])
-ax.set_yticklabels(['reject', 'accept'])
+ax.set_yticklabels(['option 2', 'option 1'])
 
 # Clean up spines
 ax.spines['left'].set_visible(False)
