@@ -17,7 +17,9 @@ There are also a few older or exploratory notebooks and standalone scripts.
 
 ---
 
-## repository map
+## repository map 
+
+
 
 ### `EEG/`
 Main EEG analysis folder. This is where most signal-processing and ERP analysis code lives
