@@ -68,29 +68,54 @@ assert len(TAI_ITEMS) == 20, f"Expected 20 TAI items, found {len(TAI_ITEMS)}. Ch
 assert len(SAI_ITEMS) == 20, f"Expected 20 SAI items, found {len(SAI_ITEMS)}. Check your column names."
 
 TAI_REVERSE = [
-    "qiastay2_Je me sens bien",
-    "qiastay2_Je me sens content(e) de moi-même",
-    "qiastay2_Je me sens reposé(e)",
-    "qiastay2_Je suis d'un grand calme",
-    "qiastay2_Je suis heureux(se)",
-    "qiastay2_Je me sens en sécurité",
-    "qiastay2_Prendre des décisions m'est facile",
-    "qiastay2_Je suis satisfait(e)",
-    "qiastay2_Je suis une personne qui a les nerfs solides",
+    "qiastay2_I feel good",
+    "qiastay2_I feel happy with myself",
+    "qiastay2_I feel rested",
+    "qiastay2_I am very calm",
+    "qiastay2_I am happy",
+    "qiastay2_I feel safe",
+    "qiastay2_Making decisions is easy for me",
+    "qiastay2_I am satisfied",
+    "qiastay2_I am a person with strong nerves",
 ]
 
 SAI_REVERSE = [
-    "qiastay1_Je me sens calme",
-    "qiastay1_Je me sens en sécurité",
-    "qiastay1_ Je me sens tranquille",
-    "qiastay1_ Je me sens comblé(e)",
-    "qiastay1_Je me sens à l'aise",
-    "qiastay1_Je me sens sûr(e) de moi",
-    "qiastay1_Je suis détendu(e)",
-    "qiastay1_Je me sens satisfait(e)",
-    "qiastay1_Je sens que j'ai les nerfs solides",
-    "qiastay1_Je me sens bien",
+    "qiastay1_I feel calm",
+    "qiastay1_I feel safe",
+    "qiastay1_I feel still",
+    "qiastay1_I feel fulfilled",
+    "qiastay1_I feel comfortable",
+    "qiastay1_I feel confident",
+    "qiastay1_I am relaxed",
+    "qiastay1_I feel satisfied",
+    "qiastay1_I feel like I have strong nerves",
+    "qiastay1_I feel good",
 ]
+
+# TAI_REVERSE = [
+#     "qiastay2_Je me sens bien",
+#     "qiastay2_Je me sens content(e) de moi-même",
+#     "qiastay2_Je me sens reposé(e)",
+#     "qiastay2_Je suis d'un grand calme",
+#     "qiastay2_Je suis heureux(se)",
+#     "qiastay2_Je me sens en sécurité",
+#     "qiastay2_Prendre des décisions m'est facile",
+#     "qiastay2_Je suis satisfait(e)",
+#     "qiastay2_Je suis une personne qui a les nerfs solides",
+# ]
+
+# SAI_REVERSE = [
+#     "qiastay1_Je me sens calme",
+#     "qiastay1_Je me sens en sécurité",
+#     "qiastay1_ Je me sens tranquille",
+#     "qiastay1_ Je me sens comblé(e)",
+#     "qiastay1_Je me sens à l'aise",
+#     "qiastay1_Je me sens sûr(e) de moi",
+#     "qiastay1_Je suis détendu(e)",
+#     "qiastay1_Je me sens satisfait(e)",
+#     "qiastay1_Je sens que j'ai les nerfs solides",
+#     "qiastay1_Je me sens bien",
+# ]
 
 # Safety: keep only cols that exist
 TAI_ITEMS   = [c for c in TAI_ITEMS if c in df.columns]

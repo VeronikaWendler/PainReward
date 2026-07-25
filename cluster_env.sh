@@ -1,6 +1,7 @@
-export CODE_ROOT="$HOME/projects/PainReward_mpreview_cluster"
-export ORIGINAL_BIDS="/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata"
-export RUN_ROOT="/rds/projects/z/zhanglp-vwendler-core/PainReward_mpreview_run"
+export CODE_ROOT="$HOME/projects/PainReward_mpreview_cluster" # this folder contains only code which is also synchronized with the GitHub repository
+export ORIGINAL_BIDS="/rds/projects/z/zhanglp-vwendler-core/PainReward_ULaval/EEG/PainReward_sub-001-050/painrewardeegdata"  # contains the original data
+export RUN_ROOT="/rds/projects/z/zhanglp-vwendler-core/PainReward_mpreview_run" # contains heavy data on the cluster's RDS
+export QUEST_DATA="/rds/projects/z/zhanglp-vwendler-core/PainReward_mpreview_run/data/participants_new.csv" # location of the participant file on the RDS
 
 export basepath="$RUN_ROOT"
 export PROJECT_DIR="$RUN_ROOT"
