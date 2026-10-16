@@ -3,9 +3,7 @@
 #SBATCH --time=01:30:00
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16G
-#SBATCH --output=logs/pr_tfr_qc_%j.out
-#SBATCH --error=logs/pr_tfr_qc_%j.err
-#SBATCH --mail-user=VAW508@student.bham.ac.uk
+#SBATCH --output=logs/tfr/pr_tfr_qc_%j.log
 
 set -Eeuo pipefail
 cd "${SLURM_SUBMIT_DIR:-$PWD}"

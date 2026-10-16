@@ -8,18 +8,11 @@ Input
 -----
 1. Cleaned passive raw FIF from eeg/03_eeg_preprocess.py:
        derivatives/<sub>/eeg/<sub>_passive_cleaned-raw.fif
-2. Passive BIDS events TSV, used for exact EEG sample identity:
-       <sub>/eeg/<sub>_task-passive_events.tsv
-3. Passive behaviour TSV, merged by chronological trial number so condition,
-   1-5 level and block are preserved for later MVPA.
-
-The TFR branch is intentionally self-contained and does NOT require
-eeg/04_eeg_erp_prep.py to have been run. To preserve the existing ERP
-artifact policy, this script recreates the passive `badtrial` flag from a
-30-Hz-low-passed copy of the cleaned raw using the same -0.2..1.0 s window
-and 150-uV peak-to-peak rejection threshold as 04_eeg_erp_prep.py. The
-actual TFR is always computed from the original cleaned 0.1-100 Hz raw, not
-from that low-passed copy.
+2. Passive single-trial ERP file from eeg/04_eeg_erp_prep.py, used ONLY for
+   exact trial identity and the pre-existing `badtrial` flag:
+       derivatives/<sub>/eeg/erps_passive/<sub>_passive_cues_singletrials-epo.fif
+3. Passive behaviour TSV, merged exactly as in the existing decoding scripts,
+   so condition, 1-5 level and block are preserved for later MVPA.
 
 Core TFR choices
 ----------------
@@ -66,6 +59,9 @@ from mne.time_frequency import tfr_array_morlet
 mne.set_log_level("ERROR")
 
 BASE_PATH = Path(os.getenv("basepath", Path(__file__).parent.parent.parent))
+# INPUT root containing the already-created cleaned EEG and ERP derivatives.
+# OUTPUTS still go to BASE_PATH (= RUN_ROOT inside the cluster container).
+SOURCE_BIDS = Path(os.getenv("SOURCE_BIDS", BASE_PATH))
 
 # TFR parameters. Keep baseline synchronized with 04a_eeg_tfr_timing_audit.py.
 FREQS = np.arange(4.0, 46.0, 1.0)
@@ -82,14 +78,6 @@ FREQ_CHUNK_SIZE = 6
 LOG_FLOOR = np.finfo(np.float64).tiny
 
 CHANS_TO_DROP = ["HEOGL", "HEOGR", "VEOGL", "STI 014", "Status"]
-
-# Match the passive ERP rejection convention in 04_eeg_erp_prep.py.
-ERP_REJECT = dict(eeg=150e-6)
-ERP_REJECT_LP_HZ = 30.0
-ERP_REJECT_TMIN = -0.2
-ERP_REJECT_TMAX = 1.0
-ERP_REJECT_BASELINE = (-0.2, 0.0)
-PASSIVE_TRIAL_TYPES = [f"rew{i}" for i in range(1, 6)] + [f"shk{i}" for i in range(1, 6)]
 
 
 def parse_args() -> argparse.Namespace:
@@ -110,25 +98,22 @@ def parse_args() -> argparse.Namespace:
 
 
 def passive_beh_path(participant: str) -> Path:
-    return BASE_PATH / participant / "eeg" / f"{participant}_task-passive_beh.tsv"
+    return SOURCE_BIDS / participant / "eeg" / f"{participant}_task-passive_beh.tsv"
 
 
 def passive_raw_path(participant: str) -> Path:
-    return BASE_PATH / "derivatives" / participant / "eeg" / f"{participant}_passive_cleaned-raw.fif"
+    return SOURCE_BIDS / "derivatives" / participant / "eeg" / f"{participant}_passive_cleaned-raw.fif"
 
 
-def passive_events_path(participant: str) -> Path:
-    canon = BASE_PATH / participant / "eeg" / f"{participant}_task-passive_events.tsv"
-    if canon.exists():
-        return canon
-    matches = list((BASE_PATH / participant / "eeg").glob("*task-passive*events.tsv"))
-    if not matches:
-        raise FileNotFoundError(
-            f"{participant}: no passive events.tsv found in {BASE_PATH / participant / 'eeg'}"
-        )
-    if len(matches) > 1:
-        raise RuntimeError(f"{participant}: multiple passive events.tsv files found: {matches}")
-    return matches[0]
+def passive_erp_path(participant: str) -> Path:
+    return (
+        SOURCE_BIDS
+        / "derivatives"
+        / participant
+        / "eeg"
+        / "erps_passive"
+        / f"{participant}_passive_cues_singletrials-epo.fif"
+    )
 
 
 def out_dir(participant: str) -> Path:
@@ -178,134 +163,72 @@ def load_passive_beh(participant: str) -> pd.DataFrame:
 
 
 def load_and_align_metadata(participant: str) -> pd.DataFrame:
-    """Build passive trial metadata directly from events.tsv + behaviour.tsv.
+    epo_path = passive_erp_path(participant)
+    if not epo_path.exists():
+        raise FileNotFoundError(
+            f"{participant}: passive ERP single-trial file missing: {epo_path}\n"
+            "Run eeg/04_eeg_erp_prep.py first."
+        )
 
-    Event samples define EEG timing. Chronological trial number aligns the 200
-    passive cue events with the 200 PsychoPy trial rows. Event-derived condition
-    and level are cross-checked against behaviour so a silent one-row shift
-    cannot pass unnoticed.
-    """
-    ev_path = passive_events_path(participant)
-    events = pd.read_csv(ev_path, sep="\t")
-    required = ["sample", "trial_type"]
-    missing = [c for c in required if c not in events.columns]
+    erp = mne.read_epochs(str(epo_path), preload=False, verbose="ERROR")
+    if erp.metadata is None:
+        raise RuntimeError(f"{participant}: passive ERP epochs have no metadata")
+
+    md = erp.metadata.reset_index(drop=True).copy()
+    required = ["trialsnum", "sample", "badtrial"]
+    missing = [c for c in required if c not in md.columns]
     if missing:
-        raise KeyError(f"{participant}: passive events.tsv missing columns: {missing}")
+        raise KeyError(f"{participant}: passive ERP metadata missing columns: {missing}")
 
-    md = events[events["trial_type"].isin(PASSIVE_TRIAL_TYPES)].copy()
-    md = md.sort_values("sample").reset_index(drop=True)
-    if md.empty:
-        raise RuntimeError(f"{participant}: no rew1-5/shk1-5 cue events found in {ev_path}")
-
+    md["trialsnum"] = pd.to_numeric(md["trialsnum"], errors="coerce")
     md["sample"] = pd.to_numeric(md["sample"], errors="coerce")
-    if md["sample"].isna().any():
-        raise RuntimeError(f"{participant}: non-numeric passive cue sample(s) in events.tsv")
+    md["badtrial"] = pd.to_numeric(md["badtrial"], errors="coerce")
+    if md[["trialsnum", "sample", "badtrial"]].isna().any().any():
+        raise RuntimeError(f"{participant}: non-numeric trialsnum/sample/badtrial in ERP metadata")
+    md["trialsnum"] = md["trialsnum"].astype(int)
     md["sample"] = md["sample"].astype(int)
-    if md["sample"].duplicated().any():
-        raise RuntimeError(f"{participant}: duplicate passive cue sample indices")
+    md["badtrial"] = md["badtrial"].astype(int)
 
-    md["trialsnum"] = np.arange(1, len(md) + 1, dtype=int)
-    md["event_condition"] = np.where(
-        md["trial_type"].astype(str).str.startswith("shk"), "p", "m"
-    )
-    md["event_level_1_5"] = (
-        md["trial_type"].astype(str).str.extract(r"(\d+)$", expand=False).astype(int)
-    )
+    if md["trialsnum"].duplicated().any():
+        raise RuntimeError(f"{participant}: duplicate trialsnum in passive ERP metadata")
 
     beh = load_passive_beh(participant)
-    if len(md) != len(beh):
-        raise RuntimeError(
-            f"{participant}: passive cue count mismatch: events={len(md)}, behaviour={len(beh)}"
-        )
-
-    merged = md[[
-        "trialsnum", "sample", "trial_type", "event_condition", "event_level_1_5"
-    ]].merge(beh, on="trialsnum", how="left", validate="1:1")
-
+    merged = md.merge(beh, on="trialsnum", how="left", validate="1:1")
     if merged[["condition", "level_1_5", "blocks.thisRepN", "fixation_duration_s"]].isna().any().any():
-        raise RuntimeError(f"{participant}: passive behaviour merge left unlabeled event trials")
+        raise RuntimeError(f"{participant}: passive behaviour merge left unlabeled ERP trials")
 
-    cond_bad = merged["event_condition"].astype(str) != merged["condition"].astype(str)
-    level_bad = ~np.isclose(
-        merged["event_level_1_5"].astype(float), merged["level_1_5"].astype(float)
-    )
-    if cond_bad.any() or level_bad.any():
-        cols = [
-            "trialsnum", "trial_type", "event_condition", "event_level_1_5",
-            "condition", "level_1_5"
-        ]
-        bad = merged.loc[cond_bad | level_bad, cols]
-        raise RuntimeError(
-            f"{participant}: events.tsv and behaviour.tsv disagree on passive trial identity.\n"
-            + bad.head(20).to_string(index=False)
-        )
-
+    # The planned baseline must sit inside fixation on every trial we keep.
     unsafe = merged["fixation_duration_s"].astype(float) < abs(BASELINE[0])
     if unsafe.any():
         bad_rows = merged.loc[unsafe, ["trialsnum", "fixation_duration_s"]]
         raise RuntimeError(
             f"{participant}: planned TFR baseline {BASELINE} is not fully inside fixation "
-            f"for {int(unsafe.sum())} trial(s):\n{bad_rows.head(20).to_string(index=False)}"
+            f"for {int(unsafe.sum())} trial(s):\n{bad_rows.head(20).to_string(index=False)}\n"
+            "Run 04a_eeg_tfr_timing_audit.py and revise the baseline before computing TFRs."
         )
 
     return merged
 
 
-def add_erp_style_badtrial_flags(
-    participant: str, raw: mne.io.BaseRaw, metadata: pd.DataFrame
-) -> pd.DataFrame:
-    """Recreate the passive ERP `badtrial` flag without needing ERP files.
-
-    The proxy epochs exactly mirror the artifact-rejection part of
-    04_eeg_erp_prep.py: 30-Hz LP filter, -0.2..1.0 s cue epochs, baseline
-    (-0.2, 0), and 150-uV peak-to-peak rejection. These epochs are used ONLY
-    to flag trials. TFR power is computed from the untouched cleaned raw.
-    """
-    reject_raw = raw.copy().filter(
-        l_freq=None, h_freq=ERP_REJECT_LP_HZ, method="fir", verbose="ERROR"
-    )
-    events = np.column_stack([
-        metadata["sample"].to_numpy(dtype=int),
-        np.zeros(len(metadata), dtype=int),
-        np.ones(len(metadata), dtype=int),
-    ])
-    proxy = mne.Epochs(
-        reject_raw,
-        events=events,
-        event_id={"cue": 1},
-        tmin=ERP_REJECT_TMIN,
-        tmax=ERP_REJECT_TMAX,
-        baseline=ERP_REJECT_BASELINE,
-        metadata=metadata.copy(),
-        preload=True,
-        reject=None,
-        reject_by_annotation=True,
-        verbose="ERROR",
-    )
-    if len(proxy) != len(metadata):
-        raise RuntimeError(
-            f"{participant}: ERP-style rejection proxy retained {len(proxy)}/{len(metadata)} "
-            "trials before peak-to-peak rejection (likely annotation/data-boundary drop)."
+def build_long_epochs(participant: str, metadata: pd.DataFrame) -> mne.Epochs:
+    raw_path = passive_raw_path(participant)
+    if not raw_path.exists():
+        raise FileNotFoundError(
+            f"{participant}: cleaned passive raw missing: {raw_path}\n"
+            "Run eeg/03_eeg_preprocess.py first."
         )
 
-    tmp = proxy.copy().drop_bad(reject=ERP_REJECT)
-    bad_flags = np.asarray([1 if len(reason) > 0 else 0 for reason in tmp.drop_log], dtype=int)
-    if len(bad_flags) != len(metadata):
-        raise RuntimeError(f"{participant}: badtrial flag length mismatch")
+    raw = mne.io.read_raw_fif(str(raw_path), preload=True, verbose="ERROR")
+    to_drop = [c for c in CHANS_TO_DROP if c in raw.ch_names]
+    if to_drop:
+        raw.drop_channels(to_drop)
+    raw.pick("eeg", exclude=[])
 
-    out = metadata.copy().reset_index(drop=True)
-    out["badtrial"] = bad_flags
-    return out
-
-
-def build_long_epochs(
-    participant: str, raw: mne.io.BaseRaw, metadata: pd.DataFrame
-) -> mne.Epochs:
     # Use only the already-defined good trials. We retain original `trialsnum`
     # and sample identity in metadata, so later MVPA can align back exactly.
     good = metadata[metadata["badtrial"] == 0].copy().reset_index(drop=True)
     if good.empty:
-        raise RuntimeError(f"{participant}: no good passive trials after ERP-style badtrial flag")
+        raise RuntimeError(f"{participant}: no good passive trials after existing ERP badtrial flag")
 
     events = np.column_stack(
         [
@@ -377,7 +300,7 @@ def main() -> None:
     args = parse_args()
     participant = args.subject
 
-    participant_dir = BASE_PATH / participant
+    participant_dir = SOURCE_BIDS / participant
     if not participant_dir.exists():
         raise FileNotFoundError(f"Unknown participant directory: {participant_dir}")
 
@@ -402,26 +325,10 @@ def main() -> None:
 
     metadata_all = load_and_align_metadata(participant)
     n_input_trials = len(metadata_all)
-
-    raw_path = passive_raw_path(participant)
-    if not raw_path.exists():
-        raise FileNotFoundError(
-            f"{participant}: cleaned passive raw missing: {raw_path}\n"
-            "Run eeg/03_eeg_preprocess.py first."
-        )
-    print(f"[{participant}] loading cleaned passive raw")
-    raw = mne.io.read_raw_fif(str(raw_path), preload=True, verbose="ERROR")
-    to_drop = [c for c in CHANS_TO_DROP if c in raw.ch_names]
-    if to_drop:
-        raw.drop_channels(to_drop)
-    raw.pick("eeg", exclude=[])
-
-    print(f"[{participant}] recreating ERP-style badtrial flags")
-    metadata_all = add_erp_style_badtrial_flags(participant, raw, metadata_all)
     n_badtrial = int((metadata_all["badtrial"] == 1).sum())
 
-    print(f"[{participant}] making long cue epochs")
-    epochs = build_long_epochs(participant, raw, metadata_all)
+    print(f"[{participant}] loading cleaned raw and making long cue epochs")
+    epochs = build_long_epochs(participant, metadata_all)
     metadata = epochs.metadata.reset_index(drop=True).copy()
     ch_names = list(epochs.ch_names)
 
@@ -503,7 +410,7 @@ def main() -> None:
 
     params = {
         "input_raw": str(passive_raw_path(participant)),
-        "events_source": str(passive_events_path(participant)),
+        "metadata_source": str(passive_erp_path(participant)),
         "behaviour_source": str(passive_beh_path(participant)),
         "working_epoch_s": [EPOCH_TMIN, EPOCH_TMAX],
         "epoch_resample_hz": EPOCH_SFREQ,
@@ -518,18 +425,14 @@ def main() -> None:
         "frequency_chunk_size": FREQ_CHUNK_SIZE,
         "dtype": "float32",
         "data_shape_order": ["trial", "channel", "frequency", "time"],
-        "badtrial_policy": (
-            "recreated internally to match 04_eeg_erp_prep.py: 30-Hz LP, "
-            "-0.2..1.0 s cue epoch, baseline -0.2..0, 150-uV peak-to-peak; "
-            "bad trials excluded before TFR"
-        ),
+        "badtrial_policy": "exclude trials flagged badtrial==1 by 04_eeg_erp_prep.py before TFR",
     }
     with open(params_path, "w", encoding="utf-8") as f:
         json.dump(params, f, indent=2)
 
     summary = {
         "participant": participant,
-        "n_input_passive_trials": int(n_input_trials),
+        "n_input_passive_epochs": int(n_input_trials),
         "n_existing_badtrial_excluded": int(n_badtrial),
         "n_tfr_trials": int(n_trials),
         "n_channels": int(n_channels),
