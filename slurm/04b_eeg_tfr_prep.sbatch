@@ -19,7 +19,7 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
 fi
 
 mapfile -t SUBJECTS < <(
-  find "$RUN_ROOT" -maxdepth 1 -mindepth 1 -type d -name 'sub-*' -printf '%f\n' | sort
+  find -L "$RUN_ROOT" -maxdepth 1 -mindepth 1 -type d -name 'sub-*' -printf '%f\n' | sort
 )
 
 if (( SLURM_ARRAY_TASK_ID < 0 || SLURM_ARRAY_TASK_ID >= ${#SUBJECTS[@]} )); then

@@ -12,7 +12,7 @@ source ./cluster_env.sh
 mkdir -p logs
 
 mapfile -t SUBJECTS < <(
-  find "$RUN_ROOT" -maxdepth 1 -mindepth 1 -type d -name 'sub-*' -printf '%f\n' | sort
+  find -L "$RUN_ROOT" -maxdepth 1 -mindepth 1 -type d -name 'sub-*' -printf '%f\n' | sort
 )
 N_SUBJECTS=${#SUBJECTS[@]}
 if (( N_SUBJECTS == 0 )); then
