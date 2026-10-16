@@ -4,8 +4,10 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16G
 #SBATCH --output=logs/tfr/pr_tfr_qc_%j.log
+#SBATCH --error=logs/tfr/pr_tfr_qc_%j.log
 
 set -Eeuo pipefail
+
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 source ./cluster_env.sh
 

@@ -117,7 +117,9 @@ def read_task_timing(participant: str, task: str) -> pd.DataFrame:
     out["planned_baseline_tmin_s"] = BASELINE_TMIN
     out["planned_baseline_tmax_s"] = BASELINE_TMAX
     out["baseline_start_after_fixation_onset_s"] = out["fixation_duration_s"] + BASELINE_TMIN
-    out["baseline_fully_inside_fixation"] = out["fixation_duration_s"] >= abs(BASELINE_TMIN)
+    required_fixation_s = abs(BASELINE_TMIN) + morlet_half_support_s(LOWEST_FREQ_HZ)
+    out["baseline_fully_inside_fixation"] = (out["fixation_duration_s"] >= required_fixation_s)
+
     return out
 
 

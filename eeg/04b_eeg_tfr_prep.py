@@ -69,7 +69,7 @@ N_CYCLES_FACTOR = 0.5
 EPOCH_TMIN = -2.0
 EPOCH_TMAX = 2.0
 EPOCH_SFREQ = 256.0
-TFR_DECIM = 2                    # 256 -> 128 Hz after convolution; still safe for <=45 Hz
+TFR_DECIM = 1                    # smoothing will be done later by Morlet transform 256 -> 128 Hz after convolution; still safe for <=45 Hz
 BASELINE = (-0.7, -0.5)
 SAVE_TMIN = -0.8
 SAVE_TMAX = 1.5
@@ -97,12 +97,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+
 def passive_beh_path(participant: str) -> Path:
     return SOURCE_BIDS / participant / "eeg" / f"{participant}_task-passive_beh.tsv"
 
 
 def passive_raw_path(participant: str) -> Path:
-    return SOURCE_BIDS / "derivatives" / participant / "eeg" / f"{participant}_passive_cleaned-raw.fif"
+    return (
+        SOURCE_BIDS
+        / "derivatives"
+        / participant
+        / "eeg"
+        / f"{participant}_passive_cleaned-raw.fif"
+    )
 
 
 def passive_erp_path(participant: str) -> Path:
