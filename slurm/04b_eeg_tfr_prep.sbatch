@@ -5,6 +5,8 @@
 #SBATCH --mem=24G
 #SBATCH --output=logs/pr_tfr_prep_%A_%a.out
 #SBATCH --error=logs/pr_tfr_prep_%A_%a.err
+#SBATCH --mail-user=VAW508@student.bham.ac.uk
+
 
 # IMPORTANT: submit this file as a job array via run_tfr_prep_cluster.sh.
 set -Eeuo pipefail

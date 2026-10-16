@@ -5,6 +5,8 @@
 #SBATCH --mem=4G
 #SBATCH --output=logs/pr_tfr_timing_%j.out
 #SBATCH --error=logs/pr_tfr_timing_%j.err
+#SBATCH --mail-user=VAW508@student.bham.ac.uk
+
 
 set -Eeuo pipefail
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
