@@ -33,13 +33,14 @@ from pathlib import Path
 from os.path import join as opj
 
 
-basepath = str(os.getenv("basepath", Path(__file__).parent.parent.parent))
+quest_data = os.getenv("QUEST_DATA") # here, we get the QUEST_DATA path which was set in cluster_env.sh, it's a csv
 
+quest_data = Path(quest_data)
 
 # =========================
 # Load + clean headers
 # =========================
-df = pd.read_csv(opj(basepath, 'participants.tsv'), sep="\t")
+df = pd.read_csv(quest_data, sep=";", encoding="utf-8-sig")
 
 df.columns = (
     df.columns.astype(str)
