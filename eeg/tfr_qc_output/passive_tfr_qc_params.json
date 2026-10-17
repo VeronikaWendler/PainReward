@@ -1,0 +1,23 @@
+{
+  "n_subjects": 49,
+  "baseline_s": [
+    -0.7,
+    -0.5
+  ],
+  "low_gamma_hz": [
+    31.0,
+    45.0
+  ],
+  "low_gamma_postcue_window_s": [
+    0.0,
+    1.0
+  ],
+  "gamma_extreme_qc_rule": "robust z > 8 MAD-equivalent; QC only, no automatic exclusion",
+  "plot_channels": [
+    "FCz",
+    "Cz",
+    "CPz",
+    "Pz",
+    "Oz"
+  ]
+}

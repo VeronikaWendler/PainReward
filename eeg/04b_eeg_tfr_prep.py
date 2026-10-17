@@ -1,9 +1,6 @@
 """
 Single-trial cue-locked TFR preparation for the PainReward passive task.
 
-This is the spectral-preparation stage only. It does NOT perform decoding,
-statistics, band selection, or any outcome-driven feature selection.
-
 Input
 -----
 1. Cleaned passive raw FIF from eeg/03_eeg_preprocess.py:
@@ -39,7 +36,7 @@ derivatives/<sub>/eeg/tfr/
     <sub>_passive_cue_params.json
     <sub>_passive_cue_prep_summary.json
 
-The .npy format is deliberate: it is transparent, version-stable, and can be
+The .npy format is transparent, version-stable, and can be
 memory-mapped later during MVPA without loading a large HDF5 object at once.
 """
 
