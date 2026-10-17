@@ -59,12 +59,13 @@ The 8 pre-defined maps (2 attributes x 4 bands) are tested jointly:
 
 Subject inclusion
 -----------------
-By default, use the established post-exclusion participant list from:
-    derivatives/behav/behav_cleaned_with_exclusions.csv
+By default, use all participant IDs listed in:
+    participants.tsv
 
-This matches the existing PainReward decoding convention. The TFR-preparation
-stage can contain more participants; only the established analysis sample is
-used here. Use --subjects only for explicit diagnostics/sensitivity analyses.
+The analysis then fails fast if any selected participant is missing one of the
+required passive-TFR files. This keeps the passive-only decoding independent
+of legacy HDDM/decision-pipeline exclusions. Use --subjects only for an
+explicit diagnostic or sensitivity subset.
 
 Outputs
 -------
@@ -103,7 +104,7 @@ RANDOM_STATE = 23
 BASE_PATH = Path(os.getenv("basepath", Path(__file__).parent.parent.parent))
 OUT_DIR = BASE_PATH / "derivatives" / "statistics" / "tfr_decoding_passive_within"
 FIG_DIR = OUT_DIR / "figures"
-BEHAV_EXCLUSIONS_CSV = BASE_PATH / "derivatives" / "behav" / "behav_cleaned_with_exclusions.csv"
+PARTICIPANTS_TSV = BASE_PATH / "participants.tsv"
 
 RIDGE_ALPHA = 1.0
 CLUSTER_FORMING_ALPHA = 0.05
@@ -160,19 +161,25 @@ def load_subject_list(explicit: List[str] | None) -> List[str]:
     if explicit:
         subs = sorted(dict.fromkeys(explicit))
     else:
-        if not BEHAV_EXCLUSIONS_CSV.exists():
+        if not PARTICIPANTS_TSV.exists():
             raise FileNotFoundError(
-                f"Established post-exclusion subject file missing: {BEHAV_EXCLUSIONS_CSV}\n"
-                "Do not silently fall back to all TFR participants. Supply --subjects explicitly "
-                "only if you intentionally want a different analysis sample."
+                f"participants.tsv missing: {PARTICIPANTS_TSV}"
             )
-        df = pd.read_csv(BEHAV_EXCLUSIONS_CSV)
-        if "participant" not in df.columns:
+
+        df = pd.read_csv(PARTICIPANTS_TSV, sep="\t")
+        if "participant_id" not in df.columns:
             raise KeyError(
-                f"{BEHAV_EXCLUSIONS_CSV} lacks required 'participant' column. "
+                f"{PARTICIPANTS_TSV} lacks required 'participant_id' column. "
                 f"Columns: {list(df.columns)}"
             )
-        subs = sorted(df["participant"].dropna().astype(str).unique().tolist())
+
+        subs = sorted(
+            df["participant_id"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
 
     if not subs:
         raise RuntimeError("No participants selected for decoding.")
@@ -183,10 +190,13 @@ def load_subject_list(explicit: List[str] | None) -> List[str]:
         for key, path in paths.items():
             if not path.exists():
                 missing.append(f"{sub} [{key}]: {path}")
-    if missing:
-        raise FileNotFoundError("Missing TFR input file(s):\n" + "\n".join(missing[:100]))
-    return subs
 
+    if missing:
+        raise FileNotFoundError(
+            "Missing TFR input file(s):\n" + "\n".join(missing[:100])
+        )
+
+    return subs
 
 def make_model(alpha: float) -> Pipeline:
     return Pipeline([
@@ -415,7 +425,7 @@ def main() -> None:
     print("=" * 76, flush=True)
     print("PASSIVE TFR WITHIN-DOMAIN MAGNITUDE DECODING", flush=True)
     print(f"Subjects: {len(subjects)}", flush=True)
-    print(f"Subject source: {'--subjects' if args.subjects else BEHAV_EXCLUSIONS_CSV}", flush=True)
+    print(f"Subject source: {'--subjects' if args.subjects else PARTICIPANTS_TSV}", flush=True)
     print(f"Ridge alpha: {args.ridge_alpha}", flush=True)
     print(f"Joint permutations: {args.n_permutations}", flush=True)
     print("=" * 76, flush=True)
@@ -583,7 +593,7 @@ def main() -> None:
     params = {
         "analysis": "within-passive TFR magnitude decoding",
         "basepath": str(BASE_PATH),
-        "subject_source": str(BEHAV_EXCLUSIONS_CSV) if not args.subjects else "explicit --subjects",
+        "subject_source": str(PARTICIPANTS_TSV) if not args.subjects else "explicit --subjects",
         "subjects": subjects,
         "n_subjects": len(subjects),
         "attributes": ATTRIBUTES,
