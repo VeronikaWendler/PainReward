@@ -16,7 +16,13 @@ def cli():
     p.add_argument('--n-jobs',type=int,default=max(1,int(os.getenv('SLURM_CPUS_PER_TASK','1')))); return p.parse_args()
 
 def rawp(s): return SOURCE/'derivatives'/s/'eeg'/f'{s}_decision_cleaned-raw.fif'
-def erpp(s): return SOURCE/'derivatives'/s/'eeg'/'erps_decision'/f'{s}_decision_cues_singletrials-epo.fif'
+def eventsp(s):
+    canon=SOURCE/s/'eeg'/f'{s}_task-decision_events.tsv'
+    if canon.exists(): return canon
+    hits=sorted((SOURCE/s/'eeg').glob(f'*task-decision*events.tsv'))
+    if len(hits)!=1:
+        raise FileNotFoundError(f'{s}: expected exactly one decision events TSV, got {hits}')
+    return hits[0]
 def behp(s): return SOURCE/s/'eeg'/f'{s}_task-decision_beh.tsv'
 def refp(s): return BASE/'derivatives'/s/'eeg'/'tfr'/f'{s}_passive_cue_params.json'
 def outd(s): return BASE/'derivatives'/s/'eeg'/'tfr_decision'
@@ -54,18 +60,78 @@ def load_beh(s):
     out=df[['trialsnum','painlevel','moneylevel','block','rt','accepted']].copy(); out.attrs['rtcol']=rtcol; return out
 
 def load_meta(s):
-    ep=mne.read_epochs(str(erpp(s)),preload=False,verbose='ERROR')
-    if ep.metadata is None: raise RuntimeError(f'{s}: no ERP metadata')
-    md=ep.metadata.reset_index(drop=True).copy()
-    for c in ['trialsnum','sample','badtrial']:
-        if c not in md: raise KeyError(f'{s}: ERP metadata missing {c}')
-        md[c]=pd.to_numeric(md[c],errors='coerce')
-    if md[['trialsnum','sample','badtrial']].isna().any().any(): raise RuntimeError(f'{s}: bad ERP metadata')
-    md['trialsnum']=md['trialsnum'].astype(int); md['sample']=md['sample'].astype(int); md['badtrial']=md['badtrial'].astype(int)
-    if len(md)!=125 or md['trialsnum'].duplicated().any(): raise RuntimeError(f'{s}: malformed ERP trial identity')
-    beh=load_beh(s); rtcol=beh.attrs['rtcol']; z=md.merge(beh,on='trialsnum',how='left',validate='1:1')
-    if z[['painlevel','moneylevel','block']].isna().any().any(): raise RuntimeError(f'{s}: behavior merge failed')
-    z['invalid_rt']=(~np.isfinite(pd.to_numeric(z['rt'],errors='coerce').to_numpy(float))).astype(int); z.attrs['rtcol']=rtcol; return z
+    """
+    Reconstruct the decision-cue metadata directly from the cleaned raw,
+    decision events TSV and behaviour TSV.
+
+    This deliberately mirrors eeg/04_eeg_erp_prep.py for the pieces the TFR
+    pipeline actually needs:
+      - cue event = off+
+      - chronological trialsnum = 1..125
+      - exact event sample from events.tsv
+      - badtrial from a 150-uV peak-to-peak rejection rule on the ERP-style
+        -0.2..1.5-s cue epoch after a 30-Hz low-pass and -0.2..0 baseline
+
+    No decision ERP FIF is required.
+    """
+    evp=eventsp(s)
+    evdf=pd.read_csv(evp,sep='\t')
+    if 'trial_type' not in evdf or 'sample' not in evdf:
+        raise KeyError(f'{s}: decision events TSV needs trial_type and sample')
+    cue=evdf[evdf['trial_type'].astype(str)=='off+'].copy()
+    cue=cue.sort_values('sample').reset_index(drop=True)
+    if len(cue)!=125:
+        raise RuntimeError(f'{s}: expected 125 off+ decision cues, got {len(cue)}')
+    cue['sample']=pd.to_numeric(cue['sample'],errors='coerce')
+    if cue['sample'].isna().any():
+        raise RuntimeError(f'{s}: nonnumeric off+ sample values')
+    cue['sample']=cue['sample'].astype(int)
+
+    md=pd.DataFrame({
+        'trialsnum':np.arange(1,126,dtype=int),
+        'sample':cue['sample'].to_numpy(int),
+    })
+
+    # Recreate the ERP-prep badtrial flag from the cleaned decision raw.
+    rp=rawp(s)
+    if not rp.exists():
+        raise FileNotFoundError(rp)
+    raw_qc=mne.io.read_raw_fif(str(rp),preload=True,verbose='ERROR')
+    raw_qc.drop_channels([c for c in DROP if c in raw_qc.ch_names])
+    raw_qc.pick('eeg',exclude=[])
+    raw_qc.filter(l_freq=None,h_freq=30.,method='fir',verbose='ERROR')
+
+    # Use unique event IDs exactly as the ERP-prep single-trial construction did.
+    ev=np.column_stack([
+        md['sample'].to_numpy(int),
+        np.zeros(125,dtype=int),
+        np.arange(1,126,dtype=int),
+    ])
+    event_id={f'trial_{i:03d}':i for i in range(1,126)}
+    qc_ep=mne.Epochs(
+        raw_qc,ev,event_id=event_id,
+        tmin=-.2,tmax=1.5,baseline=(-.2,0),
+        metadata=md.copy(),preload=True,verbose='ERROR'
+    )
+    if len(qc_ep)!=125:
+        raise RuntimeError(
+            f'{s}: ERP-style QC epoching retained {len(qc_ep)}/125 trials; '
+            'inspect raw annotations/events before continuing'
+        )
+    tmp=qc_ep.copy().drop_bad(reject=dict(eeg=150e-6))
+    bad_flags=np.asarray([1 if len(x)>0 else 0 for x in tmp.drop_log],dtype=int)
+    if len(bad_flags)!=125:
+        raise RuntimeError(f'{s}: badtrial flag length {len(bad_flags)} != 125')
+    md['badtrial']=bad_flags
+
+    beh=load_beh(s)
+    rtcol=beh.attrs['rtcol']
+    z=md.merge(beh,on='trialsnum',how='left',validate='1:1')
+    if z[['painlevel','moneylevel','block']].isna().any().any():
+        raise RuntimeError(f'{s}: behavior merge failed')
+    z['invalid_rt']=(~np.isfinite(pd.to_numeric(z['rt'],errors='coerce').to_numpy(float))).astype(int)
+    z.attrs['rtcol']=rtcol
+    return z
 
 def read_ref(s):
     with open(refp(s),'r',encoding='utf-8') as f: q=json.load(f)
@@ -111,6 +177,6 @@ def main():
         del pw,lp,norm
     atomic(P['power'],final); atomic(P['times'],ctr.astype(float)); atomic(P['freqs'],freqs.astype(float)); good.to_csv(P['meta'],index=False)
     P['channels'].write_text(json.dumps(ep.ch_names,indent=2))
-    pars={'passive_parameter_reference':str(refp(s)),'rt_source_column':rtcol,'working_epoch_s':q['working_epoch_s'],'epoch_resample_hz':q['epoch_resample_hz'],'frequencies_hz':q['frequencies_hz'],'n_cycles_rule':'n_cycles = frequency * 0.5','tfr_decim':q['tfr_decim'],'baseline_s':q['baseline_s'],'saved_time_range_s':q['saved_time_range_s'],'time_bin_s':q['time_bin_s'],'data_shape_order':['trial','channel','frequency','time']}; P['params'].write_text(json.dumps(pars,indent=2))
+    pars={'passive_parameter_reference':str(refp(s)),'rt_source_column':rtcol,'working_epoch_s':q['working_epoch_s'],'epoch_resample_hz':q['epoch_resample_hz'],'frequencies_hz':q['frequencies_hz'],'n_cycles_rule':'n_cycles = frequency * 0.5','tfr_decim':q['tfr_decim'],'baseline_s':q['baseline_s'],'saved_time_range_s':q['saved_time_range_s'],'time_bin_s':q['time_bin_s'],'metadata_source':'decision events.tsv + decision behaviour.tsv; badtrial reconstructed with ERP-prep rule','badtrial_rule':'30-Hz LP; cue epoch -0.2..1.5 s; baseline -0.2..0; EEG reject 150e-6','data_shape_order':['trial','channel','frequency','time']}; P['params'].write_text(json.dumps(pars,indent=2))
     sm={'participant':s,'n_tfr_trials':len(good),'n_badtrial':int((allmd.badtrial==1).sum()),'n_invalid_rt':int(allmd.invalid_rt.sum()),'rt_min_s':float(good.rt.min()),'rt_p05_s':float(good.rt.quantile(.05)),'rt_median_s':float(good.rt.median()),'rt_p95_s':float(good.rt.quantile(.95))}; P['summary'].write_text(json.dumps(sm,indent=2)); print(f'[{s}] DONE',flush=True)
 if __name__=='__main__': main()
