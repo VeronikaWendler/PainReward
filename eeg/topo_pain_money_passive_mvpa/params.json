@@ -1,0 +1,10 @@
+{
+  "analysis": "Haufe activation patterns for completed passive TFR MVPA",
+  "formula": "cov(X_original, model_output)/var(model_output)",
+  "training_only": true,
+  "folds": "leave-one-block-out",
+  "group_scaling": "RMS normalize each participant ROI map across channels",
+  "topography_inference": "none; descriptive follow-up",
+  "roi_reconstruction_permutations": 5000,
+  "seed": 23
+}
