@@ -22,7 +22,7 @@ module purge
 module load bb-singularity-conf/live
 
 mapfile -t SUBJECTS < <(
-    find "$RUN_ROOT" \
+    find -L "$RUN_ROOT" \
         -maxdepth 1 \
         -mindepth 1 \
         -type d \
@@ -34,7 +34,7 @@ mapfile -t SUBJECTS < <(
 N=${#SUBJECTS[@]}
 
 if (( N == 0 )); then
-    echo "ERROR: no sub-* directories found under $RUN_ROOT" >&2
+    echo "ERROR: no sub-* participants found under $RUN_ROOT" >&2
     exit 1
 fi
 
