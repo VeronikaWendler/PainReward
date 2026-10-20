@@ -42,7 +42,7 @@ CANDIDATE_TMAX_S = 0.000
 PRIMARY_MIN_TRIALS = 30
 PRIMARY_MIN_UNIQUE_LEVELS = 4
 PRIMARY_MIN_BLOCKS = 4
-PRIMARY_MIN_GROUP_PARTICIPANTS = 40
+PRIMARY_MIN_GROUP_PARTICIPANTS = 48
 
 MOTOR_MIN_TRIALS = 20
 MOTOR_MIN_UNIQUE_LEVELS = 3
@@ -84,40 +84,212 @@ def load_participant_list() -> List[str]:
     return participants
 
 
+def decision_behavior_path(participant: str) -> Path:
+    return (
+        BASE_PATH
+        / participant
+        / "eeg"
+        / f"{participant}_task-decision_beh.tsv"
+    )
+
+
 def load_response_metadata(participant: str) -> pd.DataFrame:
-    metadata = pd.read_csv(response_tfr_paths(participant)["metadata"])
+    """
+    Load response-TFR metadata and add the original physical response key.
+
+    Important:
+    the TFR power array and metadata must remain row-aligned. Therefore the
+    single anomalous `resm` row is not physically dropped here. Instead we
+    create `valid_response_analysis`, and all response-locked trial masks
+    exclude that row.
+
+    Behavior-only diagnostics established:
+        res+ = accepted outcome
+        res- = rejected outcome
+        resm = one anomalous near-deadline trial
+
+    They also showed that acceptance does NOT fix physical motor key:
+    accepted trials can be made with either `m` or `n`.
+    """
+    metadata = pd.read_csv(
+        response_tfr_paths(participant)["metadata"]
+    )
+
     required = [
-        "trialsnum", "painlevel", "moneylevel", "block",
-        "behavioral_rt_s", "event_rt_s", "response_event_type",
-        "cue_time_relative_to_response_s", "accepted",
+        "trialsnum",
+        "painlevel",
+        "moneylevel",
+        "block",
+        "behavioral_rt_s",
+        "event_rt_s",
+        "response_event_type",
+        "cue_time_relative_to_response_s",
+        "accepted",
     ]
-    missing = [c for c in required if c not in metadata.columns]
+
+    missing = [
+        column
+        for column in required
+        if column not in metadata.columns
+    ]
+
     if missing:
-        raise KeyError(f"{participant}: response metadata missing {missing}")
+        raise KeyError(
+            f"{participant}: response metadata missing {missing}"
+        )
 
-    metadata = metadata.copy()
-    numeric = [
-        "trialsnum", "painlevel", "moneylevel", "block",
-        "behavioral_rt_s", "event_rt_s", "cue_time_relative_to_response_s", "accepted",
+    behavior_path = decision_behavior_path(
+        participant
+    )
+
+    if not behavior_path.exists():
+        raise FileNotFoundError(
+            behavior_path
+        )
+
+    behavior = pd.read_csv(
+        behavior_path,
+        sep="\t",
+    )
+
+    behavior = (
+        behavior[
+            ~behavior["fixcross.started"].isna()
+        ]
+        .copy()
+        .reset_index(drop=True)
+    )
+
+    behavior["trialsnum"] = np.arange(
+        1,
+        len(behavior) + 1,
+        dtype=int,
+    )
+
+    behavior_required = [
+        "trialsnum",
+        "choice_resp.keys",
+        "acceptkey",
+        "acceptside",
     ]
-    for column in numeric:
-        metadata[column] = pd.to_numeric(metadata[column], errors="coerce")
-    if not np.isfinite(metadata[numeric].to_numpy(float)).all():
-        raise RuntimeError(f"{participant}: non-finite required metadata")
 
-    accepted_values = set(metadata["accepted"].astype(int).unique().tolist())
-    if not accepted_values.issubset({0, 1}):
-        raise RuntimeError(f"{participant}: accepted not binary: {accepted_values}")
+    behavior_missing = [
+        column
+        for column in behavior_required
+        if column not in behavior.columns
+    ]
+
+    if behavior_missing:
+        raise KeyError(
+            f"{participant}: behavior file missing {behavior_missing}"
+        )
+
+    metadata = metadata.merge(
+        behavior[behavior_required],
+        on="trialsnum",
+        how="left",
+        validate="one_to_one",
+    )
+
+    metadata = metadata.rename(
+        columns={
+            "choice_resp.keys": "physical_response_key",
+        }
+    )
+
+    numeric = [
+        "trialsnum",
+        "painlevel",
+        "moneylevel",
+        "block",
+        "behavioral_rt_s",
+        "event_rt_s",
+        "cue_time_relative_to_response_s",
+        "accepted",
+    ]
+
+    for column in numeric:
+        metadata[column] = pd.to_numeric(
+            metadata[column],
+            errors="coerce",
+        )
+
+    if not np.isfinite(
+        metadata[numeric].to_numpy(float)
+    ).all():
+        raise RuntimeError(
+            f"{participant}: non-finite required metadata"
+        )
+
     metadata["accepted"] = metadata["accepted"].astype(int)
     metadata["block"] = metadata["block"].astype(int)
-    metadata["response_event_type"] = metadata["response_event_type"].astype(str)
+    metadata["response_event_type"] = (
+        metadata["response_event_type"].astype(str)
+    )
+    metadata["physical_response_key"] = (
+        metadata["physical_response_key"].astype(str)
+    )
 
-    timing_error = np.max(np.abs(
-        metadata["cue_time_relative_to_response_s"].to_numpy(float)
-        + metadata["event_rt_s"].to_numpy(float)
-    ))
+    # Genuine button-response trials for the response-locked analysis.
+    metadata["valid_response_analysis"] = (
+        metadata["response_event_type"].isin(["res+", "res-"])
+    )
+
+    valid_rows = metadata["valid_response_analysis"]
+
+    if not metadata.loc[
+        valid_rows,
+        "physical_response_key",
+    ].isin(["m", "n"]).all():
+        bad = metadata.loc[
+            valid_rows
+            & ~metadata["physical_response_key"].isin(["m", "n"]),
+            [
+                "trialsnum",
+                "response_event_type",
+                "physical_response_key",
+            ],
+        ]
+        raise RuntimeError(
+            f"{participant}: unexpected physical keys on valid responses:\n{bad}"
+        )
+
+    event_implied_acceptance = (
+        metadata.loc[
+            valid_rows,
+            "response_event_type",
+        ]
+        == "res+"
+    ).astype(int)
+
+    if not np.array_equal(
+        event_implied_acceptance.to_numpy(int),
+        metadata.loc[
+            valid_rows,
+            "accepted",
+        ].to_numpy(int),
+    ):
+        raise RuntimeError(
+            f"{participant}: res+/res- disagrees with accepted flag"
+        )
+
+    timing_error = np.max(
+        np.abs(
+            metadata[
+                "cue_time_relative_to_response_s"
+            ].to_numpy(float)
+            + metadata[
+                "event_rt_s"
+            ].to_numpy(float)
+        )
+    )
+
     if timing_error > 1e-9:
-        raise RuntimeError(f"{participant}: cue/response timing identity failed: {timing_error:.3e}")
+        raise RuntimeError(
+            f"{participant}: cue/response timing identity failed: "
+            f"{timing_error:.3e}"
+        )
+
     return metadata
 
 
@@ -130,9 +302,34 @@ def candidate_pre_response_mask(times: np.ndarray) -> np.ndarray:
     return (times >= CANDIDATE_TMIN_S - 1e-12) & (times <= CANDIDATE_TMAX_S + 1e-12)
 
 
-def cue_has_occurred_mask(metadata: pd.DataFrame, response_relative_time_s: float) -> np.ndarray:
-    """Current-trial availability: event_RT + response-relative centre >= 0."""
-    return metadata["event_rt_s"].to_numpy(float) + float(response_relative_time_s) >= -1e-12
+def cue_has_occurred_mask(
+    metadata: pd.DataFrame,
+    response_relative_time_s: float,
+) -> np.ndarray:
+    """
+    Current-trial availability plus valid-response filtering.
+
+    A trial contributes at response-relative time tau only if:
+        event_RT + tau >= 0
+
+    The single anomalous `resm` trial is excluded through
+    `valid_response_analysis`.
+    """
+    mask = (
+        metadata["event_rt_s"].to_numpy(float)
+        + float(response_relative_time_s)
+        >= -1e-12
+    )
+
+    if "valid_response_analysis" in metadata.columns:
+        mask = (
+            mask
+            & metadata[
+                "valid_response_analysis"
+            ].to_numpy(bool)
+        )
+
+    return mask
 
 
 def trial_support_summary(

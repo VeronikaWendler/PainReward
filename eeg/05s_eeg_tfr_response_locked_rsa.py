@@ -128,7 +128,7 @@ def neural_rdm_from_features(features: np.ndarray) -> np.ndarray:
 
 def model_rdm_design(
     metadata: pd.DataFrame,
-    include_response_event_mismatch: bool,
+    include_physical_key_mismatch: bool,
 ) -> tuple[list[str], np.ndarray]:
     pain = metadata["painlevel"].to_numpy(float)
     money = metadata["moneylevel"].to_numpy(float)
@@ -146,6 +146,7 @@ def model_rdm_design(
         "log_rt",
         "choice",
     ]
+
     predictor_vectors = [
         pdist(pain[:, None], metric="cityblock"),
         pdist(money[:, None], metric="cityblock"),
@@ -153,14 +154,21 @@ def model_rdm_design(
         pdist(accepted[:, None], metric="hamming"),
     ]
 
-    if include_response_event_mismatch:
-        response_event_codes, _ = pd.factorize(
-            metadata["response_event_type"].astype(str),
+    if include_physical_key_mismatch:
+        key_codes, _ = pd.factorize(
+            metadata["physical_response_key"].astype(str),
             sort=True,
         )
-        predictor_names.append("response_event")
+
+        predictor_names.append(
+            "physical_key"
+        )
+
         predictor_vectors.append(
-            pdist(response_event_codes[:, None], metric="hamming")
+            pdist(
+                key_codes[:, None],
+                metric="hamming",
+            )
         )
 
     standardized_predictors = [
@@ -177,8 +185,8 @@ def model_rdm_design(
 
     if np.linalg.matrix_rank(design_matrix) < design_matrix.shape[1]:
         raise RuntimeError(
-            "RSA model-RDM design is rank deficient. Inspect the 05q "
-            "accepted/response-event mapping rather than silently dropping a control."
+            "RSA model-RDM design is rank deficient. Inspect pain/money/RT/"
+            "choice/physical-key structure rather than silently dropping a control."
         )
 
     return predictor_names, design_matrix
@@ -187,7 +195,7 @@ def model_rdm_design(
 def rsa_coefficients(
     features: np.ndarray,
     metadata: pd.DataFrame,
-    include_response_event_mismatch: bool,
+    include_physical_key_mismatch: bool,
 ) -> dict[str, float]:
     neural_rdm = rank_standardize(
         neural_rdm_from_features(features)
@@ -195,7 +203,7 @@ def rsa_coefficients(
 
     predictor_names, design_matrix = model_rdm_design(
         metadata=metadata,
-        include_response_event_mismatch=include_response_event_mismatch,
+        include_physical_key_mismatch=include_physical_key_mismatch,
     )
 
     coefficients, *_ = np.linalg.lstsq(
@@ -249,8 +257,8 @@ def process_one_participant(participant: str, plan: dict, overwrite_scores: bool
     if len(formal_times) == 0:
         raise RuntimeError(f"{participant}: no RSA bins in formal window")
 
-    include_response_event_mismatch = bool(
-        plan["rsa_controls"]["include_response_event_mismatch"]
+    include_physical_key_mismatch = bool(
+        plan["rsa_controls"]["include_physical_key_mismatch"]
     )
 
     n_frequencies = len(frequencies)
@@ -286,7 +294,7 @@ def process_one_participant(participant: str, plan: dict, overwrite_scores: bool
             coefficients = rsa_coefficients(
                 features=features,
                 metadata=current_metadata,
-                include_response_event_mismatch=include_response_event_mismatch,
+                include_physical_key_mismatch=include_physical_key_mismatch,
             )
             frequency_betas[0, frequency_index, local_time_index] = coefficients["pain"]
             frequency_betas[1, frequency_index, local_time_index] = coefficients["money"]
@@ -300,7 +308,7 @@ def process_one_participant(participant: str, plan: dict, overwrite_scores: bool
             coefficients = rsa_coefficients(
                 features=features,
                 metadata=current_metadata,
-                include_response_event_mismatch=include_response_event_mismatch,
+                include_physical_key_mismatch=include_physical_key_mismatch,
             )
             band_betas[0, band_index, local_time_index] = coefficients["pain"]
             band_betas[1, band_index, local_time_index] = coefficients["money"]
@@ -319,7 +327,7 @@ def process_one_participant(participant: str, plan: dict, overwrite_scores: bool
         frequency_betas=frequency_betas,
         band_betas=band_betas,
         trial_counts=trial_counts,
-        include_response_event_mismatch=np.asarray(include_response_event_mismatch),
+        include_physical_key_mismatch=np.asarray(include_physical_key_mismatch),
     )
 
     print(
@@ -416,8 +424,8 @@ def run_group_analysis(plan: dict, n_permutations: int, n_jobs: int) -> None:
             "absolute log-RT distance",
             "accepted/rejected mismatch",
         ] + (
-            ["response-event mismatch"]
-            if plan["rsa_controls"]["include_response_event_mismatch"]
+            ["physical-response-key mismatch"]
+            if plan["rsa_controls"]["include_physical_key_mismatch"]
             else []
         ),
         "rdm_transform": "rank transform then z-standardize; simultaneous OLS",
@@ -460,8 +468,8 @@ def main() -> None:
     print(
         "Controls: other attribute + logRT distance + choice mismatch"
         + (
-            " + response-event mismatch"
-            if plan["rsa_controls"]["include_response_event_mismatch"]
+            " + physical-key mismatch"
+            if plan["rsa_controls"]["include_physical_key_mismatch"]
             else ""
         ),
         flush=True,

@@ -68,21 +68,25 @@ def main() -> None:
             if not np.array_equal(frequencies, reference_frequencies):
                 raise RuntimeError(f"{participant}: frequency grid differs")
 
+        valid_response_metadata = metadata.loc[
+            metadata["valid_response_analysis"]
+        ].copy()
+
         participant_summary_rows.append({
             "participant": participant,
-            "n_trials": int(len(metadata)),
-            "accept_n": int((metadata["accepted"] == 1).sum()),
-            "reject_n": int((metadata["accepted"] == 0).sum()),
-            "accept_rate": float(metadata["accepted"].mean()),
-            "event_rt_min_s": float(metadata["event_rt_s"].min()),
-            "event_rt_p05_s": float(metadata["event_rt_s"].quantile(0.05)),
-            "event_rt_median_s": float(metadata["event_rt_s"].median()),
-            "event_rt_p95_s": float(metadata["event_rt_s"].quantile(0.95)),
+            "n_trials": int(len(valid_response_metadata)),
+            "accept_n": int((valid_response_metadata["accepted"] == 1).sum()),
+            "reject_n": int((valid_response_metadata["accepted"] == 0).sum()),
+            "accept_rate": float(valid_response_metadata["accepted"].mean()),
+            "event_rt_min_s": float(valid_response_metadata["event_rt_s"].min()),
+            "event_rt_p05_s": float(valid_response_metadata["event_rt_s"].quantile(0.05)),
+            "event_rt_median_s": float(valid_response_metadata["event_rt_s"].median()),
+            "event_rt_p95_s": float(valid_response_metadata["event_rt_s"].quantile(0.95)),
         })
 
         mapping = pd.crosstab(
-            metadata["accepted"],
-            metadata["response_event_type"],
+            valid_response_metadata["accepted"],
+            valid_response_metadata["response_event_type"],
             dropna=False,
         )
         for accepted_value in mapping.index:
@@ -145,7 +149,17 @@ def main() -> None:
     # What does response identity mean in this dataset?
     # ------------------------------------------------------------------
     all_metadata = pd.concat(
-        [metadata_by_participant[p].assign(participant=p) for p in participants],
+        [
+            metadata_by_participant[p]
+            .loc[
+                metadata_by_participant[p][
+                    "valid_response_analysis"
+                ]
+            ]
+            .copy()
+            .assign(participant=p)
+            for p in participants
+        ],
         ignore_index=True,
     )
 
@@ -163,8 +177,9 @@ def main() -> None:
         motor_value = 1
         motor_event = accept_events[0]
         motor_rationale = (
-            "accepted==1 maps to a single EEG response-event label across the retained data; "
-            "accepted-only therefore fixes both decision outcome and response-event identity."
+            "accepted==1 fixes decision outcome (res+) but NOT physical motor key. "
+            "Accepted trials can use either m or n because accept side/key varies. "
+            "This is therefore a choice-outcome specificity analysis."
         )
     else:
         event_counts = Counter(all_metadata["response_event_type"].astype(str))
@@ -235,7 +250,11 @@ def main() -> None:
     # ------------------------------------------------------------------
     accept_reject_rows = []
     for participant in participants:
-        metadata = metadata_by_participant[participant]
+        metadata = metadata_by_participant[participant].loc[
+            metadata_by_participant[participant][
+                "valid_response_analysis"
+            ]
+        ]
         for accepted_value, label in [(1, "accepted"), (0, "rejected")]:
             subset = metadata.loc[metadata["accepted"] == accepted_value]
             accept_reject_rows.append({
@@ -252,14 +271,33 @@ def main() -> None:
             })
 
     mapping_unique = (
-        all_metadata[["accepted", "response_event_type"]]
+        all_metadata[
+            [
+                "accepted",
+                "response_event_type",
+                "physical_response_key",
+            ]
+        ]
         .drop_duplicates()
-        .sort_values(["accepted", "response_event_type"])
+        .sort_values(
+            [
+                "accepted",
+                "response_event_type",
+                "physical_response_key",
+            ]
+        )
     )
-    include_response_event_rdm = bool(
-        len(mapping_unique) > 2
-        or all_metadata["response_event_type"].nunique() > all_metadata["accepted"].nunique()
+
+    # After excluding resm, res+/res- is redundant with accepted/rejected.
+    # Physical key m/n is not redundant and is entered separately in RSA.
+    include_response_event_rdm = False
+    include_physical_key_rdm = bool(
+        all_metadata[
+            "physical_response_key"
+        ].nunique()
+        > 1
     )
+
 
     # Save diagnostics.
     participant_summary = pd.DataFrame(participant_summary_rows)
@@ -322,11 +360,15 @@ def main() -> None:
             "money_distance": True,
             "log_rt_distance": True,
             "choice_mismatch_accepted": True,
-            "include_response_event_mismatch": include_response_event_rdm,
+            "include_response_event_mismatch": False,
+            "include_physical_key_mismatch": include_physical_key_rdm,
         },
         "accept_response_event_labels": accept_events,
         "reject_response_event_labels": reject_events,
         "response_event_vs_accepted_unique_pairs": mapping_unique.to_dict(orient="records"),
+        "physical_response_key_counts": (
+            all_metadata["physical_response_key"].value_counts().to_dict()
+        ),
     }
 
     with open(AUDIT_OUTPUT_ROOT / "response_locked_design_plan.json", "w", encoding="utf-8") as handle:
@@ -350,7 +392,7 @@ def main() -> None:
     print(f"  motor-control definition: {motor_kind} = {motor_value}", flush=True)
     print(f"  rationale: {motor_rationale}", flush=True)
 
-    print("\nMOTOR/CHOICE-SPECIFICITY PLAN", flush=True)
+    print("\nCHOICE-OUTCOME SPECIFICITY PLAN", flush=True)
     print(f"  enabled: {motor_enabled}", flush=True)
     if motor_enabled:
         print(f"  formal window: {motor_tmin:.3f}..{motor_tmax:.3f} s", flush=True)
@@ -358,7 +400,28 @@ def main() -> None:
 
     print("\nOVERALL ACCEPTANCE", flush=True)
     print(participant_summary[["accept_rate", "accept_n", "reject_n"]].describe().to_string(), flush=True)
-    print(f"\nRSA response-event mismatch control included: {include_response_event_rdm}", flush=True)
+    print(
+        "\nPHYSICAL RESPONSE KEY COUNTS",
+        flush=True,
+    )
+    print(
+        all_metadata[
+            "physical_response_key"
+        ].value_counts().to_string(),
+        flush=True,
+    )
+    print(
+        "\nRSA controls: choice outcome + physical motor key",
+        flush=True,
+    )
+    print(
+        f"  response-event mismatch included: {include_response_event_rdm}",
+        flush=True,
+    )
+    print(
+        f"  physical-key mismatch included: {include_physical_key_rdm}",
+        flush=True,
+    )
     print(f"\nOutputs: {AUDIT_OUTPUT_ROOT}", flush=True)
 
 
