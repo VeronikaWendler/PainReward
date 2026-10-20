@@ -96,16 +96,57 @@ def participant_score_path(participant: str) -> Path:
     return PARTICIPANT_SCORE_DIR / f"{participant}_response_rsa.npz"
 
 
-def rank_standardize(values: np.ndarray) -> np.ndarray:
-    values = np.asarray(values, dtype=float)
-    ranked = stats.rankdata(values, method="average")
-    standard_deviation = ranked.std()
+def rank_standardize(
+    values: np.ndarray,
+    *,
+    variable_name: str,
+    allow_constant: bool,
+) -> np.ndarray | None:
+    """
+    Rank-transform and z-standardize one RDM vector.
+
+    Constant nuisance RDMs are expected occasionally in an early response-
+    locked subset. Example: if every currently available trial was accepted,
+    the accept/reject mismatch RDM is exactly zero.
+
+    A constant nuisance cannot explain neural dissimilarity and therefore does
+    not need to be included in that participant/time-point model.
+
+    Constant PAIN or MONEY RDMs are different: those would mean the target
+    attribute itself is not estimable and therefore remain a hard error.
+    """
+
+    values = np.asarray(
+        values,
+        dtype=float,
+    )
+
+    ranked = stats.rankdata(
+        values,
+        method="average",
+    )
+
+    standard_deviation = float(
+        ranked.std()
+    )
+
     if standard_deviation <= 1e-12:
-        raise RuntimeError("RDM vector has no variance")
-    return (ranked - ranked.mean()) / standard_deviation
+        if allow_constant:
+            return None
+
+        raise RuntimeError(
+            f"Required model RDM '{variable_name}' has no variance."
+        )
+
+    return (
+        ranked
+        - ranked.mean()
+    ) / standard_deviation
 
 
-def neural_rdm_from_features(features: np.ndarray) -> np.ndarray:
+def neural_rdm_from_features(
+    features: np.ndarray,
+) -> np.ndarray:
     """
     Euclidean trial-pattern dissimilarity after channel-wise standardization.
 
@@ -114,97 +155,380 @@ def neural_rdm_from_features(features: np.ndarray) -> np.ndarray:
     and amplitude information.
     """
 
-    features = np.asarray(features, dtype=float)
-    channel_mean = features.mean(axis=0, keepdims=True)
-    channel_sd = features.std(axis=0, keepdims=True)
-    channel_sd[channel_sd <= 1e-12] = 1.0
-    standardized_features = (features - channel_mean) / channel_sd
+    features = np.asarray(
+        features,
+        dtype=float,
+    )
 
-    return pdist(
-        standardized_features,
-        metric="euclidean",
-    ) / np.sqrt(standardized_features.shape[1])
+    channel_mean = features.mean(
+        axis=0,
+        keepdims=True,
+    )
+
+    channel_sd = features.std(
+        axis=0,
+        keepdims=True,
+    )
+
+    channel_sd[
+        channel_sd
+        <= 1e-12
+    ] = 1.0
+
+    standardized_features = (
+        features
+        - channel_mean
+    ) / channel_sd
+
+    return (
+        pdist(
+            standardized_features,
+            metric="euclidean",
+        )
+        / np.sqrt(
+            standardized_features.shape[
+                1
+            ]
+        )
+    )
 
 
 def model_rdm_design(
     metadata: pd.DataFrame,
     include_physical_key_mismatch: bool,
-) -> tuple[list[str], np.ndarray]:
-    pain = metadata["painlevel"].to_numpy(float)
-    money = metadata["moneylevel"].to_numpy(float)
-    reaction_time = metadata["behavioral_rt_s"].to_numpy(float)
-    accepted = metadata["accepted"].to_numpy(int)
+) -> tuple[
+    list[str],
+    np.ndarray,
+    dict[str, str],
+]:
+    """
+    Construct the multiple-regression RSA design for one participant/time point.
 
-    if np.any(reaction_time <= 0):
-        raise RuntimeError("Non-positive RT encountered in RSA")
+    Pain and money are inferential targets and must always be estimable.
 
-    log_rt = np.log(reaction_time)
+    log(RT), choice outcome, and physical key are nuisance controls. A nuisance
+    RDM can legitimately have no variance in an early response-locked subset
+    (for example, all currently available trials may be accepted). Such a
+    predictor cannot confound the neural geometry at that time and is omitted.
+
+    If a NON-CONSTANT nuisance is exactly redundant with nuisance predictors
+    already in the model, it is also omitted.
+
+    If a non-constant nuisance becomes linearly dependent only because of the
+    pain/money target RDMs, the model is not capable of separating that nuisance
+    from the target effect. That remains a hard error rather than silently
+    claiming a unique pain/money effect.
+    """
+
+    pain = metadata[
+        "painlevel"
+    ].to_numpy(
+        float
+    )
+
+    money = metadata[
+        "moneylevel"
+    ].to_numpy(
+        float
+    )
+
+    reaction_time = metadata[
+        "behavioral_rt_s"
+    ].to_numpy(
+        float
+    )
+
+    accepted = metadata[
+        "accepted"
+    ].to_numpy(
+        int
+    )
+
+    if np.any(
+        reaction_time
+        <= 0
+    ):
+        raise RuntimeError(
+            "Non-positive RT encountered in RSA."
+        )
+
+    log_rt = np.log(
+        reaction_time
+    )
+
+    raw_vectors = {
+        "pain":
+            pdist(
+                pain[
+                    :,
+                    None,
+                ],
+                metric="cityblock",
+            ),
+        "money":
+            pdist(
+                money[
+                    :,
+                    None,
+                ],
+                metric="cityblock",
+            ),
+        "log_rt":
+            pdist(
+                log_rt[
+                    :,
+                    None,
+                ],
+                metric="cityblock",
+            ),
+        "choice":
+            pdist(
+                accepted[
+                    :,
+                    None,
+                ],
+                metric="hamming",
+            ),
+    }
+
+    if include_physical_key_mismatch:
+        key_codes, _ = pd.factorize(
+            metadata[
+                "physical_response_key"
+            ].astype(
+                str
+            ),
+            sort=True,
+        )
+
+        raw_vectors[
+            "physical_key"
+        ] = pdist(
+            key_codes[
+                :,
+                None,
+            ],
+            metric="hamming",
+        )
+
+    # ------------------------------------------------------------------
+    # Inferential targets: pain and money must both be present and unique.
+    # ------------------------------------------------------------------
+
+    pain_vector = rank_standardize(
+        raw_vectors[
+            "pain"
+        ],
+        variable_name=
+            "pain",
+        allow_constant=
+            False,
+    )
+
+    money_vector = rank_standardize(
+        raw_vectors[
+            "money"
+        ],
+        variable_name=
+            "money",
+        allow_constant=
+            False,
+    )
+
+    number_of_pairs = len(
+        pain_vector
+    )
+
+    intercept = np.ones(
+        number_of_pairs,
+        dtype=float,
+    )
+
+    design_columns = [
+        intercept,
+        pain_vector,
+        money_vector,
+    ]
 
     predictor_names = [
         "pain",
         "money",
+    ]
+
+    target_design = np.column_stack(
+        design_columns
+    )
+
+    if np.linalg.matrix_rank(
+        target_design
+    ) < target_design.shape[
+        1
+    ]:
+        raise RuntimeError(
+            "Pain and money RDMs are not uniquely estimable in this "
+            "participant/time-point subset."
+        )
+
+    # A separate nuisance-only matrix lets us distinguish:
+    #   (a) nuisance redundancy with another nuisance -> safe to omit
+    # from
+    #   (b) nuisance dependence involving pain/money -> not identifiable.
+    nuisance_only_columns = [
+        intercept,
+    ]
+
+    omitted_nuisance_reasons: dict[
+        str,
+        str,
+    ] = {}
+
+    nuisance_names = [
         "log_rt",
         "choice",
     ]
 
-    predictor_vectors = [
-        pdist(pain[:, None], metric="cityblock"),
-        pdist(money[:, None], metric="cityblock"),
-        pdist(log_rt[:, None], metric="cityblock"),
-        pdist(accepted[:, None], metric="hamming"),
-    ]
-
     if include_physical_key_mismatch:
-        key_codes, _ = pd.factorize(
-            metadata["physical_response_key"].astype(str),
-            sort=True,
-        )
-
-        predictor_names.append(
+        nuisance_names.append(
             "physical_key"
         )
 
-        predictor_vectors.append(
-            pdist(
-                key_codes[:, None],
-                metric="hamming",
-            )
+    for nuisance_name in nuisance_names:
+        nuisance_vector = rank_standardize(
+            raw_vectors[
+                nuisance_name
+            ],
+            variable_name=
+                nuisance_name,
+            allow_constant=
+                True,
         )
 
-    standardized_predictors = [
-        rank_standardize(vector)
-        for vector in predictor_vectors
-    ]
+        if nuisance_vector is None:
+            omitted_nuisance_reasons[
+                nuisance_name
+            ] = "no_variance"
+            continue
+
+        current_design = np.column_stack(
+            design_columns
+        )
+
+        candidate_design = np.column_stack(
+            [
+                *design_columns,
+                nuisance_vector,
+            ]
+        )
+
+        if (
+            np.linalg.matrix_rank(
+                candidate_design
+            )
+            > np.linalg.matrix_rank(
+                current_design
+            )
+        ):
+            design_columns.append(
+                nuisance_vector
+            )
+
+            predictor_names.append(
+                nuisance_name
+            )
+
+            nuisance_only_columns.append(
+                nuisance_vector
+            )
+
+            continue
+
+        # The nuisance failed to add rank to the full model.
+        # Check whether it is simply redundant with nuisance structure
+        # already controlled for.
+        current_nuisance_only = np.column_stack(
+            nuisance_only_columns
+        )
+
+        candidate_nuisance_only = np.column_stack(
+            [
+                *nuisance_only_columns,
+                nuisance_vector,
+            ]
+        )
+
+        if (
+            np.linalg.matrix_rank(
+                candidate_nuisance_only
+            )
+            == np.linalg.matrix_rank(
+                current_nuisance_only
+            )
+        ):
+            omitted_nuisance_reasons[
+                nuisance_name
+            ] = "redundant_with_existing_nuisance"
+            continue
+
+        raise RuntimeError(
+            "A non-constant nuisance RDM ('"
+            + nuisance_name
+            + "') is linearly dependent on the pain/money target space "
+            "in this participant/time-point subset. The unique attribute "
+            "effect is therefore not identifiable."
+        )
 
     design_matrix = np.column_stack(
-        [
-            np.ones(len(standardized_predictors[0])),
-            *standardized_predictors,
-        ]
+        design_columns
     )
 
-    if np.linalg.matrix_rank(design_matrix) < design_matrix.shape[1]:
+    if np.linalg.matrix_rank(
+        design_matrix
+    ) < design_matrix.shape[
+        1
+    ]:
         raise RuntimeError(
-            "RSA model-RDM design is rank deficient. Inspect pain/money/RT/"
-            "choice/physical-key structure rather than silently dropping a control."
+            "Internal RSA design error: final model is rank deficient."
         )
 
-    return predictor_names, design_matrix
+    return (
+        predictor_names,
+        design_matrix,
+        omitted_nuisance_reasons,
+    )
 
 
 def rsa_coefficients(
     features: np.ndarray,
-    metadata: pd.DataFrame,
-    include_physical_key_mismatch: bool,
+    predictor_names: list[str],
+    design_matrix: np.ndarray,
 ) -> dict[str, float]:
+    """
+    Fit one neural RDM to an already-constructed model-RDM design.
+
+    The model design is constructed once per participant/time point and reused
+    across all frequencies and canonical bands. This is both faster and ensures
+    that every spectral feature at that time is evaluated with exactly the same
+    nuisance-control structure.
+    """
+
     neural_rdm = rank_standardize(
-        neural_rdm_from_features(features)
+        neural_rdm_from_features(
+            features
+        ),
+        variable_name=
+            "neural",
+        allow_constant=
+            False,
     )
 
-    predictor_names, design_matrix = model_rdm_design(
-        metadata=metadata,
-        include_physical_key_mismatch=include_physical_key_mismatch,
-    )
+    if len(
+        neural_rdm
+    ) != design_matrix.shape[
+        0
+    ]:
+        raise RuntimeError(
+            "Neural RDM and model-RDM design have different pair counts."
+        )
 
     coefficients, *_ = np.linalg.lstsq(
         design_matrix,
@@ -213,8 +537,19 @@ def rsa_coefficients(
     )
 
     return {
-        predictor_name: float(coefficients[predictor_index + 1])
-        for predictor_index, predictor_name in enumerate(predictor_names)
+        predictor_name:
+            float(
+                coefficients[
+                    predictor_index
+                    + 1
+                ]
+            )
+        for (
+            predictor_index,
+            predictor_name,
+        ) in enumerate(
+            predictor_names
+        )
     }
 
 
@@ -278,6 +613,27 @@ def process_one_participant(participant: str, plan: dict, overwrite_scores: bool
     )
     trial_counts = np.zeros(n_times, dtype=int)
 
+    # Nuisance controls can be locally non-estimable when their RDM is constant
+    # (e.g. all currently available trials have the same choice). These arrays
+    # make that completely transparent in the saved outputs.
+    rt_control_included = np.zeros(
+        n_times,
+        dtype=bool,
+    )
+    choice_control_included = np.zeros(
+        n_times,
+        dtype=bool,
+    )
+    physical_key_control_included = np.zeros(
+        n_times,
+        dtype=bool,
+    )
+    omitted_nuisance_summary = np.full(
+        n_times,
+        "",
+        dtype="<U256",
+    )
+
     for local_time_index, global_time_index in enumerate(formal_time_indices):
         response_time_s = float(times[global_time_index])
         trial_mask = cue_has_occurred_mask(metadata, response_time_s)
@@ -289,12 +645,39 @@ def process_one_participant(participant: str, plan: dict, overwrite_scores: bool
             dtype=float,
         )
 
+        (
+            predictor_names,
+            design_matrix,
+            omitted_nuisance_reasons,
+        ) = model_rdm_design(
+            metadata=current_metadata,
+            include_physical_key_mismatch=include_physical_key_mismatch,
+        )
+
+        rt_control_included[local_time_index] = (
+            "log_rt" in predictor_names
+        )
+        choice_control_included[local_time_index] = (
+            "choice" in predictor_names
+        )
+        physical_key_control_included[local_time_index] = (
+            "physical_key" in predictor_names
+        )
+
+        omitted_nuisance_summary[
+            local_time_index
+        ] = ";".join(
+            f"{name}:{reason}"
+            for name, reason
+            in omitted_nuisance_reasons.items()
+        )
+
         for frequency_index in range(n_frequencies):
             features = current_power[:, :, frequency_index]
             coefficients = rsa_coefficients(
                 features=features,
-                metadata=current_metadata,
-                include_physical_key_mismatch=include_physical_key_mismatch,
+                predictor_names=predictor_names,
+                design_matrix=design_matrix,
             )
             frequency_betas[0, frequency_index, local_time_index] = coefficients["pain"]
             frequency_betas[1, frequency_index, local_time_index] = coefficients["money"]
@@ -307,8 +690,8 @@ def process_one_participant(participant: str, plan: dict, overwrite_scores: bool
             )
             coefficients = rsa_coefficients(
                 features=features,
-                metadata=current_metadata,
-                include_physical_key_mismatch=include_physical_key_mismatch,
+                predictor_names=predictor_names,
+                design_matrix=design_matrix,
             )
             band_betas[0, band_index, local_time_index] = coefficients["pain"]
             band_betas[1, band_index, local_time_index] = coefficients["money"]
@@ -327,12 +710,23 @@ def process_one_participant(participant: str, plan: dict, overwrite_scores: bool
         frequency_betas=frequency_betas,
         band_betas=band_betas,
         trial_counts=trial_counts,
+        rt_control_included=rt_control_included,
+        choice_control_included=choice_control_included,
+        physical_key_control_included=physical_key_control_included,
+        omitted_nuisance_summary=omitted_nuisance_summary,
         include_physical_key_mismatch=np.asarray(include_physical_key_mismatch),
     )
 
     print(
         f"    {participant}: RSA saved; current-trial counts "
         f"{trial_counts.min()}..{trial_counts.max()}",
+        flush=True,
+    )
+    print(
+        f"        nuisance estimability across {n_times} time bins: "
+        f"RT={int(rt_control_included.sum())}/{n_times}, "
+        f"choice={int(choice_control_included.sum())}/{n_times}, "
+        f"physical_key={int(physical_key_control_included.sum())}/{n_times}",
         flush=True,
     )
 
@@ -411,6 +805,87 @@ def run_group_analysis(plan: dict, n_permutations: int, n_jobs: int) -> None:
         index=False,
     )
 
+    control_rows = []
+
+    for participant, result in zip(
+        participants,
+        participant_results,
+    ):
+        for time_index, time_point in enumerate(times):
+            control_rows.append(
+                {
+                    "participant":
+                        participant,
+                    "response_time_s":
+                        float(time_point),
+                    "rt_control_included":
+                        bool(
+                            result[
+                                "rt_control_included"
+                            ][time_index]
+                        ),
+                    "choice_control_included":
+                        bool(
+                            result[
+                                "choice_control_included"
+                            ][time_index]
+                        ),
+                    "physical_key_control_included":
+                        bool(
+                            result[
+                                "physical_key_control_included"
+                            ][time_index]
+                        ),
+                    "omitted_nuisance_summary":
+                        str(
+                            result[
+                                "omitted_nuisance_summary"
+                            ][time_index]
+                        ),
+                }
+            )
+
+    control_table = pd.DataFrame(
+        control_rows
+    )
+
+    control_table.to_csv(
+        RSA_OUTPUT_ROOT
+        / "nuisance_control_estimability_by_participant_time.csv",
+        index=False,
+    )
+
+    control_summary = (
+        control_table.groupby(
+            "response_time_s",
+            as_index=False,
+        )
+        .agg(
+            n_participants=(
+                "participant",
+                "size",
+            ),
+            n_with_rt_control=(
+                "rt_control_included",
+                "sum",
+            ),
+            n_with_choice_control=(
+                "choice_control_included",
+                "sum",
+            ),
+            n_with_physical_key_control=(
+                "physical_key_control_included",
+                "sum",
+            ),
+        )
+    )
+
+    control_summary.to_csv(
+        RSA_OUTPUT_ROOT
+        / "nuisance_control_estimability_by_time.csv",
+        index=False,
+    )
+
     params = {
         "analysis": "response-locked multiple-regression RSA",
         "design_plan": plan,
@@ -429,6 +904,12 @@ def run_group_analysis(plan: dict, n_permutations: int, n_jobs: int) -> None:
             else []
         ),
         "rdm_transform": "rank transform then z-standardize; simultaneous OLS",
+        "constant_nuisance_rule": (
+            "A nuisance RDM with no variance at a participant/time point is omitted "
+            "because it cannot explain neural dissimilarity there. Pain and money "
+            "must always have variance. Non-constant nuisance dependence involving "
+            "pain/money remains a hard error."
+        ),
         "group_targets": [
             "unique pain geometry coefficient",
             "unique money geometry coefficient",
