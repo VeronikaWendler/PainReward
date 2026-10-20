@@ -16,13 +16,11 @@ mkdir -p logs/sv_modeling
 module purge
 module load bb-singularity-conf/live
 
-PYMC_IMAGE="${IMAGE_PYMC:-$HOME/containers/pymc_5.26.sif}"
+PYMC_IMAGE="${IMAGE_PYMC:-/rds/projects/z/zhanglp-vwendler-core/containers/pymc_5.26.sif}"
+PYMC_PYTHON="/opt/conda/envs/pymc-dev/bin/python"
 
 if [[ ! -f "$PYMC_IMAGE" ]]; then
-    echo "ERROR: Modern PyMC image not found: $PYMC_IMAGE" >&2
-    echo "Create it first with:" >&2
-    echo "  mkdir -p \$HOME/containers" >&2
-    echo "  apptainer pull \$HOME/containers/pymc_5.26.sif docker://pymc/pymc:5.26" >&2
+    echo "ERROR: PyMC image not found: $PYMC_IMAGE" >&2
     exit 1
 fi
 
@@ -30,16 +28,21 @@ echo "============================================================"
 echo "OUT-OF-FOLD SUBJECTIVE-VALUE TARGET GENERATION"
 echo "SLURM job:    $SLURM_JOB_ID"
 echo "PyMC image:   $PYMC_IMAGE"
+echo "PyMC Python:  $PYMC_PYTHON"
 echo "============================================================"
 
 apptainer exec --cleanenv \
     "$PYMC_IMAGE" \
-    python -c '
+    "$PYMC_PYTHON" \
+    -c '
 import pymc as pm
 import arviz as az
+
 major = int(pm.__version__.split(".")[0])
+
 print("PyMC", pm.__version__)
 print("ArviZ", az.__version__)
+
 if major < 5:
     raise SystemExit("ERROR: this pipeline requires PyMC >= 5")
 '
@@ -58,7 +61,8 @@ apptainer exec --cleanenv \
     --env MKL_NUM_THREADS="1" \
     --env OPENBLAS_NUM_THREADS="1" \
     "$PYMC_IMAGE" \
-    python /workspace/behav/06d_generate_oof_subjective_value_targets.py \
+    "$PYMC_PYTHON" \
+    /workspace/behav/06d_generate_oof_subjective_value_targets.py \
         --draws 1500 \
         --tune 1500 \
         --chains 4 \
