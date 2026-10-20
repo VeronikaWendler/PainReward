@@ -38,10 +38,8 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, Sequence, Tuple
 
-import arviz as az
 import numpy as np
 import pandas as pd
-import pymc as pm
 
 
 # =============================================================================
@@ -581,7 +579,11 @@ def hierarchical_normal(
 ):
     """
     Non-centered participant-level normal hierarchy.
+
+    PyMC is imported lazily so behavior-only utilities such as the acceptance
+    audit do not require the Bayesian stack.
     """
+    import pymc as pm
 
     population_mean = pm.Normal(
         f"mu_{name}",
@@ -618,7 +620,8 @@ def build_subjective_value_model(
     data: pd.DataFrame,
     model_name: str,
     participant_names: Sequence[str] | None = None,
-) -> pm.Model:
+):
+    import pymc as pm
     if model_name not in MODEL_DEFINITIONS:
         raise ValueError(
             f"Unknown model: {model_name}"
@@ -860,7 +863,7 @@ def build_subjective_value_model(
 # =============================================================================
 
 def stacked_participant_samples(
-    idata: az.InferenceData,
+    idata,
     variable_name: str,
 ) -> np.ndarray:
     """
@@ -886,9 +889,10 @@ def stacked_participant_samples(
 
 
 def posterior_participant_parameter_table(
-    idata: az.InferenceData,
+    idata,
     model_name: str,
 ) -> pd.DataFrame:
+    import arviz as az
     participant_names = (
         idata.posterior.coords[
             "participant"
@@ -978,7 +982,7 @@ def posterior_participant_parameter_table(
 
 
 def trial_posterior_summary(
-    idata: az.InferenceData,
+    idata,
     data: pd.DataFrame,
     model_name: str,
     chunk_size: int = 256,
