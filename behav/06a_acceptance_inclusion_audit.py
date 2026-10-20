@@ -3,8 +3,8 @@
 06a_acceptance_inclusion_audit.py
 =================================
 
-Freeze the participant sample for subjective-value modeling before fitting
-any Bayesian models.
+Freeze the participant sample for subjective-value modeling before fitting any
+Bayesian model.
 
 PRIMARY RULE
 ------------
@@ -16,8 +16,11 @@ Therefore exclude participants who:
     - accept <= 5% of valid offers, OR
     - accept >= 95% of valid offers.
 
-The acceptance rate is computed from the full behavioral decision task, not
-from EEG-retained trials and not from neural results.
+IMPORTANT
+---------
+This audit intentionally reads only the full behavioral decision-task
+`accepted` responses. It does not require derived model columns such as
+moneylevel or block and does not use EEG-retained trials.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ from sv_model_common import (
     MIN_ACCEPTANCE_RATE,
     OUTPUT_ROOT,
     PRIMARY_INCLUSION_COLUMN,
-    load_participant_behavior,
+    load_raw_decision_behavior,
     participant_ids,
 )
 
@@ -45,20 +48,51 @@ def main() -> None:
     rows = []
 
     for participant in participant_ids():
-        behavior = load_participant_behavior(
+        behavior, behavior_path = load_raw_decision_behavior(
             participant
         )
 
+        if "accepted" not in behavior.columns:
+            raise KeyError(
+                f"{participant}: {behavior_path} has no `accepted` column."
+            )
+
+        accepted = pd.to_numeric(
+            behavior[
+                "accepted"
+            ],
+            errors="coerce",
+        )
+
+        valid_acceptance = accepted.isin(
+            [
+                0.0,
+                1.0,
+            ]
+        )
+
+        accepted = accepted.loc[
+            valid_acceptance
+        ].astype(
+            int
+        )
+
+        if len(
+            accepted
+        ) == 0:
+            raise RuntimeError(
+                f"{participant}: no valid binary accepted responses in "
+                f"{behavior_path}"
+            )
+
         n_trials = int(
             len(
-                behavior
+                accepted
             )
         )
 
         n_accept = int(
-            behavior[
-                "accepted"
-            ].sum()
+            accepted.sum()
         )
 
         n_reject = int(
@@ -82,10 +116,25 @@ def main() -> None:
             )
         )
 
+        if acceptance_rate <= MIN_ACCEPTANCE_RATE:
+            exclusion_reason = (
+                "acceptance_rate_lte_0.05"
+            )
+        elif acceptance_rate >= MAX_ACCEPTANCE_RATE:
+            exclusion_reason = (
+                "acceptance_rate_gte_0.95"
+            )
+        else:
+            exclusion_reason = ""
+
         rows.append(
             {
                 "participant":
                     participant,
+                "behavior_file":
+                    str(
+                        behavior_path
+                    ),
                 "n_valid_choice_trials":
                     n_trials,
                 "n_accept":
@@ -100,16 +149,7 @@ def main() -> None:
                 PRIMARY_INCLUSION_COLUMN:
                     include_primary,
                 "exclusion_reason":
-                    (
-                        ""
-                        if include_primary
-                        else (
-                            "acceptance_rate_lte_0.05"
-                            if acceptance_rate
-                            <= MIN_ACCEPTANCE_RATE
-                            else "acceptance_rate_gte_0.95"
-                        )
-                    ),
+                    exclusion_reason,
             }
         )
 
@@ -167,7 +207,7 @@ def main() -> None:
                 )
             ),
         "source":
-            "full behavioral decision task",
+            "full behavioral decision task accepted responses only",
     }
 
     (

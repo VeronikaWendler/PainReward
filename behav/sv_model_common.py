@@ -255,9 +255,18 @@ def find_decision_behavior_file(
     ]
 
 
-def load_participant_behavior(
+def load_raw_decision_behavior(
     participant: str,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, Path]:
+    """
+    Read the full decision-task behavior TSV without imposing modeling columns.
+
+    This is deliberately separate from `load_participant_behavior()` because
+    the participant-inclusion audit only needs valid accept/reject responses.
+    It must not fail merely because model predictors such as block or
+    moneylevel are stored under their original PsychoPy names.
+    """
+
     behavior_path = find_decision_behavior_file(
         participant
     )
@@ -267,42 +276,392 @@ def load_participant_behavior(
         sep="\t",
     )
 
-    required_columns = [
-        "painlevel",
-        "moneylevel",
-        "accepted",
-        "block",
-    ]
+    return (
+        behavior,
+        behavior_path,
+    )
 
-    missing_columns = [
-        column
-        for column in required_columns
-        if column not in behavior.columns
-    ]
 
-    if missing_columns:
-        raise KeyError(
-            f"{participant}: {behavior_path} is missing columns "
-            f"{missing_columns}"
+def parse_stimulus_level(
+    values: pd.Series,
+    prefix: str,
+    participant: str,
+    column_name: str,
+) -> pd.Series:
+    """
+    Parse PainReward stimulus labels such as m1..m5 or p1..p5 to levels 1..5.
+
+    The historical decision files use labels such as `m1`-`m5` and `p1`-`p5`.
+    Quotes/whitespace are tolerated. Numeric 1..5 values are also accepted.
+    """
+
+    numeric = pd.to_numeric(
+        values,
+        errors="coerce",
+    )
+
+    parsed = numeric.copy()
+
+    needs_string_parse = parsed.isna()
+
+    if needs_string_parse.any():
+        cleaned = (
+            values.astype(
+                str
+            )
+            .str.strip()
+            .str.strip(
+                "\"'"
+            )
+            .str.lower()
         )
+
+        extracted = cleaned.str.extract(
+            rf"^{prefix}\s*([1-5])$",
+            expand=False,
+        )
+
+        parsed.loc[
+            needs_string_parse
+        ] = pd.to_numeric(
+            extracted.loc[
+                needs_string_parse
+            ],
+            errors="coerce",
+        )
+
+    invalid = (
+        parsed.notna()
+        & ~parsed.isin(
+            DESIGN_LEVELS
+        )
+    )
+
+    if invalid.any():
+        examples = (
+            values.loc[
+                invalid
+            ]
+            .astype(
+                str
+            )
+            .head(
+                10
+            )
+            .tolist()
+        )
+
+        raise ValueError(
+            f"{participant}: could not interpret {column_name} as levels 1..5. "
+            f"Examples: {examples}"
+        )
+
+    return parsed
+
+
+def derive_money_level(
+    behavior: pd.DataFrame,
+    participant: str,
+) -> pd.Series:
+    """
+    Recover decision-task money level.
+
+    Preferred source:
+        existing numeric `moneylevel`
+
+    Historical source:
+        `moneystim` labels m1..m5
+    """
+
+    if "moneylevel" in behavior.columns:
+        money_level = pd.to_numeric(
+            behavior[
+                "moneylevel"
+            ],
+            errors="coerce",
+        )
+
+        return money_level
+
+    if "moneystim" in behavior.columns:
+        return parse_stimulus_level(
+            values=
+                behavior[
+                    "moneystim"
+                ],
+            prefix=
+                "m",
+            participant=
+                participant,
+            column_name=
+                "moneystim",
+        )
+
+    raise KeyError(
+        f"{participant}: decision behavior has neither "
+        "'moneylevel' nor 'moneystim'. Available columns:\n"
+        + ", ".join(
+            map(
+                str,
+                behavior.columns,
+            )
+        )
+    )
+
+
+def derive_pain_level(
+    behavior: pd.DataFrame,
+    participant: str,
+) -> pd.Series:
+    """
+    Recover decision-task pain level.
+
+    Preferred source:
+        existing numeric `painlevel`
+
+    Fallback historical source:
+        `painstim` labels p1..p5
+    """
+
+    if "painlevel" in behavior.columns:
+        return pd.to_numeric(
+            behavior[
+                "painlevel"
+            ],
+            errors="coerce",
+        )
+
+    if "painstim" in behavior.columns:
+        return parse_stimulus_level(
+            values=
+                behavior[
+                    "painstim"
+                ],
+            prefix=
+                "p",
+            participant=
+                participant,
+            column_name=
+                "painstim",
+        )
+
+    raise KeyError(
+        f"{participant}: decision behavior has neither "
+        "'painlevel' nor 'painstim'. Available columns:\n"
+        + ", ".join(
+            map(
+                str,
+                behavior.columns,
+            )
+        )
+    )
+
+
+def derive_trial_number(
+    behavior: pd.DataFrame,
+    participant: str,
+) -> pd.Series:
+    """
+    Recover the 1-based global decision trial number.
+
+    Historical PainReward decision design:
+        5 blocks x 25 trials = 125 trials
+
+    Preferred source:
+        `trialsnum`
+
+    PsychoPy fallback:
+        blocks.thisRepN * 25 + trials.thisN + 1
+    """
+
+    if "trialsnum" in behavior.columns:
+        trial_number = pd.to_numeric(
+            behavior[
+                "trialsnum"
+            ],
+            errors="coerce",
+        )
+
+        return trial_number
+
+    block_candidates = [
+        "blocks.thisRepN",
+        "blocks.thisN",
+    ]
+
+    block_column = next(
+        (
+            column
+            for column in block_candidates
+            if column in behavior.columns
+        ),
+        None,
+    )
+
+    if (
+        block_column is not None
+        and "trials.thisN" in behavior.columns
+    ):
+        block_index = pd.to_numeric(
+            behavior[
+                block_column
+            ],
+            errors="coerce",
+        )
+
+        within_block_trial = pd.to_numeric(
+            behavior[
+                "trials.thisN"
+            ],
+            errors="coerce",
+        )
+
+        return (
+            block_index
+            * 25
+            + within_block_trial
+            + 1
+        )
+
+    # Final fallback for the untouched full 125-row behavioral file.
+    if len(
+        behavior
+    ) == 125:
+        return pd.Series(
+            np.arange(
+                1,
+                126,
+                dtype=int,
+            ),
+            index=
+                behavior.index,
+            dtype=float,
+        )
+
+    raise KeyError(
+        f"{participant}: cannot recover trial number. "
+        "Expected `trialsnum`, or PsychoPy block/trial columns, "
+        "or exactly 125 full decision rows."
+    )
+
+
+def derive_block(
+    behavior: pd.DataFrame,
+    trial_number: pd.Series,
+    participant: str,
+) -> pd.Series:
+    """
+    Recover a block identifier for leave-one-block-out behavioral refitting.
+
+    Preferred sources:
+        block
+        blocks.thisRepN
+        blocks.thisN
+
+    Fallback:
+        5 x 25 decision design from 1-based global `trialsnum`.
+
+    The absolute block labels (0..4 versus 1..5) are irrelevant for the
+    held-out logic; only membership must be correct.
+    """
+
+    for column in [
+        "block",
+        "blocks.thisRepN",
+        "blocks.thisN",
+    ]:
+        if column in behavior.columns:
+            block = pd.to_numeric(
+                behavior[
+                    column
+                ],
+                errors="coerce",
+            )
+
+            return block
+
+    if trial_number.notna().all():
+        minimum_trial = float(
+            trial_number.min()
+        )
+
+        maximum_trial = float(
+            trial_number.max()
+        )
+
+        if (
+            minimum_trial >= 1.0
+            and maximum_trial <= 125.0
+        ):
+            return (
+                (
+                    trial_number
+                    - 1
+                )
+                // 25
+            )
+
+    raise KeyError(
+        f"{participant}: cannot recover decision block from behavior."
+    )
+
+
+def load_participant_behavior(
+    participant: str,
+) -> pd.DataFrame:
+    """
+    Load the full behavioral decision task in a canonical modeling format.
+
+    The source TSV does not have to contain derived columns `moneylevel` or
+    `block`. For the historical PainReward files:
+        moneystim m1..m5 -> moneylevel 1..5
+        trialsnum 1..125 -> five 25-trial blocks
+
+    No EEG trial exclusions are applied here.
+    """
+
+    behavior, behavior_path = load_raw_decision_behavior(
+        participant
+    )
+
+    if "accepted" not in behavior.columns:
+        raise KeyError(
+            f"{participant}: {behavior_path} has no `accepted` column."
+        )
+
+    trial_number = derive_trial_number(
+        behavior=
+            behavior,
+        participant=
+            participant,
+    )
+
+    block = derive_block(
+        behavior=
+            behavior,
+        trial_number=
+            trial_number,
+        participant=
+            participant,
+    )
 
     table = pd.DataFrame(
         {
             "participant":
                 participant,
             "painlevel":
-                pd.to_numeric(
-                    behavior[
-                        "painlevel"
-                    ],
-                    errors="coerce",
+                derive_pain_level(
+                    behavior=
+                        behavior,
+                    participant=
+                        participant,
                 ),
             "moneylevel":
-                pd.to_numeric(
-                    behavior[
-                        "moneylevel"
-                    ],
-                    errors="coerce",
+                derive_money_level(
+                    behavior=
+                        behavior,
+                    participant=
+                        participant,
                 ),
             "accepted":
                 pd.to_numeric(
@@ -312,35 +671,11 @@ def load_participant_behavior(
                     errors="coerce",
                 ),
             "block":
-                pd.to_numeric(
-                    behavior[
-                        "block"
-                    ],
-                    errors="coerce",
-                ),
+                block,
+            "trialsnum":
+                trial_number,
         }
     )
-
-    if "trialsnum" in behavior.columns:
-        table[
-            "trialsnum"
-        ] = pd.to_numeric(
-            behavior[
-                "trialsnum"
-            ],
-            errors="coerce",
-        )
-    else:
-        table[
-            "trialsnum"
-        ] = np.arange(
-            1,
-            len(
-                table
-            )
-            + 1,
-            dtype=int,
-        )
 
     if "choice_resp.rt" in behavior.columns:
         table[
@@ -386,6 +721,9 @@ def load_participant_behavior(
         )
         & table[
             "block"
+        ].notna()
+        & table[
+            "trialsnum"
         ].notna()
     )
 
