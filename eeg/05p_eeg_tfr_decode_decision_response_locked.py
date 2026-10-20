@@ -82,22 +82,20 @@ Timing inference window
 The response TFR files contain -0.8..+0.2 s relative to the response, but the
 formal inferential interval is chosen BEFORE looking at decoding values.
 
-For every retained trial, TFR preparation saved:
+For every retained trial, TFR preparation saved the cue time relative
+to the response. A nominal response-relative TFR centre tau counts as post-cue
+when:
 
-    earliest_center_full_morlet_support_after_cue_s
+    event_RT + tau >= 0
 
-This is the earliest response-relative TFR centre for which the complete
-conservative lowest-frequency Morlet support lies after cue onset.
+The formal inference start is the first response-time bin at which at least
+95% of retained trials WITHIN EVERY PARTICIPANT have nominal TFR centres after
+cue onset. The formal end is the last available bin at or before response
+onset.
 
-This decoder pools those timing values across ALL retained participants/trials
-and defines the formal inference start as the first available response-time bin
-that is safe for every retained trial.
-
-The formal inference end is the last available bin at or before response onset.
-
-Thus formal inference is:
-
-    all-trials post-cue-safe TFR centre  ->  response onset
+The stricter full-Morlet-support-after-cue quantity is retained as timing QC
+but does not define the formal window, because that rule is stricter than the
+completed cue-locked analysis and is infeasible for the fastest responses.
 
 The TFR values outside that interval are retained in participant score files
 for plotting/QC but are not used for cluster inference.
@@ -216,6 +214,14 @@ CLUSTER_FORMING_ALPHA = 0.05
 
 # Response onset is the upper bound of formal inference.
 INFERENCE_TMAX_TARGET_S = 0.0
+
+# Timing-only criterion used to define the formal response-relative window.
+#
+# At every formally tested response-relative time bin, at least 95% of the
+# retained trials WITHIN EVERY PARTICIPANT must have their nominal TFR centre
+# after cue onset. This criterion is determined from event timing only, before
+# any neural decoding results are inspected.
+TIMING_COVERAGE_THRESHOLD = 0.95
 
 # Same conservative project-wide Morlet half-support used during TFR prep:
 # n_cycles = f/2 -> 5*sigma_t = 5*(0.5/(2*pi)) ~= 0.398 s.
@@ -398,23 +404,49 @@ def derive_response_inference_window(
     participants: Sequence[str],
 ) -> Tuple[float, float, np.ndarray, np.ndarray]:
     """
-    Define the response-relative inference interval using timing only.
+    Define the response-relative formal inference interval using timing only.
 
-    The start is the first available response-time bin for which every retained
-    trial has full conservative lowest-frequency Morlet support after cue onset.
+    Why nominal TFR centres?
+    ------------------------
+    The response-locked TFR is intentionally matched to the completed
+    cue-locked TFR analysis. In that cue-locked analysis, a nominal centre at
+    cue onset was analysed even though the symmetric Morlet kernel extends
+    around that centre.
 
-    The end is the last available response-time bin at or before t=0 response.
+    We therefore do NOT require the entire Morlet kernel to lie after cue
+    onset. That criterion is too strict for fast-response trials and would make
+    the response-locked analysis impossible.
+
+    Instead, for a response-relative TFR centre tau, a trial counts as
+    post-cue when:
+
+        event_RT + tau >= 0
+
+    Equivalently, the cue itself occurred at response-relative time:
+
+        cue_time_relative_to_response = -event_RT
+
+    Formal inference requires at least TIMING_COVERAGE_THRESHOLD of retained
+    trials WITHIN EVERY PARTICIPANT to have a nominal centre after cue onset.
+
+    The end of formal inference is the last available bin at or before the
+    response. No neural decoding values enter this timing decision.
+
+    We additionally retain the stricter full-Morlet-support coverage as a
+    descriptive QC measure only.
 
     Returns
     -------
     inference_tmin
     inference_tmax
     reference_times
-    coverage_fraction_by_time
+    minimum_participant_nominal_center_coverage_by_time
     """
 
     reference_times = None
-    all_safe_start_values = []
+
+    nominal_postcue_start_values_by_participant = []
+    full_support_postcue_start_values_by_participant = []
     timing_rows = []
 
     for participant in participants:
@@ -424,7 +456,9 @@ def derive_response_inference_window(
 
         times = np.load(
             paths["times"]
-        ).astype(float)
+        ).astype(
+            float
+        )
 
         if reference_times is None:
             reference_times = times
@@ -443,34 +477,89 @@ def derive_response_inference_window(
             paths["metadata"]
         )
 
-        required_column = (
-            "earliest_center_full_morlet_support_after_cue_s"
-        )
+        required_columns = [
+            "cue_time_relative_to_response_s",
+            "earliest_center_full_morlet_support_after_cue_s",
+            "event_rt_s",
+        ]
 
-        if required_column not in metadata.columns:
+        missing_columns = [
+            column
+            for column in required_columns
+            if column not in metadata.columns
+        ]
+
+        if missing_columns:
             raise KeyError(
                 f"{participant}: response metadata lacks "
-                f"{required_column}."
+                f"{missing_columns}."
             )
 
-        safe_start = pd.to_numeric(
+        nominal_postcue_start = pd.to_numeric(
             metadata[
-                required_column
+                "cue_time_relative_to_response_s"
             ],
             errors="coerce",
         ).to_numpy(
             dtype=float
         )
 
-        if not np.isfinite(
-            safe_start
-        ).all():
+        full_support_postcue_start = pd.to_numeric(
+            metadata[
+                "earliest_center_full_morlet_support_after_cue_s"
+            ],
+            errors="coerce",
+        ).to_numpy(
+            dtype=float
+        )
+
+        event_rt = pd.to_numeric(
+            metadata[
+                "event_rt_s"
+            ],
+            errors="coerce",
+        ).to_numpy(
+            dtype=float
+        )
+
+        if not (
+            np.isfinite(
+                nominal_postcue_start
+            ).all()
+            and np.isfinite(
+                full_support_postcue_start
+            ).all()
+            and np.isfinite(
+                event_rt
+            ).all()
+        ):
             raise RuntimeError(
-                f"{participant}: non-finite response timing safety values."
+                f"{participant}: non-finite timing values."
             )
 
-        all_safe_start_values.append(
-            safe_start
+        # Internal consistency:
+        # cue-relative-to-response should equal -event RT.
+        maximum_identity_error = float(
+            np.max(
+                np.abs(
+                    nominal_postcue_start
+                    + event_rt
+                )
+            )
+        )
+
+        if maximum_identity_error > 1e-9:
+            raise RuntimeError(
+                f"{participant}: cue/response timing identity failed; "
+                f"max |-RT - cue_time| = {maximum_identity_error:.3e}."
+            )
+
+        nominal_postcue_start_values_by_participant.append(
+            nominal_postcue_start
+        )
+
+        full_support_postcue_start_values_by_participant.append(
+            full_support_postcue_start
         )
 
         timing_rows.append(
@@ -480,20 +569,40 @@ def derive_response_inference_window(
                 "n_trials":
                     int(
                         len(
-                            safe_start
+                            event_rt
                         )
                     ),
-                "latest_safe_start_within_participant_s":
+                "event_rt_min_s":
                     float(
-                        np.max(
-                            safe_start
+                        np.min(
+                            event_rt
                         )
                     ),
-                "p95_safe_start_within_participant_s":
+                "event_rt_p05_s":
                     float(
                         np.quantile(
-                            safe_start,
-                            0.95,
+                            event_rt,
+                            0.05,
+                        )
+                    ),
+                "event_rt_median_s":
+                    float(
+                        np.median(
+                            event_rt
+                        )
+                    ),
+                "nominal_center_95pct_postcue_start_s":
+                    float(
+                        np.quantile(
+                            nominal_postcue_start,
+                            TIMING_COVERAGE_THRESHOLD,
+                        )
+                    ),
+                "full_support_95pct_postcue_start_s":
+                    float(
+                        np.quantile(
+                            full_support_postcue_start,
+                            TIMING_COVERAGE_THRESHOLD,
                         )
                     ),
             }
@@ -504,17 +613,42 @@ def derive_response_inference_window(
             "No response-time grids were loaded."
         )
 
-    pooled_safe_start = np.concatenate(
-        all_safe_start_values
+    # -------------------------------------------------------------------------
+    # Coverage of nominal TFR centres after cue onset.
+    # -------------------------------------------------------------------------
+
+    nominal_center_coverage_by_participant = np.stack(
+        [
+            np.asarray(
+                [
+                    np.mean(
+                        participant_start_values
+                        <= time_point + 1e-12
+                    )
+                    for time_point in reference_times
+                ],
+                dtype=float,
+            )
+            for participant_start_values
+            in nominal_postcue_start_values_by_participant
+        ],
+        axis=0,
     )
 
-    # At time t, a trial is fully post-cue at the lowest frequency if:
-    #
-    #     earliest_safe_start_trial <= t
-    coverage_fraction_by_time = np.asarray(
+    minimum_participant_nominal_center_coverage = (
+        nominal_center_coverage_by_participant.min(
+            axis=0
+        )
+    )
+
+    pooled_nominal_start_values = np.concatenate(
+        nominal_postcue_start_values_by_participant
+    )
+
+    pooled_nominal_center_coverage = np.asarray(
         [
             np.mean(
-                pooled_safe_start
+                pooled_nominal_start_values
                 <= time_point + 1e-12
             )
             for time_point in reference_times
@@ -522,72 +656,126 @@ def derive_response_inference_window(
         dtype=float,
     )
 
-    latest_safe_start_all_trials = float(
-        np.max(
-            pooled_safe_start
+    # -------------------------------------------------------------------------
+    # Stricter full-Morlet-support coverage, saved only as QC.
+    # -------------------------------------------------------------------------
+
+    full_support_coverage_by_participant = np.stack(
+        [
+            np.asarray(
+                [
+                    np.mean(
+                        participant_start_values
+                        <= time_point + 1e-12
+                    )
+                    for time_point in reference_times
+                ],
+                dtype=float,
+            )
+            for participant_start_values
+            in full_support_postcue_start_values_by_participant
+        ],
+        axis=0,
+    )
+
+    minimum_participant_full_support_coverage = (
+        full_support_coverage_by_participant.min(
+            axis=0
         )
     )
 
-    valid_start_bins = reference_times[
-        reference_times
-        >= latest_safe_start_all_trials - 1e-12
-    ]
+    pooled_full_support_start_values = np.concatenate(
+        full_support_postcue_start_values_by_participant
+    )
 
-    if len(
-        valid_start_bins
-    ) == 0:
-        raise RuntimeError(
-            "No saved response-relative TFR bin is fully post-cue-safe "
-            "for every retained trial."
+    pooled_full_support_coverage = np.asarray(
+        [
+            np.mean(
+                pooled_full_support_start_values
+                <= time_point + 1e-12
+            )
+            for time_point in reference_times
+        ],
+        dtype=float,
+    )
+
+    # -------------------------------------------------------------------------
+    # Freeze formal inference window from timing only.
+    # -------------------------------------------------------------------------
+
+    pre_response_mask = (
+        reference_times
+        <= INFERENCE_TMAX_TARGET_S + 1e-12
+    )
+
+    meets_nominal_timing_criterion = (
+        minimum_participant_nominal_center_coverage
+        >= TIMING_COVERAGE_THRESHOLD - 1e-12
+    )
+
+    valid_inference_mask = (
+        pre_response_mask
+        & meets_nominal_timing_criterion
+    )
+
+    if not np.any(
+        valid_inference_mask
+    ):
+        maximum_pre_response_coverage = float(
+            minimum_participant_nominal_center_coverage[
+                pre_response_mask
+            ].max()
         )
 
+        raise RuntimeError(
+            "No pre-response TFR bin reaches the pre-specified "
+            f"{TIMING_COVERAGE_THRESHOLD:.0%} within-participant "
+            "nominal-centre-after-cue criterion. "
+            "Maximum minimum-participant coverage before response = "
+            f"{maximum_pre_response_coverage:.3f}. "
+            "Do not relax this based on EEG results."
+        )
+
+    valid_inference_times = reference_times[
+        valid_inference_mask
+    ]
+
     inference_tmin = float(
-        valid_start_bins[
+        valid_inference_times[
             0
         ]
     )
 
-    valid_end_bins = reference_times[
-        reference_times
-        <= INFERENCE_TMAX_TARGET_S + 1e-12
-    ]
-
-    if len(
-        valid_end_bins
-    ) == 0:
-        raise RuntimeError(
-            "No saved response-time bin exists at or before response onset."
-        )
-
     inference_tmax = float(
-        valid_end_bins[
+        valid_inference_times[
             -1
         ]
     )
 
-    if inference_tmin > inference_tmax:
-        raise RuntimeError(
-            "Timing-only all-trial-safe interval contains no pre-response "
-            f"bins: tmin={inference_tmin:.3f}, tmax={inference_tmax:.3f}. "
-            "Do not relax this automatically after seeing neural results."
-        )
+    # -------------------------------------------------------------------------
+    # Save timing diagnostics before any decoding begins.
+    # -------------------------------------------------------------------------
 
     coverage_table = pd.DataFrame(
         {
             "response_time_s":
                 reference_times,
-            "fraction_all_retained_trials_full_morlet_support_after_cue":
-                coverage_fraction_by_time,
+            "pooled_fraction_nominal_centers_after_cue":
+                pooled_nominal_center_coverage,
+            "minimum_participant_fraction_nominal_centers_after_cue":
+                minimum_participant_nominal_center_coverage,
+            "meets_95pct_nominal_center_within_every_participant":
+                meets_nominal_timing_criterion,
+            "pooled_fraction_full_morlet_support_after_cue":
+                pooled_full_support_coverage,
+            "minimum_participant_fraction_full_morlet_support_after_cue":
+                minimum_participant_full_support_coverage,
             "inside_formal_inference_window":
+                valid_inference_mask,
+            "fully_pre_response_under_conservative_morlet_support":
                 (
-                    (
-                        reference_times
-                        >= inference_tmin - 1e-12
-                    )
-                    & (
-                        reference_times
-                        <= inference_tmax + 1e-12
-                    )
+                    reference_times
+                    <= -MORLET_HALF_SUPPORT_S + 1e-12
                 ),
         }
     )
@@ -606,16 +794,36 @@ def derive_response_inference_window(
         index=False,
     )
 
+    n_formal_bins_fully_pre_response = int(
+        np.sum(
+            valid_inference_mask
+            & (
+                reference_times
+                <= -MORLET_HALF_SUPPORT_S + 1e-12
+            )
+        )
+    )
+
     timing_record = {
         "selection_basis":
             (
                 "timing only; no neural decoding values used"
             ),
-        "policy":
+        "formal_window_policy":
             (
-                "formal inference starts at first saved response-time bin "
-                "whose full conservative lowest-frequency Morlet support is "
-                "after cue onset for every retained trial"
+                "first through last pre-response bins for which at least "
+                f"{TIMING_COVERAGE_THRESHOLD:.0%} of retained trials within "
+                "every participant have nominal TFR centres after cue onset"
+            ),
+        "nominal_center_definition":
+            (
+                "event_RT + response_relative_time >= 0"
+            ),
+        "full_morlet_support_policy":
+            (
+                "saved as descriptive QC only; not used to define the formal "
+                "window because that criterion is stricter than the completed "
+                "cue-locked analysis and is infeasible for fast-response trials"
             ),
         "n_participants":
             int(
@@ -626,17 +834,25 @@ def derive_response_inference_window(
         "n_trials_total":
             int(
                 len(
-                    pooled_safe_start
+                    pooled_nominal_start_values
                 )
             ),
+        "timing_coverage_threshold":
+            TIMING_COVERAGE_THRESHOLD,
         "morlet_half_support_s":
             MORLET_HALF_SUPPORT_S,
-        "latest_trial_specific_safe_start_s":
-            latest_safe_start_all_trials,
         "formal_inference_tmin_s":
             inference_tmin,
         "formal_inference_tmax_s":
             inference_tmax,
+        "n_formal_bins":
+            int(
+                np.sum(
+                    valid_inference_mask
+                )
+            ),
+        "n_formal_bins_fully_pre_response_under_conservative_support":
+            n_formal_bins_fully_pre_response,
         "saved_response_time_min_s":
             float(
                 reference_times.min()
@@ -663,28 +879,52 @@ def derive_response_inference_window(
         "\nTIMING-ONLY FORMAL INFERENCE WINDOW",
         flush=True,
     )
+
     print(
-        f"  latest all-trial post-cue-safe centre threshold: "
-        f"{latest_safe_start_all_trials:.3f} s",
+        f"  criterion: >= "
+        f"{TIMING_COVERAGE_THRESHOLD:.0%} nominal-centre-after-cue "
+        f"coverage within EVERY participant",
         flush=True,
     )
+
     print(
         f"  snapped formal window: "
         f"{inference_tmin:.3f} .. {inference_tmax:.3f} s "
         f"relative to response",
         flush=True,
     )
+
     print(
-        f"  lowest-frequency Morlet half-support: "
+        f"  formal bins: "
+        f"{int(np.sum(valid_inference_mask))}",
+        flush=True,
+    )
+
+    print(
+        f"  conservative Morlet half-support: "
         f"{MORLET_HALF_SUPPORT_S:.3f} s",
         flush=True,
     )
+
+    print(
+        f"  formal bins fully pre-response under that support: "
+        f"{n_formal_bins_fully_pre_response}",
+        flush=True,
+    )
+
+    if n_formal_bins_fully_pre_response == 0:
+        print(
+            "  NOTE: all formal bins are peri-response under the conservative "
+            "Morlet-support definition; do not describe significant clusters "
+            "as wholly pre-response.",
+            flush=True,
+        )
 
     return (
         inference_tmin,
         inference_tmax,
         reference_times,
-        coverage_fraction_by_time,
+        minimum_participant_nominal_center_coverage,
     )
 
 
@@ -2753,8 +2993,9 @@ def run_group_analysis(
             ],
         "formal_inference_selection":
             (
-                "timing-only all-retained-trials post-cue-safe start; "
-                "last response-time bin at/before response onset as end"
+                "timing-only >=95% nominal-centre-after-cue coverage within every "
+                "participant; last qualifying response-time bin at/before "
+                "response onset as end"
             ),
         "cluster_forming_alpha_one_sided":
             CLUSTER_FORMING_ALPHA,
