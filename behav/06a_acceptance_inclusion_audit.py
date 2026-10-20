@@ -8,35 +8,64 @@ Bayesian model.
 
 PRIMARY RULE
 ------------
-Keep only participants satisfying:
+Compute each participant's acceptance percentage from the full behavioral
+decision task, round it to the nearest whole percentage point, then exclude if:
 
-    0.05 < acceptance_rate < 0.95
+    rounded acceptance percent < 5
+    OR
+    rounded acceptance percent > 95
 
-Therefore exclude participants who:
-    - accept <= 5% of valid offers, OR
-    - accept >= 95% of valid offers.
+Thus:
+    95.2% -> 95% -> KEEP
+    96.0% -> 96% -> EXCLUDE
+     4.8% ->  5% -> KEEP
+     4.0% ->  4% -> EXCLUDE
 
 IMPORTANT
 ---------
-This audit intentionally reads only the full behavioral decision-task
-`accepted` responses. It does not require derived model columns such as
-moneylevel or block and does not use EEG-retained trials.
+This audit reads only the full behavioral decision-task `accepted` responses.
+It does not use EEG-retained trials or neural results.
+
+The existing manifest column name is retained for compatibility with the rest
+of the subjective-value pipeline:
+
+    include_primary_gt5_lt95pct
+
+Its meaning after this patch is the rounded-percentage rule above.
 """
 
 from __future__ import annotations
 
 import json
+import math
 
 import pandas as pd
 
 from sv_model_common import (
-    MAX_ACCEPTANCE_RATE,
-    MIN_ACCEPTANCE_RATE,
     OUTPUT_ROOT,
     PRIMARY_INCLUSION_COLUMN,
     load_raw_decision_behavior,
     participant_ids,
 )
+
+
+def round_percentage_to_nearest_integer(
+    percentage: float,
+) -> int:
+    """
+    Conventional half-up rounding for a non-negative percentage.
+
+    With 125 trials the possible percentages occur in 0.8% steps, so exact
+    x.5 ties cannot arise, but using half-up rounding makes the intended rule
+    explicit rather than relying on Python's banker's rounding.
+    """
+
+    return int(
+        math.floor(
+            percentage
+            + 0.5
+        )
+    )
 
 
 def main() -> None:
@@ -105,24 +134,35 @@ def main() -> None:
             / n_trials
         )
 
-        include_primary = bool(
-            (
-                acceptance_rate
-                > MIN_ACCEPTANCE_RATE
-            )
-            and (
-                acceptance_rate
-                < MAX_ACCEPTANCE_RATE
+        acceptance_percent = float(
+            100.0
+            * acceptance_rate
+        )
+
+        acceptance_percent_rounded = (
+            round_percentage_to_nearest_integer(
+                acceptance_percent
             )
         )
 
-        if acceptance_rate <= MIN_ACCEPTANCE_RATE:
-            exclusion_reason = (
-                "acceptance_rate_lte_0.05"
+        include_primary = bool(
+            (
+                acceptance_percent_rounded
+                >= 5
             )
-        elif acceptance_rate >= MAX_ACCEPTANCE_RATE:
+            and (
+                acceptance_percent_rounded
+                <= 95
+            )
+        )
+
+        if acceptance_percent_rounded < 5:
             exclusion_reason = (
-                "acceptance_rate_gte_0.95"
+                "rounded_acceptance_percent_lt_5"
+            )
+        elif acceptance_percent_rounded > 95:
+            exclusion_reason = (
+                "rounded_acceptance_percent_gt_95"
             )
         else:
             exclusion_reason = ""
@@ -144,8 +184,9 @@ def main() -> None:
                 "acceptance_rate":
                     acceptance_rate,
                 "acceptance_percent":
-                    100.0
-                    * acceptance_rate,
+                    acceptance_percent,
+                "acceptance_percent_rounded":
+                    acceptance_percent_rounded,
                 PRIMARY_INCLUSION_COLUMN:
                     include_primary,
                 "exclusion_reason":
@@ -183,11 +224,12 @@ def main() -> None:
 
     summary = {
         "primary_rule":
-            "0.05 < acceptance_rate < 0.95",
-        "exclude_low":
-            "acceptance_rate <= 0.05",
-        "exclude_high":
-            "acceptance_rate >= 0.95",
+            (
+                "round acceptance percent to nearest whole percent; "
+                "exclude if rounded percent <5 or >95"
+            ),
+        "keep_rule":
+            "5 <= rounded_acceptance_percent <= 95",
         "n_total":
             int(
                 len(
@@ -221,19 +263,19 @@ def main() -> None:
     )
 
     print(
-        "=" * 82
+        "=" * 88
     )
     print(
         "PAINREWARD SUBJECTIVE-VALUE PARTICIPANT INCLUSION AUDIT"
     )
     print(
-        "PRIMARY RULE: 0.05 < acceptance rate < 0.95"
+        "PRIMARY RULE: round acceptance %; exclude if rounded % <5 or >95"
     )
     print(
         "Behavior only — full decision task"
     )
     print(
-        "=" * 82
+        "=" * 88
     )
 
     print(
@@ -248,6 +290,7 @@ def main() -> None:
                 "n_accept",
                 "n_reject",
                 "acceptance_percent",
+                "acceptance_percent_rounded",
                 PRIMARY_INCLUSION_COLUMN,
                 "exclusion_reason",
             ]
@@ -288,6 +331,7 @@ def main() -> None:
                     "n_accept",
                     "n_reject",
                     "acceptance_percent",
+                    "acceptance_percent_rounded",
                     "exclusion_reason",
                 ]
             ].to_string(
